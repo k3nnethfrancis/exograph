@@ -55,6 +55,27 @@ remain available and continue to name `filesystem` as their effective provider.
 
 `show`, `index`, `open`, `invoke`, and `terminals` require the resident Exograph app. `invoke` opens a visible terminal task and is intentionally different from a note-native `@` invocation, which carries document context and uses inline review.
 
+## Open an exact note or folder
+
+`exo open` is the agent-facing way to reveal an exact workspace item in the
+desktop app. It never searches by title: it resolves the supplied path, checks
+that the existing target is inside the active Workspace's configured Note Roots,
+brings Exograph to the foreground, and opens the target directly.
+
+```sh
+# Absolute path
+exo open /Users/me/wiki/notes/project/plan.md
+
+# Path relative to the active Workspace root
+exo open notes/project
+```
+
+A file opens and focuses its editor tab. A folder opens its Folder Overview in
+the focused editor pane. The command rejects missing paths, paths outside the
+active Workspace, and relative paths that do not resolve from the active
+Workspace root. Start the app first with `exo start`; `exo open` deliberately
+does not silently switch workspaces or use fuzzy workspace search.
+
 ## Terminal control
 
 The terminal commands operate only on live, Exograph-managed shell sessions. They

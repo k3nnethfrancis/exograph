@@ -26,7 +26,7 @@ import { InvocationRunnerError, type InvocationResult } from "../invocation/invo
 export interface CommandServerOptions {
   runtimeRoot: string;
   onShowWindow: () => void;
-  onOpenFile: (filePath: string) => Promise<void>;
+  onOpenPath: (filePath: string) => Promise<void>;
   onIndexSearch: (query: string, options: { limit?: number; offset?: number; intent?: string; includeContent?: boolean; maxLinesPerResult?: number }) => Promise<IndexSearchResponse>;
   onIndexStatus: () => Promise<IndexStatus>;
   onIndexSync: () => Promise<IndexSyncResult>;
@@ -158,7 +158,7 @@ export class CommandServer {
           return;
         }
         try {
-          await this.options.onOpenFile(filePath);
+          await this.options.onOpenPath(filePath);
         } catch (error) {
           json(res, { error: error instanceof Error ? error.message : String(error) } satisfies ExographCommandBasicErrorResponse, 400);
           return;

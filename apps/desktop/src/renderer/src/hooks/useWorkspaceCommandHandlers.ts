@@ -5,6 +5,7 @@ import type { WorkspaceSettingsSection } from "../../../shared/api";
 interface UseWorkspaceCommandHandlersOptions {
   workspaceModel: WorkspaceModel | null;
   openFile: (filePath: string) => Promise<void>;
+  openFolder: (directoryPath: string) => void;
   openSettings: (section: WorkspaceSettingsSection) => Promise<void>;
   reloadTrees: () => Promise<void>;
   scheduleOpenDocumentRefresh: (filePath: string) => void;
@@ -16,6 +17,12 @@ export function useWorkspaceCommandHandlers(options: UseWorkspaceCommandHandlers
       void options.openFile(filePath);
     });
   }, [options.openFile]);
+
+  useEffect(() => {
+    return window.exograph.workspace.onCommandOpenFolder((directoryPath: string) => {
+      options.openFolder(directoryPath);
+    });
+  }, [options.openFolder]);
 
   useEffect(() => {
     return window.exograph.workspace.onCommandOpenSettings((event) => {

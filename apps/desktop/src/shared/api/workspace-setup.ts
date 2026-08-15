@@ -48,5 +48,6 @@ export interface WorkspaceSetupApi {
   keepOntology: (guard: OntologyReviewGuard) => Promise<OntologyKeepResult>;
   rejectOntology: (guard: OntologyReviewGuard) => Promise<OntologyRejectResult>;
   onCommandOpenFile: (callback: (filePath: string) => void) => () => void;
+  onCommandOpenFolder: (callback: (directoryPath: string) => void) => () => void;
   onCommandOpenSettings: (callback: (event: { section: WorkspaceSettingsSection }) => void) => () => void;
 }

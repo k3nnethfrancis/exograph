@@ -173,14 +173,24 @@ export class WorkspaceNotesService {
    * claim that Exograph opened it.  This shares the same root and symlink boundary
    * as every other workspace read. */
   async authorizeOpenFile(filePath: string): Promise<string> {
-    const scope = this.scope;
-    const authorizedPath = await this.workspaceFiles(scope).existing(filePath);
-    const fileStat = await stat(authorizedPath);
-    this.assertCurrentScope(scope);
-    if (!fileStat.isFile()) {
+    const target = await this.authorizeOpenPath(filePath);
+    if (target.kind !== "file") {
       throw new Error("Exograph can only open an existing file inside the active wiki.");
     }
-    return authorizedPath;
+    return target.path;
+  }
+
+  /** Authorizes an exact operator-requested file or folder for presentation.
+   * The command surface never performs fuzzy resolution and retains the same
+   * containment and symlink checks as ordinary workspace reads. */
+  async authorizeOpenPath(targetPath: string): Promise<{ path: string; kind: "file" | "directory" }> {
+    const scope = this.scope;
+    const authorizedPath = await this.workspaceFiles(scope).existing(targetPath);
+    const targetStat = await stat(authorizedPath);
+    this.assertCurrentScope(scope);
+    if (targetStat.isFile()) return { path: authorizedPath, kind: "file" };
+    if (targetStat.isDirectory()) return { path: authorizedPath, kind: "directory" };
+    throw new Error("Exograph can only open an existing file or folder inside the active wiki.");
   }
 
   async searchFilenames(query: string): Promise<WorkspaceSearchResults> {

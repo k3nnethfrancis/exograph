@@ -348,6 +348,7 @@ export function App() {
   useWorkspaceCommandHandlers({
     workspaceModel,
     openFile: canvasNavigation.openFile,
+    openFolder: canvasNavigation.openFolderOverview,
     openSettings: workspaceSettingsController.openDialog,
     reloadTrees,
     scheduleOpenDocumentRefresh,

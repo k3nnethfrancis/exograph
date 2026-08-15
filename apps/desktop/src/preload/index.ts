@@ -111,6 +111,11 @@ const api: DesktopApi = {
       ipcRenderer.on("command:open-file", listener);
       return () => ipcRenderer.removeListener("command:open-file", listener);
     },
+    onCommandOpenFolder: (callback) => {
+      const listener = (_event: unknown, directoryPath: string) => callback(directoryPath);
+      ipcRenderer.on("command:open-folder", listener);
+      return () => ipcRenderer.removeListener("command:open-folder", listener);
+    },
     onCommandOpenSettings: (callback) => {
       const listener = (_event: unknown, payload: Parameters<typeof callback>[0]) => callback(payload);
       ipcRenderer.on("command:open-settings", listener);

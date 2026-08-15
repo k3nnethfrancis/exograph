@@ -224,12 +224,19 @@ export async function runCli(argv: string[], options: {
   if (command === "show") { await client.showWindow(); return 0; }
   if (command === "index") return runIndex(client, subcommand, stdout);
   if (command === "open") {
-    await client.openFile(subcommand); return 0;
+    await client.openFile(resolveOpenPath(subcommand, workspace.model)); return 0;
   }
   if (command === "invoke") {
     return print(client.spawnAgentCommand(subcommand, args.join(" ")), stdout);
   }
   throw new Error("Unreachable CLI command.");
+}
+
+/** Resolve relative operator paths against the selected Workspace, never a
+ * transient agent cwd. The desktop retains authority for existence, canonical
+ * containment, and whether the target is a file or a folder. */
+function resolveOpenPath(targetPath: string, workspace: WorkspaceModel): string {
+  return path.isAbsolute(targetPath) ? path.resolve(targetPath) : path.resolve(workspace.workspaceRoot, targetPath);
 }
 
 async function runIndex(client: AppClientLike, subcommand: string | undefined, stdout: { write(text: string): void }): Promise<number> {
