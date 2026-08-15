@@ -9,6 +9,7 @@ interface UseWorkspaceCommandHandlersOptions {
   openSettings: (section: WorkspaceSettingsSection) => Promise<void>;
   reloadTrees: () => Promise<void>;
   scheduleOpenDocumentRefresh: (filePath: string) => void;
+  reconcileOpenDocumentFilesystemState: () => Promise<void>;
 }
 
 export function useWorkspaceCommandHandlers(options: UseWorkspaceCommandHandlersOptions) {
@@ -34,6 +35,7 @@ export function useWorkspaceCommandHandlers(options: UseWorkspaceCommandHandlers
     const removeWorkspaceChangeListener = window.exograph.workspace.onDidChange((event) => {
       if (event.eventType === "rename" || !event.filePath) {
         void options.reloadTrees();
+        void options.reconcileOpenDocumentFilesystemState();
       }
       if (event.filePath) {
         const filePath = event.filePath;
@@ -48,5 +50,6 @@ export function useWorkspaceCommandHandlers(options: UseWorkspaceCommandHandlers
     options.workspaceModel,
     options.reloadTrees,
     options.scheduleOpenDocumentRefresh,
+    options.reconcileOpenDocumentFilesystemState,
   ]);
 }

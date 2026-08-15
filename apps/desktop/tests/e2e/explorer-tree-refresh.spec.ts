@@ -34,3 +34,31 @@ test("keeps an expanded branch beyond the initial tree depth after an external r
     await cleanup();
   }
 });
+
+test("shows an open tab's file in the Explorer", async () => {
+  let notePath = "";
+  const { electronApp, page, cleanup } = await launchExographWorkspaceFixture({
+    mutable: true,
+    initialNoteLabel: null,
+    prepareWorkspace: async (workspaceRoot) => {
+      const noteRoot = path.join(workspaceRoot, "notes/test-notes");
+      notePath = path.join(noteRoot, "one", "two", "three", "four", "reveal-me.md");
+      await mkdir(path.dirname(notePath), { recursive: true });
+      await writeFile(notePath, "# Reveal me\n", "utf8");
+    },
+  });
+
+  try {
+    await electronApp.evaluate(({ BrowserWindow }, targetPath) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send("command:open-file", targetPath);
+    }, notePath);
+    const tab = page.locator(".tab-strip__tab").filter({ hasText: "reveal-me" });
+    await tab.click({ button: "right" });
+    await page.getByRole("button", { name: "Show in Explorer" }).click();
+    const revealed = page.locator(`[data-explorer-path="${notePath}"]`);
+    await expect(revealed).toBeVisible();
+    await expect(revealed).toHaveClass(/tree-node--revealed/);
+  } finally {
+    await cleanup();
+  }
+});

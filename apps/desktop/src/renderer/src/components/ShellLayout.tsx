@@ -48,7 +48,7 @@ interface ShellLayoutProps {
   onOpenUtilityTerminal: () => void;
   onOpenUtilityGraph: () => void;
   onOpenNoteContext: () => void;
-  revealExplorerPathRequest?: { path: string; nonce: number } | null;
+  revealExplorerPathRequest?: { path: string; nonce: number; kind?: "file" | "directory" } | null;
   onAppearanceModeChange: (mode: AppearanceMode) => void;
   onOpenWorkspaceSettings: () => void;
   onSearchQueryChange: (value: string) => void;

@@ -895,6 +895,12 @@
   font-weight: 400;
 }
 
+.tree-node--revealed {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 82%, transparent);
+}
+
 .sidebar--mirrored .tree-node--file {
   grid-template-columns: auto minmax(0, 1fr) 14px;
   padding-left: 10px;
@@ -1686,6 +1692,16 @@ body.pane-resize-active .browser-pane__frame {
   white-space: nowrap;
 }
 
+.tab-strip__tab--deleted .chrome-tab__label {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  opacity: 0.72;
+}
+
+.status-dot--deleted {
+  background: var(--warning, #c4873a);
+}
+
 .chrome-tab--active {
   background: transparent;
   color: var(--text);
@@ -1755,6 +1771,33 @@ body.pane-resize-active .browser-pane__frame {
   opacity: 1;
   pointer-events: auto;
   box-shadow: none;
+}
+
+.editor-deleted-notice {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 8px 14px 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--warning, #c4873a) 50%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--warning, #c4873a) 10%, var(--surface-1));
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.editor-deleted-notice > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.editor-deleted-notice__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
 }
 
 /* Keep the invocation affordance reachable without restoring persistent editor chrome. */

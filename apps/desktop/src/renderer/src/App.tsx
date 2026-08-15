@@ -107,7 +107,7 @@ export function App() {
   const [qmdSearchSelected, setQmdSearchSelected] = useState(false);
   const workspaceSearch = useWorkspaceSearch({ indexedOnEnter: exploreIndexSearchOnEnter, qmdSelected: qmdSearchSelected });
   const graphInspection = useInspectedConcept();
-  const [revealExplorerPathRequest, setRevealExplorerPathRequest] = useState<{ path: string; nonce: number } | null>(null);
+  const [revealExplorerPathRequest, setRevealExplorerPathRequest] = useState<{ path: string; nonce: number; kind?: "file" | "directory" } | null>(null);
   const [inspectorTabRequest, setInspectorTabRequest] = useState<{ tab: "history"; nonce: number } | null>(null);
   const [pendingInvocationAuthorization, setPendingInvocationAuthorization] = useState<PendingInvocationAuthorization | null>(null);
   const [agentComposeRequest, setAgentComposeRequest] = useState<AgentComposeRequest | null>(null);
@@ -205,6 +205,8 @@ export function App() {
     saveDocument,
     prepareDocumentsForReview,
     discardAndReloadDocument,
+    reconcileOpenDocumentFilesystemState,
+    recoverDeletedDocument,
   } = openDocumentsState;
   const canvasNavigation = useCanvasDocumentNavigation({
     canvasTree,
@@ -232,6 +234,7 @@ export function App() {
     removeDeletedPaths: canvasNavigation.removeDeletedPaths,
     revealExplorerPath: (path) => setRevealExplorerPathRequest({ path, nonce: Date.now() }),
     requestGeneratedTitleSelection,
+    recoverDeletedDocument,
   });
   const { dialog: workspaceDialog, setDialog: setWorkspaceDialog } = workspaceMutations;
   const dragManager = usePaneDropOrchestration({
@@ -352,6 +355,7 @@ export function App() {
     openSettings: workspaceSettingsController.openDialog,
     reloadTrees,
     scheduleOpenDocumentRefresh,
+    reconcileOpenDocumentFilesystemState,
   });
 
   useAppKeybindings({
@@ -919,7 +923,11 @@ export function App() {
 
   const workspaceLabel = workspaceModel ? pathLabel(workspaceModel.workspaceRoot) : "Exograph";
   const titleSegments = activeDocument
-    ? workspaceBreadcrumb(activeDocument.filePath, workspaceModel?.noteRoots.map((root) => root.path) ?? [])
+    ? workspaceBreadcrumb(activeDocument.filePath, workspaceModel?.noteRoots.map((root) => root.path) ?? []).map((segment, index, segments) =>
+      activeDocument.filesystemState === "deleted" && index === segments.length - 1
+        ? { ...segment, label: `${segment.label} · deleted` }
+        : segment,
+    )
     : [{ kind: "folder" as const, label: workspaceLabel, path: workspaceModel?.workspaceRoot ?? "" }];
   const canvasLeaves = collectLeaves(canvasTree);
   const editorPaneIds = canvasLeaves.flatMap((leaf) => leaf.content.kind === "editor" ? [leaf.id] : []);
@@ -1160,6 +1168,11 @@ export function App() {
                 }
               }}
               onSave={() => void (leaf.content.kind === "editor" && leaf.content.activePath ? saveDocument(leaf.content.activePath) : Promise.resolve())}
+              onRecoverDeleted={() => void (leaf.content.kind === "editor" && leaf.content.activePath ? workspaceMutations.recoverDeletedFile(leaf.content.activePath) : Promise.resolve())}
+              onSaveDeletedAs={() => {
+                if (leaf.content.kind === "editor" && leaf.content.activePath) workspaceMutations.saveDeletedFileAs(leaf.content.activePath);
+              }}
+              onShowInExplorer={(filePath) => setRevealExplorerPathRequest({ path: filePath, kind: "file", nonce: Date.now() })}
               onOpenTag={(tag) => void openTag(tag)}
               onOpenTarget={(target) => void openKnowledgeTarget(target)}
               onSuggestTargets={(query) => suggestNoteTargets(query)}

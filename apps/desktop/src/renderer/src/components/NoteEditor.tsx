@@ -76,6 +76,7 @@ interface AgentSuggestionState {
 interface EditorDocument extends NoteDocument {
   dirty: boolean;
   readOnly?: boolean;
+  filesystemState?: "deleted";
 }
 
 interface NoteEditorProps {
@@ -88,6 +89,8 @@ interface NoteEditorProps {
   onUpdateFrontmatter: (key: string, value: unknown) => void;
   onBodyChange: (body: string) => void;
   onSave: () => void | Promise<void>;
+  onRecoverDeleted: () => void;
+  onSaveDeletedAs: () => void;
   onOpenTag: (tag: string) => void;
   onOpenTarget: (target: string) => void;
   onSuggestTargets: (query: string) => Promise<Array<{ label: string; target: string; detail?: string }>>;
@@ -137,6 +140,8 @@ export function NoteEditor(props: NoteEditorProps) {
     onUpdateFrontmatter,
     onBodyChange,
     onSave,
+    onRecoverDeleted,
+    onSaveDeletedAs,
     onOpenTag,
     onOpenTarget,
     onSuggestTargets,
@@ -1058,13 +1063,13 @@ export function NoteEditor(props: NoteEditorProps) {
             aria-label="Save document"
             className={`toolbar-button toolbar-button--icon ${compact ? "toolbar-button--compact" : ""}`}
             data-testid="editor-save"
-            disabled={!document.dirty || saveStatus === "saving"}
+            disabled={!document.dirty || saveStatus === "saving" || document.filesystemState === "deleted"}
             onClick={() => {
               const view = codeMirrorRef.current?.view;
               if (inlineComposerActive && view) flushSync(() => bodyChangeRef.current(view.state.doc.toString()));
               void saveRef.current();
             }}
-            title={document.dirty ? "Save" : "No unsaved changes"}
+            title={document.filesystemState === "deleted" ? "Use Recover or Save as…" : document.dirty ? "Save" : "No unsaved changes"}
             type="button"
           >
             <Save size={14} />
@@ -1083,6 +1088,19 @@ export function NoteEditor(props: NoteEditorProps) {
           ) : null}
         </div>
       </div>
+
+      {document.filesystemState === "deleted" ? (
+        <div className="editor-deleted-notice" data-testid="editor-deleted-notice" role="status">
+          <div>
+            <strong>This file was deleted or moved outside Exograph.</strong>
+            <span>Your open edits are preserved until you recover them.</span>
+          </div>
+          <div className="editor-deleted-notice__actions">
+            <button className="toolbar-button" data-testid="recover-deleted-document" onClick={onRecoverDeleted} type="button">Recover</button>
+            <button className="toolbar-button" data-testid="save-deleted-document-as" onClick={onSaveDeletedAs} type="button">Save as…</button>
+          </div>
+        </div>
+      ) : null}
 
       {showNoteMetadata && !propertiesCollapsed ? (
         <div className="properties-card" data-testid="properties-panel">
