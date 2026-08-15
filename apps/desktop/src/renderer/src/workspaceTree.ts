@@ -22,6 +22,23 @@ export function replaceTreeChildrenInRoots(
   return changed ? next : roots;
 }
 
+/**
+ * A root refresh is intentionally shallow. Preserve descendants that the user
+ * already expanded beyond that boundary, while taking the fresh root shape as
+ * authoritative so deleted or renamed paths disappear.
+ */
+export function mergeTreeRootsWithMaterializedBranches(
+  current: Record<string, TreeNode[]>,
+  refreshed: Record<string, TreeNode[]>,
+): Record<string, TreeNode[]> {
+  return Object.fromEntries(
+    Object.entries(refreshed).map(([rootPath, nodes]) => [
+      rootPath,
+      mergeTreeChildren(current[rootPath] ?? [], nodes),
+    ]),
+  );
+}
+
 export function replaceTreeChildren(nodes: TreeNode[], directoryPath: string, children: TreeNode[]): TreeNode[] {
   let changed = false;
   const nextNodes = nodes.map((node) => {
