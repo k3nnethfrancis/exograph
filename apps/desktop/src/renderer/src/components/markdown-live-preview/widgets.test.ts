@@ -39,4 +39,22 @@ describe("Markdown tables", () => {
       { kind: "wikilink", label: "README", target: "../public-benchmarks/astabench/README" },
     ]);
   });
+
+  it("preserves ordinary inline Markdown semantics alongside wikilinks", () => {
+    expect(tableCellInlineContent("**Claim** with *emphasis*, ~~removed~~, `code`, [site](https://example.test), #tag, and [[note|a link]]")).toEqual([
+      { kind: "strong", value: "Claim" },
+      { kind: "text", value: " with " },
+      { kind: "emphasis", value: "emphasis" },
+      { kind: "text", value: ", " },
+      { kind: "strike", value: "removed" },
+      { kind: "text", value: ", " },
+      { kind: "code", value: "code" },
+      { kind: "text", value: ", " },
+      { kind: "markdown-link", label: "site", target: "https://example.test" },
+      { kind: "text", value: ", " },
+      { kind: "tag", value: "#tag", target: "tag" },
+      { kind: "text", value: ", and " },
+      { kind: "wikilink", label: "a link", target: "note" },
+    ]);
+  });
 });

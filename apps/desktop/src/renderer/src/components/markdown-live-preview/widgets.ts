@@ -52,7 +52,12 @@ export interface MarkdownGraphReferences {
 
 export type TableCellInlineContent =
   | { kind: "text"; value: string }
-  | { kind: "wikilink"; label: string; target: string };
+  | { kind: "wikilink"; label: string; target: string }
+  | { kind: "markdown-link"; label: string; target: string }
+  | { kind: "strong" | "emphasis" | "strike" | "code"; value: string }
+  | { kind: "tag"; value: string; target: string };
+
+const tableCellInlinePattern = /(?<wikilink>(?<!!)\[\[(?<wikilinkTarget>[^\]|]+)(?:\|(?<wikilinkAlias>[^\]]+))?\]\])|(?<markdownLink>\[(?<markdownLinkLabel>[^\]]+)\]\((?<markdownLinkTarget>[^)]+)\))|(?<strong>\*\*(?<strongValue>.+?)\*\*)|(?<emphasis>(?<!\*)\*(?<emphasisValue>[^*]+)\*(?!\*))|(?<strike>~~(?<strikeValue>.+?)~~)|(?<code>`(?<codeValue>[^`\n]+)`)|(?<tag>(?<tagPrefix>^|[\s(])#(?<tagTarget>[A-Za-z][\w/-]*))/g;
 
 /**
  * Tables are replacement widgets, so their cells do not pass through the
@@ -61,18 +66,41 @@ export type TableCellInlineContent =
  */
 export function tableCellInlineContent(value: string): TableCellInlineContent[] {
   const content: TableCellInlineContent[] = [];
-  const pattern = /(?<!!)\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+  const appendText = (text: string) => {
+    if (!text) return;
+    const previous = content.at(-1);
+    if (previous?.kind === "text") previous.value += text;
+    else content.push({ kind: "text", value: text });
+  };
   let cursor = 0;
-  for (const match of value.matchAll(pattern)) {
+  for (const match of value.matchAll(tableCellInlinePattern)) {
     const start = match.index ?? 0;
-    if (start > cursor) content.push({ kind: "text", value: value.slice(cursor, start) });
-    const target = match[1]?.trim() ?? "";
-    const { label } = wikilinkPresentation(target, match[2]);
-    if (target && label) content.push({ kind: "wikilink", target, label });
-    else content.push({ kind: "text", value: match[0] });
+    if (start > cursor) appendText(value.slice(cursor, start));
+    const groups = match.groups ?? {};
+    if (groups.wikilink) {
+      const target = groups.wikilinkTarget?.trim() ?? "";
+      const { label } = wikilinkPresentation(target, groups.wikilinkAlias);
+      if (target && label) content.push({ kind: "wikilink", target, label });
+      else appendText(match[0]);
+    } else if (groups.markdownLink) {
+      content.push({ kind: "markdown-link", label: groups.markdownLinkLabel ?? "", target: groups.markdownLinkTarget?.trim() ?? "" });
+    } else if (groups.strong) {
+      content.push({ kind: "strong", value: groups.strongValue ?? "" });
+    } else if (groups.emphasis) {
+      content.push({ kind: "emphasis", value: groups.emphasisValue ?? "" });
+    } else if (groups.strike) {
+      content.push({ kind: "strike", value: groups.strikeValue ?? "" });
+    } else if (groups.code) {
+      content.push({ kind: "code", value: groups.codeValue ?? "" });
+    } else if (groups.tag) {
+      const prefix = groups.tagPrefix ?? "";
+      appendText(prefix);
+      const target = groups.tagTarget ?? "";
+      content.push({ kind: "tag", value: `#${target}`, target });
+    }
     cursor = start + match[0].length;
   }
-  if (cursor < value.length || content.length === 0) content.push({ kind: "text", value: value.slice(cursor) });
+  if (cursor < value.length || content.length === 0) appendText(value.slice(cursor));
   return content;
 }
 
@@ -82,12 +110,27 @@ function appendTableCellContent(cell: HTMLElement, value: string) {
       cell.append(document.createTextNode(part.value));
       continue;
     }
-    const link = document.createElement("span");
-    link.className = "exograph-md-link";
-    link.dataset.exographLinkTarget = part.target;
-    link.dataset.exographLinkKind = "wikilink";
-    link.textContent = part.label;
-    cell.append(link);
+    if (part.kind === "wikilink" || part.kind === "markdown-link") {
+      const link = document.createElement("span");
+      link.className = "exograph-md-link";
+      link.dataset.exographLinkTarget = part.target;
+      if (part.kind === "wikilink") link.dataset.exographLinkKind = "wikilink";
+      link.textContent = part.label;
+      cell.append(link);
+      continue;
+    }
+    if (part.kind === "tag") {
+      const tag = document.createElement("span");
+      tag.className = "exograph-md-tag";
+      tag.dataset.exographTag = part.target;
+      tag.textContent = part.value;
+      cell.append(tag);
+      continue;
+    }
+    const element = document.createElement(part.kind === "strong" ? "strong" : part.kind === "emphasis" ? "em" : part.kind === "strike" ? "s" : "code");
+    element.className = `exograph-md-${part.kind === "strong" ? "strong" : part.kind === "emphasis" ? "emphasis" : part.kind === "strike" ? "strike" : "inline-code"}`;
+    element.textContent = part.value;
+    cell.append(element);
   }
 }
 

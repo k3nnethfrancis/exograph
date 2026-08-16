@@ -24,7 +24,7 @@ test("renders path-only wikilinks as compact clickable labels in prose and table
         "",
         "| Source |",
         "| --- |",
-        "| [[targets/table-target]] |",
+        "| **Claim** [[targets/table-target]] |",
       ].join("\n"), "utf8");
     },
   });
@@ -62,6 +62,7 @@ test("renders path-only wikilinks as compact clickable labels in prose and table
     await revealTableViewport();
     await expect(page.locator(".cm-content")).toContainText("table-target");
     const tableLink = page.locator(".cm-content .exograph-md-link[data-exograph-link-target='targets/table-target']");
+    await expect(page.locator(".cm-content .exograph-md-strong").last()).toHaveText("Claim");
     await expect(tableLink).toHaveText("table-target");
     await tableLink.click();
     await expect(page.getByTestId("editor-title")).toHaveText("table-target");
