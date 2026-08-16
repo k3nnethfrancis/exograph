@@ -3,7 +3,8 @@ import { RangeSetBuilder, type Text } from "@codemirror/state";
 
 import { LIST_GEOMETRY, listGeometryStyleVariables } from "../listGeometry";
 import { listPrefixPattern, type ListContext, type MarkdownPreviewMetadata, visibleLineNumbers } from "./metadata";
-import { FoldToggleWidget, MarkdownImageWidget, markdownImageTarget, TaskPrefixWidget, TableWidget } from "./widgets";
+import { FoldToggleWidget, MarkdownImageWidget, markdownImageTarget, TaskPrefixWidget, TableWidget, WikilinkWidget } from "./widgets";
+import { wikilinkPresentation } from "./wikilinks";
 
 export interface MarkdownLivePreviewOptions {
   onResolveImage: (target: string, options?: { lookupByFilename?: boolean }) => Promise<{ url: string }>;
@@ -525,7 +526,7 @@ function applyWikilinks(text: string, lineFrom: number, out: DecorationEntry[], 
     const fullText = match[0];
     const end = start + fullText.length;
     const target = match[1].trim();
-    const label = (match[2] ?? target).trim();
+    const { label } = wikilinkPresentation(target, match[2]);
     const labelStartOffset = match[2] ? fullText.indexOf(match[2]) : 2;
     const labelStart = start + labelStartOffset;
     const labelEnd = labelStart + label.length;
@@ -534,12 +535,7 @@ function applyWikilinks(text: string, lineFrom: number, out: DecorationEntry[], 
       // Cursor inside — show raw wikilink, still make the label clickable
       out.push({ from: labelStart, to: labelEnd, decoration: Decoration.mark({ class: "exograph-md-link", attributes: { "data-exograph-link-target": target, "data-exograph-link-kind": "wikilink" } }) });
     } else {
-      out.push({ from: start, to: start + 2, decoration: concealDecoration });
-      if (match[2]) {
-        out.push({ from: start + 2, to: labelStart, decoration: concealDecoration });
-      }
-      out.push({ from: labelStart, to: labelEnd, decoration: Decoration.mark({ class: "exograph-md-link", attributes: { "data-exograph-link-target": target, "data-exograph-link-kind": "wikilink" } }) });
-      out.push({ from: end - 2, to: end, decoration: concealDecoration });
+      out.push({ from: start, to: end, decoration: Decoration.replace({ widget: new WikilinkWidget(target, label) }) });
     }
   }
 }

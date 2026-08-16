@@ -104,4 +104,16 @@ describe("markdown live preview metadata repair", () => {
     expect(repaired).toEqual(markdownPreviewMetadata(transaction.newDoc));
     expect(repaired.tableContexts.get(5)?.rows).toEqual([["beta", "1"]]);
   });
+
+  it("keeps aliased wikilinks together as one table cell", () => {
+    const state = EditorState.create({ doc: [
+      "| Task | Benchmark |",
+      "| --- | --- |",
+      "| Discovery | [[../public-benchmarks/astabench/README|AstaBench]] |",
+    ].join("\n") });
+
+    expect(markdownPreviewMetadata(state.doc).tableContexts.get(3)?.rows).toEqual([
+      ["Discovery", "[[../public-benchmarks/astabench/README|AstaBench]]"],
+    ]);
+  });
 });

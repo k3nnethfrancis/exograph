@@ -2,6 +2,7 @@ import { WidgetType, type EditorView } from "@codemirror/view";
 
 import { LIST_GEOMETRY } from "../listGeometry";
 import type { TableContext } from "./metadata";
+import { wikilinkPresentation } from "./wikilinks";
 
 type ResolveImage = (target: string, options?: { lookupByFilename?: boolean }) => Promise<{ url: string }>;
 
@@ -47,6 +48,73 @@ export interface MarkdownGraphReferenceItem {
 export interface MarkdownGraphReferences {
   backlinks: MarkdownGraphReferenceItem[];
   references: MarkdownGraphReferenceItem[];
+}
+
+export type TableCellInlineContent =
+  | { kind: "text"; value: string }
+  | { kind: "wikilink"; label: string; target: string };
+
+/**
+ * Tables are replacement widgets, so their cells do not pass through the
+ * line-level Markdown decorations. Parse wikilinks here to preserve the same
+ * visible label and click contract as links in ordinary Markdown text.
+ */
+export function tableCellInlineContent(value: string): TableCellInlineContent[] {
+  const content: TableCellInlineContent[] = [];
+  const pattern = /(?<!!)\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+  let cursor = 0;
+  for (const match of value.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    if (start > cursor) content.push({ kind: "text", value: value.slice(cursor, start) });
+    const target = match[1]?.trim() ?? "";
+    const { label } = wikilinkPresentation(target, match[2]);
+    if (target && label) content.push({ kind: "wikilink", target, label });
+    else content.push({ kind: "text", value: match[0] });
+    cursor = start + match[0].length;
+  }
+  if (cursor < value.length || content.length === 0) content.push({ kind: "text", value: value.slice(cursor) });
+  return content;
+}
+
+function appendTableCellContent(cell: HTMLElement, value: string) {
+  for (const part of tableCellInlineContent(value)) {
+    if (part.kind === "text") {
+      cell.append(document.createTextNode(part.value));
+      continue;
+    }
+    const link = document.createElement("span");
+    link.className = "exograph-md-link";
+    link.dataset.exographLinkTarget = part.target;
+    link.dataset.exographLinkKind = "wikilink";
+    link.textContent = part.label;
+    cell.append(link);
+  }
+}
+
+export class WikilinkWidget extends WidgetType {
+  constructor(
+    private readonly target: string,
+    private readonly label: string,
+  ) {
+    super();
+  }
+
+  toDOM() {
+    const link = document.createElement("span");
+    link.className = "exograph-md-link";
+    link.dataset.exographLinkTarget = this.target;
+    link.dataset.exographLinkKind = "wikilink";
+    link.textContent = this.label;
+    return link;
+  }
+
+  eq(other: WikilinkWidget) {
+    return other.target === this.target && other.label === this.label;
+  }
+
+  ignoreEvent(event: Event) {
+    return event.type !== "click" && event.type !== "mousedown";
+  }
 }
 
 export class GraphReferencesWidget extends WidgetType {
@@ -280,7 +348,7 @@ export class TableWidget extends WidgetType {
     const headerRow = document.createElement("tr");
     this.ctx.headers.forEach((cell, idx) => {
       const th = document.createElement("th");
-      th.textContent = cell;
+      appendTableCellContent(th, cell);
       const align = this.ctx.alignments[idx] ?? "left";
       th.style.textAlign = align;
       headerRow.appendChild(th);
@@ -293,7 +361,7 @@ export class TableWidget extends WidgetType {
       const tr = document.createElement("tr");
       row.forEach((cell, idx) => {
         const td = document.createElement("td");
-        td.textContent = cell;
+        appendTableCellContent(td, cell);
         const align = this.ctx.alignments[idx] ?? "left";
         td.style.textAlign = align;
         tr.appendChild(td);
