@@ -12,6 +12,10 @@ export function replaceTreeChildrenInRoots(
   let changed = false;
   const next = Object.fromEntries(
     Object.entries(roots).map(([rootPath, nodes]) => {
+      if (rootPath === directoryPath) {
+        changed = true;
+        return [rootPath, children];
+      }
       const nextNodes = replaceTreeChildren(nodes, directoryPath, children);
       if (nextNodes !== nodes) {
         changed = true;

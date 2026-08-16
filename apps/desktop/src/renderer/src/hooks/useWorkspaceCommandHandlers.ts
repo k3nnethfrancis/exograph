@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { WorkspaceModel } from "@exograph/core";
 import type { WorkspaceSettingsSection } from "../../../shared/api";
+import { directoryOf } from "../workspaceTree";
 
 interface UseWorkspaceCommandHandlersOptions {
   workspaceModel: WorkspaceModel | null;
@@ -8,6 +9,7 @@ interface UseWorkspaceCommandHandlersOptions {
   openFolder: (directoryPath: string) => void;
   openSettings: (section: WorkspaceSettingsSection) => Promise<void>;
   reloadTrees: () => Promise<void>;
+  refreshTreeDirectory: (directoryPath: string) => Promise<void>;
   scheduleOpenDocumentRefresh: (filePath: string) => void;
   reconcileOpenDocumentFilesystemState: () => Promise<void>;
 }
@@ -33,12 +35,15 @@ export function useWorkspaceCommandHandlers(options: UseWorkspaceCommandHandlers
 
   useEffect(() => {
     const removeWorkspaceChangeListener = window.exograph.workspace.onDidChange((event) => {
-      if (event.eventType === "rename" || !event.filePath) {
-        void options.reloadTrees();
-        void options.reconcileOpenDocumentFilesystemState();
-      }
+      // fs.watch's event type is platform-specific: a structural edit may arrive
+      // as either "change" or "rename". Always refresh the root shape, then
+      // replace the changed path's immediate parent to invalidate any expanded
+      // branch beyond the root's shallow tree depth.
+      void options.reloadTrees();
+      void options.reconcileOpenDocumentFilesystemState();
       if (event.filePath) {
         const filePath = event.filePath;
+        void options.refreshTreeDirectory(directoryOf(filePath));
         options.scheduleOpenDocumentRefresh(filePath);
       }
     });
@@ -49,6 +54,7 @@ export function useWorkspaceCommandHandlers(options: UseWorkspaceCommandHandlers
   }, [
     options.workspaceModel,
     options.reloadTrees,
+    options.refreshTreeDirectory,
     options.scheduleOpenDocumentRefresh,
     options.reconcileOpenDocumentFilesystemState,
   ]);

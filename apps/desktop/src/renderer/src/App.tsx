@@ -354,6 +354,7 @@ export function App() {
     openFolder: canvasNavigation.openFolderOverview,
     openSettings: workspaceSettingsController.openDialog,
     reloadTrees,
+    refreshTreeDirectory: workspaceTrees.refreshTreeDirectory,
     scheduleOpenDocumentRefresh,
     reconcileOpenDocumentFilesystemState,
   });

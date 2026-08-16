@@ -50,11 +50,22 @@ export function useWorkspaceTrees(options: UseWorkspaceTreesOptions) {
     setNoteTrees((current) => replaceTreeChildrenInRoots(current, directoryPath, children));
   }
 
+  async function refreshTreeDirectory(directoryPath: string): Promise<void> {
+    const children = await window.exograph.workspace.listTree(directoryPath, {
+      allowedFileExtensions: [".md", ".pdf"],
+      maxDepth: 1,
+      excludedPaths: excludedPathsRef.current,
+    });
+    loadedTreeDirectoriesRef.current.add(treeLoadKey("notes", directoryPath));
+    setNoteTrees((current) => replaceTreeChildrenInRoots(current, directoryPath, children));
+  }
+
   return {
     noteTrees,
     replaceTreesForModel,
     reloadTreesForModel,
     expandTreeDirectory,
+    refreshTreeDirectory,
   };
 }
 
