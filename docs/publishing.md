@@ -63,7 +63,8 @@ adapter owns compatibility between the generated route list and its output.
 
 Builds have a five-minute timeout, bounded process output, and cancellation of
 the child process group. Context changes discard late results from the previous
-Workspace. Private snapshots and receipts live under desktop user data, outside
+Workspace. Build requests compare the publication configuration and Note Root
+scope; unrelated layout or appearance saves do not invalidate them. Private snapshots and receipts live under desktop user data, outside
 all Note Roots; a configuration that cannot maintain that separation is rejected.
 
 ## Verification

@@ -1,7 +1,7 @@
 import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { PublicationSnapshot, WorkspaceModel, WorkspaceSettings, WorkspaceSettingsSnapshot } from "@exograph/core";
-import type { PublicationAction, PublishingStatus } from "../../shared/api";
+import { publicationScope, type PublishingBuildRequest, type PublicationAction, type PublishingStatus } from "../../shared/api";
 import { buildQuartzSite, type QuartzBuildInput } from "./quartz-build";
 import { servePublication, within } from "./preview-server";
 
@@ -9,7 +9,7 @@ interface PublishingContext extends WorkspaceSettingsSnapshot { model: Workspace
 interface PublishingServiceOptions {
   context: () => PublishingContext;
   stagingParent: string;
-  capture: (model: WorkspaceModel, publicationDirectory: string, stagingParent: string, generatedRoutes: readonly string[]) => Promise<PublicationSnapshot>;
+  capture: (model: WorkspaceModel, publicationDirectory: string, stagingParent: string, generatedRoutes: readonly string[], assertCurrent: () => void) => Promise<PublicationSnapshot>;
   verify: (snapshot: PublicationSnapshot) => Promise<void>;
   publishStatus: (status: PublishingStatus) => void;
   build?: (input: QuartzBuildInput) => Promise<void>;
@@ -35,11 +35,14 @@ export class PublishingService {
 
   getStatus(): PublishingStatus { this.updateContext(); return this.status; }
 
-  async build(input: { expectedRevision: string | null; action: PublicationAction }): Promise<PublishingStatus> {
+  async build(input: PublishingBuildRequest): Promise<PublishingStatus> {
     this.updateContext();
     if (!input || (input.action !== "preview" && input.action !== "prepare")) throw new Error("Unknown publishing action.");
     const context = this.options.context();
-    if (input.expectedRevision !== context.revision) throw new Error("Settings changed. Wait for Settings to finish saving and try again.");
+    let expectedKey: string;
+    try { expectedKey = JSON.stringify(publicationScope(input.scope)); }
+    catch { throw new Error("Invalid publication settings scope."); }
+    if (expectedKey !== contextKey(context)) throw new Error("Publication settings or Note Roots changed. Reopen Settings and review the current folders before building.");
     if (this.pending) throw new Error("A publication build is already running.");
     this.invalidate();
     const generation = this.generation;
@@ -88,7 +91,7 @@ export class PublishingService {
       assertCurrent();
       const generatedRoutes = await readGeneratedRoutes(config.engineDirectory);
       assertCurrent();
-      snapshot = await this.options.capture(context.model, config.publicationDirectory, config.stagingParent, generatedRoutes);
+      snapshot = await this.options.capture(context.model, config.publicationDirectory, config.stagingParent, generatedRoutes, assertCurrent);
       assertCurrent();
       await this.options.verify(snapshot);
       assertCurrent();
@@ -127,7 +130,7 @@ export class PublishingService {
 }
 
 function contextKey(context: PublishingContext): string {
-  return JSON.stringify([context.model.workspaceRoot, context.model.noteRoots.map((root) => root.path), context.settings.publishing]);
+  return JSON.stringify(publicationScope({ workspaceRoot: context.model.workspaceRoot, noteRoots: context.model.noteRoots.map((root) => root.path), publishing: context.settings.publishing }));
 }
 
 export async function validatePublishingSettings(settings: WorkspaceSettings, model: WorkspaceModel, stagingParent: string) {

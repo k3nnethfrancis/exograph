@@ -93,7 +93,7 @@ it("discards a late export after workspace context replacement without launching
   let context = { settings: f.settings, model: f.model, revision: "rev1" };
   const build = vi.fn();
   const service = new PublishingService({ context: () => context, stagingParent: f.staging, capture, verify: vi.fn(), build, publishStatus: vi.fn() });
-  const job = service.build({ expectedRevision: "rev1", action: "preview" });
+  const job = service.build({ scope: f.settings, action: "preview" });
   await vi.waitFor(() => expect(capture).toHaveBeenCalled());
   context = { ...context, settings: { ...f.settings, publishing: { ...f.settings.publishing!, siteUrl: "https://replacement.example/" } } };
   service.updateContext();
@@ -101,7 +101,7 @@ it("discards a late export after workspace context replacement without launching
   expect((await job).phase).toBe("idle");
   expect(build).not.toHaveBeenCalled();
   await expect(readFile(snapshotRoot)).rejects.toMatchObject({ code: "ENOENT" });
-  await expect(service.build({ expectedRevision: "stale", action: "preview" })).rejects.toThrow("Settings changed");
+  await expect(service.build({ scope: { ...f.settings, publishing: { ...f.settings.publishing!, publicationDirectory: "/stale" } }, action: "preview" })).rejects.toThrow("Publication settings or Note Roots changed");
 });
 
 it("keeps source-change failures out of preview and removes failed artifacts", async () => {
@@ -112,7 +112,7 @@ it("keeps source-change failures out of preview and removes failed artifacts", a
   const verify = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("source bytes changed"));
   const service = new PublishingService({ context: () => ({ settings: f.settings, model: f.model, revision: "rev1" }), stagingParent: f.staging,
     capture, verify, publishStatus: vi.fn(), build: async ({ outputDirectory }) => { await mkdir(outputDirectory); await writeFile(path.join(outputDirectory, "index.html"), "built"); } });
-  const result = await service.build({ expectedRevision: "rev1", action: "preview" });
+  const result = await service.build({ scope: f.settings, action: "preview" });
   expect(result).toMatchObject({ phase: "error", error: "source bytes changed" });
   expect(result.previewUrl).toBeUndefined();
   expect(() => service.outputPath()).toThrow("Build a site first");
@@ -128,7 +128,7 @@ it("stops a ready preview and removes its private snapshot on configuration chan
   const service = new PublishingService({ context: () => ({ settings, model: f.model, revision: "rev1" }), stagingParent: f.staging,
     capture, verify: vi.fn(), publishStatus: vi.fn(), build: async ({ outputDirectory }) => { await mkdir(outputDirectory); await writeFile(path.join(outputDirectory, "index.html"), "built"); } });
   cleanups.push(() => service.stop());
-  const result = await service.build({ expectedRevision: "rev1", action: "preview" });
+  const result = await service.build({ scope: f.settings, action: "preview" });
   expect(result.phase).toBe("ready");
   expect(await (await fetch(result.previewUrl!)).text()).toBe("built");
   settings = { ...settings, publishing: { ...settings.publishing!, siteUrl: "https://different.example/" } };
@@ -154,7 +154,7 @@ it("builds and serves a real Core export while keeping private links and source 
     capture: (model, publicationDirectory, stagingParent, generatedRoutes) => exportPublication({ model, publicationDirectory, stagingParent, generatedRoutes }),
     verify: verifyPublicationSnapshot, publishStatus: vi.fn() });
   cleanups.push(() => service.stop());
-  const result = await service.build({ expectedRevision: "rev1", action: "preview" });
+  const result = await service.build({ scope: f.settings, action: "preview" });
   expect(result.error).toBeUndefined();
   expect(result.phase).toBe("ready");
   const body = await (await fetch(result.previewUrl!)).text();
@@ -164,4 +164,24 @@ it("builds and serves a real Core export while keeping private links and source 
   expect(body).not.toContain("PRIVATE_SENTINEL");
   expect((await fetch(new URL("/publication.json", result.previewUrl!))).status).toBe(404);
   expect(await readFile(path.join(f.publication, "index.md"), "utf8")).toBe(authored);
+});
+
+
+it("accepts unrelated settings revisions and model replacements while rechecking actual publication scope after flush", async () => {
+  const f = await fixture();
+  const snapshotRoot = path.join(f.temp, "snapshot");
+  await mkdir(path.join(snapshotRoot, "content"), { recursive: true });
+  let context = { settings: f.settings, model: f.model, revision: "initial-revision" };
+  const service = new PublishingService({ context: () => context, stagingParent: f.staging,
+    capture: async (_model, _publication, _staging, _routes, assertCurrent) => {
+      // Layout persistence can publish a new model while the editor flush awaits IPC.
+      context = { settings: { ...context.settings, appearanceMode: "light" }, model: { ...f.model }, revision: "after-flush-layout" };
+      assertCurrent();
+      return { stagingRoot: snapshotRoot, directory: path.join(snapshotRoot, "content"), manifest: { diagnostics: [] } } as unknown as PublicationSnapshot;
+    }, verify: vi.fn(), publishStatus: vi.fn(), build: async ({ outputDirectory }) => { await mkdir(outputDirectory); await writeFile(path.join(outputDirectory, "index.html"), "built"); } });
+  cleanups.push(() => service.stop());
+  context = { settings: { ...f.settings, appearanceMode: "dark" }, model: { ...f.model }, revision: "background-layout-revision" };
+  expect((await service.build({ scope: f.settings, action: "prepare" })).phase).toBe("ready");
+  const changedRoots = { ...f.settings, noteRoots: [f.publication] };
+  await expect(service.build({ scope: changedRoots, action: "prepare" })).rejects.toThrow("Publication settings or Note Roots changed");
 });

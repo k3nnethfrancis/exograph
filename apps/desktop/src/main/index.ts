@@ -361,9 +361,9 @@ function registerIpcHandlers() {
   publishingService = new PublishingService({
     context: () => ({ ...currentSnapshot(), model: workspaceModel }),
     stagingParent: path.join(app.getPath("userData"), "publishing"),
-    capture: async (model, publicationDirectory, stagingParent, generatedRoutes) => {
+    capture: async (model, publicationDirectory, stagingParent, generatedRoutes, assertCurrent) => {
       await appLifecycle.withDocumentsFlushed(async () => {});
-      if (model !== workspaceModel) throw new Error("Workspace changed before publication export.");
+      assertCurrent();
       return exportPublication({ model, publicationDirectory, stagingParent, generatedRoutes });
     },
     verify: verifyPublicationSnapshot,

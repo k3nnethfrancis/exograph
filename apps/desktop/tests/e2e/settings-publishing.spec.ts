@@ -47,6 +47,13 @@ test("Publishing persists its folder, exports a private-safe snapshot, previews,
       publicationDirectory: publication, engineDirectory: engine, siteUrl: "https://example.com/",
     } });
     await expect(page.getByTestId("publishing-preview")).toBeEnabled();
+    // A background settings save must not invalidate unchanged publication configuration.
+    expect(await page.evaluate(async () => {
+      const snapshot = await window.exograph.workspace.getSettings();
+      const saved = await window.exograph.workspace.saveSettings({ expectedRevision: snapshot.revision,
+        settings: { ...snapshot.settings, editorFontSize: snapshot.settings.editorFontSize === 16 ? 17 : 16 } });
+      return saved.revision !== snapshot.revision;
+    })).toBe(true);
     await page.getByTestId("publishing-preview").click();
     await expect(page.getByTestId("publishing-status")).toContainText("Preview ready", { timeout: 30_000 });
     const status = await page.evaluate(() => window.exograph.publishing.getStatus());

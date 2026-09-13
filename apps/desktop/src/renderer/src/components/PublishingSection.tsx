@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import type { PublicationAction, PublishingStatus } from "../../../shared/api";
+import { publicationScope, type PublicationAction, type PublishingStatus } from "../../../shared/api";
 import type { WorkspaceSettingsDialogState } from "../workspaceSettingsDialogTypes";
 
 export function PublishingSection({ settings, setSettings }: {
@@ -34,7 +34,7 @@ export function PublishingSection({ settings, setSettings }: {
     setStarting(true);
     setError(null);
     try {
-      const next = await window.exograph.publishing.build({ action, expectedRevision: settings.settingsRevision });
+      const next = await window.exograph.publishing.build({ action, scope: publicationScope(settings) });
       if (mounted.current && requestIdentity === identityRef.current) setStatus(next);
     } catch (cause) { if (mounted.current && requestIdentity === identityRef.current) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (mounted.current) setStarting(false); }
