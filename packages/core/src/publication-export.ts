@@ -71,11 +71,12 @@ export async function exportPublication(request: PublicationExportRequest): Prom
   const assets = new Set<string>();
   const output = new Map<string, { source: string; bytes: Buffer; kind: "note" | "asset"; visibility?: "listed" | "unlisted" }>();
   const generated = new Set(generatedRoutes.map((route) => route.replace(/\/$/, "")));
+  const publicFolders = new Set<string>();
   // Quartz folder/tag routes derive from listed publication members, never private/unlisted-only members.
   for (const note of notes.values()) {
     if (!note.published || note.unlisted) continue;
     let folder = slash(path.relative(publicationDirectory, path.dirname(note.path)));
-    while (folder && folder !== ".") { generated.add(folder); folder = path.posix.dirname(folder); }
+    while (folder && folder !== ".") { generated.add(folder); publicFolders.add(folder); folder = path.posix.dirname(folder); }
     const tags = typeof note.metadata.tags === "string" ? [note.metadata.tags] : Array.isArray(note.metadata.tags) ? note.metadata.tags : [];
     for (const tag of tags) {
       if (typeof tag !== "string" || !tag || tag.split("/").some((part) => !part || part === "." || part === "..") || /[?#%\\]/.test(tag)) continue;
@@ -111,7 +112,14 @@ export async function exportPublication(request: PublicationExportRequest): Prom
       const destination = candidates[0];
       if (!isPathWithinRoot(publicationDirectory, destination)) return { reason: "excluded-local-target" };
       if (markdown(destination)) {
-        if (!notes.get(destination)?.published) return { reason: "excluded-local-target" };
+        if (!notes.get(destination)?.published) {
+          // A folder URL addresses its generated listing, not an excluded index Note.
+          const route = slash(path.relative(publicationDirectory, localPath));
+          if (path.extname(localPath) === "" && destination === path.join(localPath, "index.md") && publicFolders.has(route)) {
+            return { url: publicRelative(sourcePath, localPath) + suffix, kind: "generated" };
+          }
+          return { reason: "excluded-local-target" };
+        }
       } else {
         if (!assetExtensions.has(path.extname(destination).toLowerCase())) return { reason: "unsupported-local-resource" };
         assets.add(destination);

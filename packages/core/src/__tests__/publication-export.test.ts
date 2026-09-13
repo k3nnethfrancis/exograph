@@ -16,6 +16,22 @@ async function fixture(files: Record<string, string>) {
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 describe("publication export", () => {
+  it("keeps generated public folder URLs when their index Note is a draft, without exposing that Note", async () => {
+    const f = await fixture({
+      "public/index.md": '[Reports](/reports) [Draft index](reports/index.md) [Private folder](/private-folder)',
+      "public/reports/index.md": "---\ndraft: true\n---\nPRIVATE PLACEHOLDER",
+      "public/reports/report.md": "# Published report",
+      "public/private-folder/index.md": "---\ndraft: true\n---\nPRIVATE FOLDER",
+    });
+    const snapshot = await exportPublication({ ...f.request, generatedRoutes: [...f.request.generatedRoutes, "private-folder"] });
+    const output = await readFile(path.join(snapshot.directory, "index.md"), "utf8");
+    expect(output).toContain("[Reports](<reports>)");
+    expect(output).not.toContain("reports/index.md");
+    expect(output).not.toContain("(<private-folder>)");
+    expect(snapshot.manifest.files.map((file) => file.path)).toEqual(["index.md", "reports/report.md"]);
+    expect(snapshot.manifest.diagnostics).toHaveLength(2);
+  });
+
 
   it("recognizes BOM and YAML-labelled draft headers before eligibility and preserves shared-preview status", async () => {
     const f = await fixture({
