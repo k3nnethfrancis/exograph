@@ -2,11 +2,16 @@ import type { PublicationDiagnostic, WorkspaceSettings } from "@exograph/core";
 export type { PublicationDiagnostic } from "@exograph/core";
 
 export type PublicationAction = "preview" | "prepare";
+export type PublicationDeployResult =
+  | { status: "setup-required"; message: string }
+  | { status: "deployed"; deploymentUrl: string; snapshotCommit: string; engineCommit: string; runId: string };
 export interface PublishingStatus {
-  phase: "idle" | "exporting" | "building" | "ready" | "error";
+  phase: "idle" | "exporting" | "building" | "ready" | "deploying" | "error";
   action?: PublicationAction;
   previewUrl?: string;
   outputPath?: string;
+  preparedId?: string;
+  deployment?: PublicationDeployResult;
   diagnostics: PublicationDiagnostic[];
   error?: string;
 }
@@ -29,6 +34,7 @@ export function publicationScope(settings: PublishingScope): PublishingScope {
 export interface PublishingApi {
   getStatus: () => Promise<PublishingStatus>;
   build: (input: PublishingBuildRequest) => Promise<PublishingStatus>;
+  publish: (input: { scope: PublishingScope; preparedId: string }) => Promise<PublishingStatus>;
   stop: () => Promise<void>;
   revealOutput: () => Promise<void>;
   onStatus: (callback: (status: PublishingStatus) => void) => () => void;
