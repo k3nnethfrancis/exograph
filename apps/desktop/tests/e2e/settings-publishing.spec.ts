@@ -65,6 +65,7 @@ test("Publishing persists its folder, exports a private-safe snapshot, previews,
     await page.getByTestId("publishing-prepare").click();
     await expect(page.getByTestId("publishing-status")).toContainText("It has not been deployed", { timeout: 30_000 });
     expect((await page.evaluate(() => window.exograph.publishing.getStatus())).previewUrl).toBeUndefined();
+    await fixture.electronApp.close();
     relaunched = await relaunchExographWorkspaceFixture(fixture);
     page = relaunched.page;
     await page.getByTestId("workspace-menu-toggle").click();
