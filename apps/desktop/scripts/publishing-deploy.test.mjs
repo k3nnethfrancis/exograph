@@ -22,7 +22,6 @@ async function fixture(mode = "success") {
   const buildScript = "// reviewed generic Quartz runner\n"
   await writeFile(path.join(engineDirectory, "deployment/quartz-build.mjs"), buildScript)
   await writeFile(path.join(engineDirectory, "deployment/github-pages.yml"), workflow)
-  await writeFile(path.join(engineDirectory, "exograph-publishing.json"), JSON.stringify({ deployment: { repository: "owner/site", engineRepository: "owner/engine", workflow: "exograph-publish.yml", workflowRef: "main", siteUrl: "https://example.com" } }))
   git(engineDirectory, ["init", "--quiet"])
   git(engineDirectory, ["add", "."])
   git(engineDirectory, ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "--quiet", "-m", "fixture"])
