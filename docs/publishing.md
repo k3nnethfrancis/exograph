@@ -12,10 +12,9 @@ a Workspace replacement, another build, or quitting Exograph stops it.
 
 **Prepare publish** creates a fresh site artifact and exposes its folder for
 review. It does not deploy or contact GitHub Pages. Deployment of that reviewed
-artifact remains a separate, explicit step. No build runs automatically on edits.
+snapshot is available through **Publish prepared site** after preparation with a clean, committed Quartz project. This explicit action verifies the source snapshot and pinned engine revision before invoking deployment. No build or deployment runs automatically on edits.
 Closing or replacing a preview removes its temporary files; prepared artifacts
-also last only until the next build, configuration change, or app exit. Copy a
-reviewed artifact to its deployment project before ending that session.
+also last only until the next build, configuration change, or app exit. Source or engine changes require preparing and reviewing a fresh site. An uncommitted engine can still build locally, but cannot publish.
 
 The export preserves public-to-public links and ordinary external URLs. Local
 references to private, excluded, ambiguous, or unavailable content are removed
@@ -75,3 +74,35 @@ completion. `tests/e2e/settings-publishing.spec.ts` exercises real renderer,
 preload, main, Core export, filesystem, child-process, and HTTP boundaries with
 a deterministic site adapter. Actual Quartz visual/content parity is a separate
 site-level gate; the fixture adapter does not establish it.
+
+## Explicit deployment
+
+The trusted engine supplies `scripts/exograph-deploy.mjs` and its destination
+configuration. Exograph invokes this fixed adapter only after a Publish click:
+
+```
+node scripts/exograph-deploy.mjs --input <snapshot/content> --snapshot-hash <sha256> --engine-commit <40-character SHA> --site-url <url>
+```
+
+The snapshot hash is SHA256 of UTF-8 JSON for the path-sorted array of
+`{path,sha256}` entries, with POSIX relative paths, raw-byte file hashes, lexical
+JavaScript ordering, and no trailing newline. The adapter must validate the
+actual copied content against this hash before uploading it. The input is the
+sanitized content used for preparation; the pinned engine builds it remotely.
+Private receipts and source inventories must never enter that content.
+
+A missing adapter or destination workflow reports **setup required**, without
+claiming deployment. Exit 2 returns `{ok:false,status:"setup-required",message}`.
+Success requires exit 0 and `{ok:true,status:"deployed",deploymentUrl,
+snapshotCommit,engineCommit,runId}` after the actual Pages deployment completes;
+queued or merely dispatched workflows are not success. Progress uses stderr.
+
+Deployments have a twenty-minute local wait limit. **Stop waiting** terminates
+the local process group, but a dispatched remote workflow may still finish.
+Check the destination before publishing again. Exograph never retries a
+publication automatically, and a confirmed deployment cannot be repeated from
+the same prepared artifact. Prepare again for another explicit publication.
+
+Deployment adapter tests use local child processes and Git fixtures; service
+lifecycle tests use real Core snapshots with a fake deployment boundary. These
+checks establish the desktop contract without publishing any real site.

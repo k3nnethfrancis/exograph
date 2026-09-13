@@ -89,7 +89,17 @@ export async function deployQuartzSite(input: PublicationDeployInput): Promise<P
     child.once("close", (code) => {
       cleanup();
       if (failure) { kill("SIGKILL"); reject(failure); }
-      else if (code !== 0 && code !== 2) reject(new Error(`Deployment failed (${code ?? "terminated"}). ${stderr.trim()}`));
+      else if (code !== 0 && code !== 2) {
+        let detail = stderr.trim();
+        try {
+          const receipt = JSON.parse(stdout) as Record<string, unknown>;
+          if (receipt?.ok === false && receipt.status === "failed" && typeof receipt.message === "string") {
+            detail = receipt.message.slice(0, 16_384);
+            if (typeof receipt.runId === "string" && /^\d+$/.test(receipt.runId)) detail += ` Check GitHub Actions run ${receipt.runId} before retrying.`;
+          }
+        } catch { /* Fall back to bounded stderr when no failure receipt exists. */ }
+        reject(new Error(`Deployment failed (${code ?? "terminated"}). ${detail}`));
+      }
       else resolve({ stdout, code });
     });
   });

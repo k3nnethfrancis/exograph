@@ -23,7 +23,8 @@ export function PublishingSection({ settings, setSettings }: {
     return () => { mounted.current = false; off(); };
   }, []);
   const config = settings.publishing ?? { publicationDirectory: "", engineDirectory: "", siteUrl: "" };
-  const busy = starting || status.phase === "exporting" || status.phase === "building";
+  const deploymentUrl = status.deployment?.status === "deployed" ? status.deployment.deploymentUrl : undefined;
+  const busy = starting || status.phase === "exporting" || status.phase === "building" || status.phase === "deploying";
   const saved = settings.saveStatus === "saved" && settings.applyStatus !== "applying";
   const update = (key: keyof typeof config, value: string) => {
     setError(null);
@@ -35,6 +36,17 @@ export function PublishingSection({ settings, setSettings }: {
     setError(null);
     try {
       const next = await window.exograph.publishing.build({ action, scope: publicationScope(settings) });
+      if (mounted.current && requestIdentity === identityRef.current) setStatus(next);
+    } catch (cause) { if (mounted.current && requestIdentity === identityRef.current) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (mounted.current) setStarting(false); }
+  };
+  const publish = async () => {
+    if (!status.preparedId || status.action !== "prepare" || status.phase !== "ready" || busy || !saved || status.deployment?.status === "deployed") return;
+    const requestIdentity = identity;
+    setStarting(true);
+    setError(null);
+    try {
+      const next = await window.exograph.publishing.publish({ scope: publicationScope(settings), preparedId: status.preparedId });
       if (mounted.current && requestIdentity === identityRef.current) setStatus(next);
     } catch (cause) { if (mounted.current && requestIdentity === identityRef.current) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (mounted.current) setStarting(false); }
@@ -73,17 +85,21 @@ export function PublishingSection({ settings, setSettings }: {
     <div className="dialog-card__actions">
       <button className="toolbar-button" data-testid="publishing-preview" disabled={busy || !saved} type="button" onClick={() => void run("preview")}>Build preview</button>
       <button className="toolbar-button" data-testid="publishing-prepare" disabled={busy || !saved} type="button" onClick={() => void run("prepare")}>Prepare publish</button>
-      {busy || status.previewUrl ? <button className="toolbar-button" type="button" onClick={() => action(() => window.exograph.publishing.stop())}>{busy ? "Cancel build" : "Stop preview"}</button> : null}
+      <button className="toolbar-button" data-testid="publishing-publish" disabled={busy || !saved || status.phase !== "ready" || status.action !== "prepare" || !status.preparedId || status.deployment?.status === "deployed"} type="button" onClick={() => void publish()}>Publish prepared site</button>
+      {busy || status.previewUrl ? <button className="toolbar-button" type="button" onClick={() => action(() => window.exograph.publishing.stop())}>{status.phase === "deploying" ? "Stop waiting" : busy ? "Cancel build" : "Stop preview"}</button> : null}
     </div>
-    <p className="dialog-card__hint">Prepare publish creates a site artifact for review. Deployment is a separate step.</p>
+    <p className="dialog-card__hint">Prepare publish creates the site for review. Publish prepared site deploys that exact snapshot through your Quartz project’s configured workflow.</p>
     <div role="status" aria-live="polite" data-testid="publishing-status">
       {status.phase === "exporting" ? "Preparing notes…" : status.phase === "building" ? "Building site…" : null}
+      {status.phase === "deploying" ? "Publishing site… Stopping the local wait does not cancel a dispatched remote workflow; check its status before publishing again." : null}
       {status.phase === "ready" ? <>
-        <p>{status.action === "prepare" ? "Site prepared. It has not been deployed." : "Preview ready."}</p>
+        <p>{status.deployment?.status === "deployed" ? "Site published." : status.action === "prepare" ? "Site prepared. It has not been deployed." : "Preview ready."}</p>
         {status.previewUrl ? <button className="toolbar-button" type="button" data-testid="publishing-open-preview" onClick={() => action(() => window.exograph.shell.openExternal(status.previewUrl!))}>Open preview</button> : null}
         <button className="toolbar-button" type="button" onClick={() => action(() => window.exograph.publishing.revealOutput())}>Show site files</button>
       </> : null}
     </div>
+    {status.deployment?.status === "setup-required" ? <p role="alert">Publishing setup required: {status.deployment.message}</p> : null}
+    {deploymentUrl ? <button className="toolbar-button" data-testid="publishing-open-site" type="button" onClick={() => action(() => window.exograph.shell.openExternal(deploymentUrl))}>Open published site</button> : null}
     {error || status.error ? <p role="alert" className="dialog-card__status--error">{error ?? status.error}</p> : null}
     {status.diagnostics.length ? <details><summary>{status.diagnostics.length} publication notice{status.diagnostics.length === 1 ? "" : "s"}</summary>
       <ul>{status.diagnostics.map((diagnostic, index) => <li key={index}>{diagnostic.path}: {diagnostic.message}</li>)}</ul>

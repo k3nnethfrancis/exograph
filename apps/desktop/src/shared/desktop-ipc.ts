@@ -9,6 +9,7 @@ type ShellApi = DesktopApi["shell"];
 export interface DesktopInvokeHandlers {
   "publishing:get-status": DesktopApi["publishing"]["getStatus"];
   "publishing:build": DesktopApi["publishing"]["build"];
+  "publishing:publish": DesktopApi["publishing"]["publish"];
   "publishing:stop": DesktopApi["publishing"]["stop"];
   "publishing:reveal-output": DesktopApi["publishing"]["revealOutput"];
   "workspace:get-model": WorkspaceApi["getModel"];

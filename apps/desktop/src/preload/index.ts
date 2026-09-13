@@ -30,6 +30,7 @@ const api: DesktopApi = {
   publishing: {
     getStatus: () => invokeDesktop("publishing:get-status"),
     build: (input) => invokeDesktop("publishing:build", input),
+    publish: (input) => invokeDesktop("publishing:publish", input),
     stop: () => invokeDesktop("publishing:stop"),
     revealOutput: () => invokeDesktop("publishing:reveal-output"),
     onStatus: (callback) => {
