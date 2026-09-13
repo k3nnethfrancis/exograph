@@ -69,10 +69,12 @@ async function repairGeneratedLinks(root, site, require) {
   }
 }
 
-async function run(script, args, cwd) {
-  // Stock yargs detects Electron as an application. Supply ordinary Node argv explicitly.
+async function run(script, args, cwd, stockCli = false) {
+  // Only stock yargs needs Electron argv normalization. Hooks use normal Node
+  // execution so util.parseArgs sees the script name at its expected offset.
   await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--input-type=module", "--eval", "process.defaultApp=true;process.argv=JSON.parse(process.env.EXOGRAPH_QUARTZ_ARGV);await import(process.env.EXOGRAPH_QUARTZ_ENTRY)"], {
+    const invocation = stockCli ? ["--input-type=module", "--eval", "process.defaultApp=true;process.argv=JSON.parse(process.env.EXOGRAPH_QUARTZ_ARGV);await import(process.env.EXOGRAPH_QUARTZ_ENTRY)"] : [script, ...args];
+    const child = spawn(process.execPath, invocation, {
       cwd, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", TZ: "UTC", EXOGRAPH_QUARTZ_ENTRY: pathToFileURL(script).href,
         EXOGRAPH_QUARTZ_ARGV: JSON.stringify([process.execPath, script, ...args]) }, stdio: ["ignore", "pipe", "pipe"],
     });
@@ -167,7 +169,7 @@ try {
         await writeFile(target, `---\n${document.toString()}---\n${source.slice(header[0].length)}`);
       }
     }
-    await run(path.join(working, "quartz/bootstrap-cli.mjs"), ["build", "--directory", content, "--output", output], working);
+    await run(path.join(working, "quartz/bootstrap-cli.mjs"), ["build", "--directory", content, "--output", output], working, true);
     await repairGeneratedLinks(output, site, require);
   }
   if (JSON.stringify(before) !== JSON.stringify(await files(input))) throw new Error("The publication snapshot changed during the build.");

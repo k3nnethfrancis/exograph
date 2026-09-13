@@ -24,7 +24,9 @@ test("Publishing persists its folder, exports a private-safe snapshot, previews,
       await writeFile(path.join(notes, "secret.md"), "# PRIVATE_SECRET_SENTINEL\n");
       await writeFile(path.join(engine, "scripts/exograph-publish.mjs"), `
         import { readFile, mkdir, writeFile, readdir } from 'node:fs/promises';
-        const args=Object.fromEntries(Array.from({length:(process.argv.length-2)/2},(_,i)=>[process.argv[2+i*2],process.argv[3+i*2]]));
+        import {parseArgs} from 'node:util';
+        const {values}=parseArgs({options:Object.fromEntries(['input','output','site-url','action'].map(name=>[name,{type:'string'}]))});
+        const args=Object.fromEntries(Object.entries(values).map(([key,value])=>['--'+key,value]));
         const body=await readFile(args['--input']+'/index.md','utf8');
         const files=await readdir(args['--input']);
         if(files.includes('secret.md') || body.includes('secret.md')) throw new Error('Private reference reached adapter');

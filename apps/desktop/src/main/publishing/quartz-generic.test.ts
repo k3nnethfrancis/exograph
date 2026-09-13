@@ -1,9 +1,12 @@
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { buildQuartzSite } from "./quartz-build";
+import { publishingResource } from "./publishing-resources";
 
 const cleanup: string[] = [];
 afterEach(async () => { await Promise.all(cleanup.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -68,4 +71,16 @@ it.each([
   await writeFile(path.join(f.input, first), content); await writeFile(path.join(f.input, second), "# Second");
   await expect(f.build()).rejects.toThrow("Publication URL collision");
   await expect(readFile(path.join(f.output, "index.html"))).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it.each(["node", "electron"])("runs optional hooks with normal util.parseArgs semantics under %s", async runtime => {
+  const f = await fixture(false);
+  await mkdir(path.join(f.engine, "scripts"));
+  await writeFile(path.join(f.engine, "scripts/exograph-publish.mjs"), `import {parseArgs} from 'node:util';import {mkdir,writeFile} from 'node:fs/promises';
+    const {values}=parseArgs({options:Object.fromEntries(['input','output','site-url','action'].map(name=>[name,{type:'string'}]))});
+    if(!values.input||values.action!=='preview')throw new Error('Wrong hook arguments');
+    await mkdir(values.output);await writeFile(values.output+'/index.html',values['site-url']);`);
+  const executable = runtime === "electron" ? createRequire(import.meta.url)("electron") as string : process.execPath;
+  await promisify(execFile)(executable, [await publishingResource("quartz-build.mjs"), "--engine", f.engine, "--input", f.input, "--output", f.output, "--site-url", "https://site.example/base/", "--action", "preview"], { env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, timeout: 20_000 });
+  expect(await readFile(path.join(f.output, "index.html"), "utf8")).toBe("https://site.example/base/");
 });
