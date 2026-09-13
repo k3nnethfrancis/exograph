@@ -19,7 +19,7 @@ async function fixture(custom: boolean, unlisted = true) {
     const dependencyRoot = path.resolve(path.dirname(coreRequire.resolve(dependency)), "..");
     await symlink(dependencyRoot, path.join(engine, "node_modules", dependency), "dir");
   }
-  await writeFile(path.join(engine, "node_modules/@quartz-community/utils/package.json"), '{"type":"module","exports":"./index.js"}');
+  await writeFile(path.join(engine, "node_modules/@quartz-community/utils/package.json"), '{"type":"module","exports":{".":{"import":"./index.js"}}}');
   await writeFile(path.join(engine, "node_modules/@quartz-community/utils/index.js"), 'export const slugifyFilePath = value => value.toLowerCase().replace(/\\s/g,"-").replace(/\\.md$/,"");');
   await writeFile(path.join(engine, "package.json"), '{"name":"quartz","version":"5.0.0","type":"module"}');
   const config = JSON.stringify({ configuration: { pageTitle: custom ? "My custom theme" : "Quartz 5", baseUrl: "quartz.jzhao.xyz", analytics: { provider: "plausible" }, theme: { colors: { custom: "red" } } }, plugins: [{ source: "@quartz-community/crawl-links", options: { markdownLinkResolution: "shortest", externalLinkIcon: false } }, ...(unlisted ? [{ source: "@quartz-community/unlisted-pages" }] : []), { source: "./custom", options: { retained: true } }] });

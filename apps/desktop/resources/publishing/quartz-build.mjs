@@ -107,7 +107,18 @@ try {
     const require = createRequire(path.join(engine, "package.json"));
     let YAML;
     try { YAML = require("yaml"); } catch { throw new Error("Install the Quartz project's dependencies before building (npm ci in that project)."); }
-    const { slugifyFilePath } = await import(pathToFileURL(require.resolve("@quartz-community/utils")).href);
+    working = await mkdtemp(path.join(path.dirname(output), ".quartz-work-"));
+    for (const entry of await readdir(engine, { withFileTypes: true })) {
+      if ([".git", "content", "public", "quartz.config.yaml", "quartz.config.default.yaml", "quartz.plugins.json", "quartz.plugins.default.json"].includes(entry.name)) continue;
+      const source = path.join(engine, entry.name), target = path.join(working, entry.name);
+      if (entry.name === "quartz") await cp(source, target, { recursive: true, filter: file => !file.split(path.sep).includes(".quartz-cache") });
+      else await symlink(source, target, entry.isDirectory() ? "dir" : "file");
+    }
+    // Resolve the engine's ESM import conditions from its temporary build context.
+    const importDirectory = await mkdtemp(path.join(working, ".exograph-import-"));
+    const importModule = path.join(importDirectory, "utils.mjs");
+    await writeFile(importModule, 'export { slugifyFilePath } from "@quartz-community/utils";');
+    const { slugifyFilePath } = await import(pathToFileURL(importModule).href);
     const routes = new Map();
     const register = (route, source) => {
       const normalized = route.replace(/\/index(?:\.html)?$/, "").replace(/\.html$/, "");
@@ -142,13 +153,6 @@ try {
     const plugin = name => config.plugins.find(entry => new RegExp(`(?:@quartz-community/|github:quartz-community/)${name}(?:#.*)?$`).test(sourceName(entry)) && entry.enabled !== false);
     const links = plugin("crawl-links");
     if (links) links.options = { ...links.options, markdownLinkResolution: "relative" };
-    working = await mkdtemp(path.join(path.dirname(output), ".quartz-work-"));
-    for (const entry of await readdir(engine, { withFileTypes: true })) {
-      if ([".git", "content", "public", "quartz.config.yaml", "quartz.config.default.yaml", "quartz.plugins.json", "quartz.plugins.default.json"].includes(entry.name)) continue;
-      const source = path.join(engine, entry.name), target = path.join(working, entry.name);
-      if (entry.name === "quartz") await cp(source, target, { recursive: true, filter: file => !file.split(path.sep).includes(".quartz-cache") });
-      else await symlink(source, target, entry.isDirectory() ? "dir" : "file");
-    }
     await writeFile(path.join(working, "quartz.config.yaml"), YAML.stringify(config));
     const content = path.join(working, "content");
     await cp(input, content, { recursive: true, preserveTimestamps: true });
