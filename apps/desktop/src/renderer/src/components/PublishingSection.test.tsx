@@ -8,7 +8,7 @@ let mounted: ReactTestRenderer | undefined;
 let receive: (status: PublishingStatus) => void;
 const publish = vi.fn();
 const build = vi.fn();
-const settings = { workspaceRoot: "/workspace", noteRoots: ["/workspace/notes"], publishing: { publicationDirectory: "/workspace/notes/public", engineDirectory: "/engine", siteUrl: "https://example.com/" }, saveStatus: "saved", applyStatus: "applied" } as WorkspaceSettingsDialogState;
+const settings = { workspaceRoot: "/workspace", noteRoots: ["/workspace/notes"], publishing: { publicationDirectory: "/workspace/notes/public", engineDirectory: "/engine", siteUrl: "https://example.com/", destinationRepository: "author/site" }, saveStatus: "saved", applyStatus: "applied" } as WorkspaceSettingsDialogState;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("window", { exograph: { publishing: {

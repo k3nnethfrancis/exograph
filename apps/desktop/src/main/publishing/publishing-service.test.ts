@@ -72,7 +72,7 @@ it("runs a real fixed adapter with literal arguments and rejects false success",
   await buildQuartzSite(input);
   expect(await readFile(path.join(output, "index.html"), "utf8")).toBe(input.siteUrl);
   await writeFile(adapter, `console.log(JSON.stringify({ok:true,outputPath:'/wrong',action:'prepare'}));`);
-  await expect(buildQuartzSite({ ...input, outputDirectory: path.join(f.temp, "other") })).rejects.toThrow("invalid build receipt");
+  await expect(buildQuartzSite({ ...input, outputDirectory: path.join(f.temp, "other") })).rejects.toThrow("Quartz build failed");
 });
 
 it("terminates a running real adapter when cancelled", async () => {

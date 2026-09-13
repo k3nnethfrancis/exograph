@@ -478,6 +478,7 @@ function normalizePublishingSettings(value: unknown): WorkspaceSettings["publish
     publicationDirectory: typeof input.publicationDirectory === "string" ? input.publicationDirectory.trim() : "",
     engineDirectory: typeof input.engineDirectory === "string" ? input.engineDirectory.trim() : "",
     siteUrl: typeof input.siteUrl === "string" ? input.siteUrl.trim() : "",
+    destinationRepository: typeof input.destinationRepository === "string" ? input.destinationRepository.trim() : "",
   };
 }
 

@@ -1,8 +1,10 @@
+import { commandEnvironment } from "../command/command-environment";
 import { spawn } from "node:child_process";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { PublicationAction } from "../../shared/api";
 import { within } from "./preview-server";
+import { publishingResource } from "./publishing-resources";
 
 export interface QuartzBuildInput {
   engineDirectory: string;
@@ -15,14 +17,13 @@ export interface QuartzBuildInput {
 
 /** Executes the selected, trusted site adapter, without a command shell or install. */
 export async function buildQuartzSite(input: QuartzBuildInput): Promise<void> {
-  const adapter = await realpath(path.join(input.engineDirectory, "scripts/exograph-publish.mjs"));
-  if (!within(input.engineDirectory, adapter)) throw new Error("The publishing adapter must belong to the selected Quartz project.");
+  const adapter = await publishingResource("quartz-build.mjs");
   const stdout = await new Promise<string>((resolve, reject) => {
     if (input.signal.aborted) { reject(new Error("Build cancelled.")); return; }
-    const child = spawn(process.execPath, [adapter, "--input", input.inputDirectory, "--output", input.outputDirectory,
+    const child = spawn(process.execPath, [adapter, "--engine", input.engineDirectory, "--input", input.inputDirectory, "--output", input.outputDirectory,
       "--site-url", input.siteUrl, "--action", input.action], {
       cwd: input.engineDirectory,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      env: { ...commandEnvironment(), ELECTRON_RUN_AS_NODE: "1" },
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
     });

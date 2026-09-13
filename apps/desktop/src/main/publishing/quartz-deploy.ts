@@ -1,15 +1,17 @@
+import { commandEnvironment } from "../command/command-environment";
 import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { realpath } from "node:fs/promises";
-import path from "node:path";
 import { promisify } from "node:util";
 import type { PublicationSnapshot } from "@exograph/core";
 import type { PublicationDeployResult } from "../../shared/api";
-import { within } from "./preview-server";
+import { publishingResource } from "./publishing-resources";
 export type { PublicationDeployResult } from "../../shared/api";
 
 export interface PublicationDeployInput {
   engineDirectory: string;
+  repository: string;
+  engineRepository: string;
   inputDirectory: string;
   snapshotHash: string;
   engineCommit: string;
@@ -42,22 +44,28 @@ export async function readPublicationEngineCommit(engineDirectory: string): Prom
   }
 }
 
+/** The user's configured origin supplies the immutable engine's remote owner. */
+export async function readPublicationEngineRepository(engineDirectory: string): Promise<string> {
+  const remote = (await promisify(execFile)("git", ["-C", engineDirectory, "remote", "get-url", "origin"], { timeout: 15_000 })).stdout.trim();
+  const match = remote.match(/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/);
+  if (!match) throw new Error("Set the Quartz project's Git origin to its GitHub repository before publishing.");
+  return match[1]!;
+}
+
 /** Explicit user-invoked deployment only. A prepared build never calls this adapter. */
 export async function deployQuartzSite(input: PublicationDeployInput): Promise<PublicationDeployResult> {
   if (!/^[a-f0-9]{64}$/.test(input.snapshotHash) || !/^[a-f0-9]{40}$/.test(input.engineCommit)) throw new Error("Invalid prepared publication identity.");
   if (await readPublicationEngineCommit(input.engineDirectory) !== input.engineCommit) throw new Error("Quartz changed since preparation. Prepare the site again.");
-  let adapter: string;
-  try { adapter = await realpath(path.join(input.engineDirectory, "scripts/exograph-deploy.mjs")); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "setup-required", message: "This Quartz project has no publishing adapter. Configure its deployment workflow first." };
-    throw error;
-  }
-  if (!within(await realpath(input.engineDirectory), adapter)) throw new Error("The deployment adapter must belong to the selected Quartz project.");
+  if (await readPublicationEngineRepository(input.engineDirectory) !== input.engineRepository) throw new Error("The Quartz GitHub origin changed. Prepare the site again.");
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository)) throw new Error("Choose a destination repository in owner/repository format.");
+  const adapter = await publishingResource("quartz-deploy.mjs");
+  const workflow = await publishingResource("github-pages.yml");
+  const buildScript = await publishingResource("quartz-build.mjs");
   const result = await new Promise<{ stdout: string; code: number | null }>((resolve, reject) => {
     if (input.signal.aborted) { reject(new Error("Publishing cancelled before deployment.")); return; }
-    const child = spawn(process.execPath, [adapter, "--input", input.inputDirectory, "--snapshot-hash", input.snapshotHash,
+    const child = spawn(process.execPath, [adapter, "--engine", input.engineDirectory, "--repository", input.repository, "--engine-repository", input.engineRepository, "--workflow", workflow, "--build-script", buildScript, "--input", input.inputDirectory, "--snapshot-hash", input.snapshotHash,
       "--engine-commit", input.engineCommit, "--site-url", input.siteUrl], {
-      cwd: input.engineDirectory, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      cwd: input.engineDirectory, env: { ...commandEnvironment(), ELECTRON_RUN_AS_NODE: "1" },
       stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32",
     });
     let stdout = "";

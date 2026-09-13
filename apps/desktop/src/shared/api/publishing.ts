@@ -27,6 +27,7 @@ export function publicationScope(settings: PublishingScope): PublishingScope {
       publicationDirectory: settings.publishing.publicationDirectory.trim(),
       engineDirectory: settings.publishing.engineDirectory.trim(),
       siteUrl: settings.publishing.siteUrl.trim(),
+      destinationRepository: settings.publishing.destinationRepository?.trim() ?? "",
     } : undefined,
   };
 }

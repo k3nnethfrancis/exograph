@@ -1,108 +1,110 @@
 # Publishing a folder of notes
 
-Settings → Publishing selects a publication folder inside a Note Root, a Quartz
-project outside all Note Roots, and the site's URL. These settings belong to the
-Workspace and are saved with its other settings.
+Settings → Publishing selects a publication folder inside a Note Root, an
+installed Quartz 5 project outside your notes, the site's URL, and an optional
+GitHub destination repository in `owner/repository` format. Your Quartz project
+owns the design; Exograph owns the export, build runner, and deployment adapter.
+A vanilla Quartz 5 checkout works after its dependencies are installed with
+`npm ci`. No personal theme or deployment profile is required.
 
-**Build preview** flushes editor changes, exports a fresh publication snapshot,
-builds it with the selected site's adapter, and serves only the completed site on
-a loopback URL. Open preview opens that URL in the browser. The preview remains
-available when Settings closes; Stop preview, a publishing configuration change,
-a Workspace replacement, another build, or quitting Exograph stops it.
+**Build preview** saves editor changes, exports a fresh sanitized snapshot, and
+builds a temporary site served on a loopback URL. The preview remains available
+when Settings closes. Stop preview, a publishing configuration change, another
+build, workspace replacement, or quitting Exograph removes temporary artifacts.
 
-**Prepare publish** creates a fresh site artifact and exposes its folder for
-review. It does not deploy or contact GitHub Pages. Deployment of that reviewed
-snapshot is available through **Publish prepared site** after preparation with a clean, committed Quartz project. This explicit action verifies the source snapshot and pinned engine revision before invoking deployment. No build or deployment runs automatically on edits.
-Closing or replacing a preview removes its temporary files; prepared artifacts
-also last only until the next build, configuration change, or app exit. Source or engine changes require preparing and reviewing a fresh site. An uncommitted engine can still build locally, but cannot publish.
+**Prepare publish** builds a fresh site for review without contacting GitHub.
+**Publish prepared site** deploys that reviewed snapshot only after an explicit
+click. Publishing requires a clean committed Quartz project with a GitHub
+`origin`, a destination repository, and its reviewed workflow installation.
+Missing setup leaves local previews available. No publication runs automatically
+on edits; changed source bytes, engine commit/origin, or destination require a
+new preparation. Unrelated appearance and layout saves do not invalidate it.
 
-The export preserves public-to-public links and ordinary external URLs. Local
-references to private, excluded, ambiguous, or unavailable content are removed
-from output, with diagnostics. Source notes are unchanged. Draft eligibility,
-asset containment, and source/staged-byte verification belong to the Core
-publication exporter. An export or build error never becomes a successful
-publication. Changes observed during the build invalidate it; this verification
-does not lock external editors or promise a filesystem transaction.
+## Notes and themes
 
-## Site adapter
+Core selects eligible files and projects Markdown references before Quartz sees
+any content. Public links and external URLs remain; local references to private,
+excluded, ambiguous, or unavailable content lose their link while keeping the
+label. Source notes are unchanged. Drafts are excluded except `draft: true` with
+`preview: true`, which become accessible unlisted pages. See
+[the export contract](publication-export.md) for eligibility and diagnostics.
 
-The selected Quartz project supplies `scripts/exograph-publish.mjs`, its installed
-dependencies, and its site design. Exograph invokes it using its Node runtime and
-an argument array, with no command shell and no dependency installation:
+The default runner reads Quartz 5 YAML or legacy JSON configuration, preserves
+the site's title, colors, plugins, and custom files, and builds in a temporary
+working directory. It applies the configured site URL, disables analytics for
+preview, and sets standard CrawlLinks resolution to relative because Core has
+already resolved local references. Unlisted pages require the enabled Quartz
+`unlisted-pages` plugin; shared previews clear `draft` only in the derivative
+build input. Stock generated links to absent unlisted-only folders/tags become
+readable text, and empty folder entries disappear. Content indexing, feeds,
+backlinks, and listings follow Quartz's unlisted filtering. The original engine
+configuration and Core snapshot are unchanged.
 
-```
-node scripts/exograph-publish.mjs --input <snapshot/content> --output <fresh/site> --site-url <url> --action preview|prepare
-```
+A customized project may optionally provide `scripts/exograph-publish.mjs`.
+Exograph invokes this fixed hook with `--input`, `--output`, `--site-url`, and
+`--action preview|prepare`. The hook must build only the supplied sanitized
+content, honor the site URL and unlisted semantics, preserve input bytes, and
+write a fresh output directory with `index.html`. Exit nonzero on failure and
+send progress to stderr. This hook owns custom compatibility such as legacy URL
+aliases; it is never required of a vanilla project.
 
-The adapter must build only the supplied sanitized content, avoid mutating it,
-write a fresh output directory including `index.html`, and exit nonzero on
-failure. Standard output is one JSON object:
-
-```json
-{"ok":true,"outputPath":"<exact requested output>","action":"preview"}
-```
-
-Additional receipt fields are allowed. Progress and failure detail belong on
-standard error. Build and deployment receipts belong outside the public output.
-The project is trusted executable code selected by the user; staging its input
-is not an operating-system sandbox for that code. Preview binds only to
-`127.0.0.1`, rejects foreign Host headers and path/symlink escapes, and serves
-neither source snapshots nor private Core receipts.
-
-An optional `exograph-publishing.json` declares exact generated root-relative
-routes needed by authored links, such as feeds or folder pages:
+An optional `exograph-publishing.json` declares exact generated routes for
+Core's resolver, for example:
 
 ```json
 {"schemaVersion":1,"generatedRoutes":["index.xml","sitemap.xml","tags"]}
 ```
 
-These routes are passed to Core's resolver. They do not make a private source
-note public or allow a generic fallback for every unresolved link. The site's
-adapter owns compatibility between the generated route list and its output.
+These routes do not make private notes public or permit arbitrary missing-link
+fallback. The theme owns compatibility between this list and generated output.
 
-Builds have a five-minute timeout, bounded process output, and cancellation of
-the child process group. Context changes discard late results from the previous
-Workspace. Build requests compare the publication configuration and Note Root
-scope; unrelated layout or appearance saves do not invalidate them. Private snapshots and receipts live under desktop user data, outside
-all Note Roots; a configuration that cannot maintain that separation is rejected.
+The selected engine is trusted executable code. Temporary input separation is
+not an operating-system sandbox. Core checks source and staged bytes before and
+after the build; it does not lock external editors. Receipts stay outside the
+web root. Preview serves only generated files on `127.0.0.1`, rejects foreign
+Host headers, and confines paths and symlinks. Builds have a five-minute timeout
+and process-group cancellation; stale completions cannot replace current state.
+
+## GitHub Pages setup
+
+The destination repository keeps its site administration on `main` and sanitized
+notes/assets under `garden/` on the ordinary `publication` branch. Exograph
+creates each publication commit as a child of the preceding publication (or
+`main` initially), replacing the content tree so removed notes disappear. It
+uses a normal fast-forward push. Concurrent updates are rejected without force
+pushes or automatic retries. The user's vault Git history is never read.
+
+Install these reviewed Exograph resources on the destination's `main` branch:
+
+| Exograph resource in `apps/desktop/resources/publishing/` | Destination path |
+| --- | --- |
+| `github-pages.yml` | `.github/workflows/exograph-publish.yml` |
+| `quartz-build.mjs` | `.github/scripts/exograph-quartz-build.mjs` |
+
+Enable GitHub Pages with GitHub Actions and authenticate `gh` locally for the
+destination. A private engine repository needs a destination secret named
+`EXOGRAPH_ENGINE_TOKEN` with read access to that engine. The engine's reviewed
+commit must be pushed to its GitHub `origin` before publishing.
+
+Exograph checks the installed workflow and runner bytes before uploading the
+snapshot. A missing or changed setup reports **setup required**, with no upload.
+Updating the app's publishing contract may require reviewing and updating those
+two destination files. The workflow checks out the exact publication and engine
+SHAs, installs the engine dependencies, runs the same generic runner, deploys
+Pages, and records a receipt. Success requires that completed receipt to match
+the snapshot, engine, run, and configured site URL; dispatch alone is not success.
+
+The twenty-minute local wait can be stopped, but a dispatched workflow may still
+finish remotely. Check GitHub before trying again. No automatic deployment retry
+occurs, and a confirmed prepared artifact cannot be deployed twice.
 
 ## Verification
 
-`src/main/publishing/publishing-service.test.ts` covers real child processes,
-cancellation, preview containment, settings normalization, and stale export
-completion. `tests/e2e/settings-publishing.spec.ts` exercises real renderer,
-preload, main, Core export, filesystem, child-process, and HTTP boundaries with
-a deterministic site adapter. Actual Quartz visual/content parity is a separate
-site-level gate; the fixture adapter does not establish it.
-
-## Explicit deployment
-
-The trusted engine supplies `scripts/exograph-deploy.mjs` and its destination
-configuration. Exograph invokes this fixed adapter only after a Publish click:
-
-```
-node scripts/exograph-deploy.mjs --input <snapshot/content> --snapshot-hash <sha256> --engine-commit <40-character SHA> --site-url <url>
-```
-
-The snapshot hash is SHA256 of UTF-8 JSON for the path-sorted array of
-`{path,sha256}` entries, with POSIX relative paths, raw-byte file hashes, lexical
-JavaScript ordering, and no trailing newline. The adapter must validate the
-actual copied content against this hash before uploading it. The input is the
-sanitized content used for preparation; the pinned engine builds it remotely.
-Private receipts and source inventories must never enter that content.
-
-A missing adapter or destination workflow reports **setup required**, without
-claiming deployment. Exit 2 returns `{ok:false,status:"setup-required",message}`.
-Success requires exit 0 and `{ok:true,status:"deployed",deploymentUrl,
-snapshotCommit,engineCommit,runId}` after the actual Pages deployment completes;
-queued or merely dispatched workflows are not success. Progress uses stderr.
-
-Deployments have a twenty-minute local wait limit. **Stop waiting** terminates
-the local process group, but a dispatched remote workflow may still finish.
-Check the destination before publishing again. Exograph never retries a
-publication automatically, and a confirmed deployment cannot be repeated from
-the same prepared artifact. Prepare again for another explicit publication.
-
-Deployment adapter tests use local child processes and Git fixtures; service
-lifecycle tests use real Core snapshots with a fake deployment boundary. These
-checks establish the desktop contract without publishing any real site.
+The desktop tests exercise real child processes, Core snapshots, scope changes,
+cancellation, default/custom configuration, unlisted handling, and typed receipt
+validation. Neutral deployment tests use real bare Git repositories and fake
+GitHub responses to verify incremental history, deleted files, concurrent push
+rejection, and setup/receipt mismatches. Electron tests cover actual preload,
+main, Core, child, and HTTP boundaries, including an app-owned deployment adapter
+with isolated fake GitHub commands. Actual vanilla Quartz rendering and personal
+theme parity are separate real-engine gates; no test deploys a live site.

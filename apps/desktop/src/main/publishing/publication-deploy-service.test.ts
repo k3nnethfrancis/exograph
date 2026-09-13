@@ -21,20 +21,22 @@ async function fixture(operation: (input: PublicationDeployInput) => Promise<Pub
   await mkdir(engine);
   const file = path.join(notes, "index.md");
   await writeFile(file, "# Public site\n");
-  let settings = normalizeWorkspaceSettings({ workspaceRoot: temp, defaultTerminalCwd: temp, noteRoots: [notes], publishing: { publicationDirectory: notes, engineDirectory: engine, siteUrl: "https://example.com/" } })!;
+  let settings = normalizeWorkspaceSettings({ workspaceRoot: temp, defaultTerminalCwd: temp, noteRoots: [notes], publishing: { publicationDirectory: notes, engineDirectory: engine, siteUrl: "https://example.com/", destinationRepository: "author/site" } })!;
   let commit = originalCommit;
+  let repository = "author/theme";
   const service = new PublishingService({
     context: () => ({ settings, model: workspaceModelFromSettings(settings), revision: "any-settings-revision" }),
     stagingParent: path.join(temp, "staging"),
     capture: (model, publicationDirectory, stagingParent, generatedRoutes) => exportPublication({ model, publicationDirectory, stagingParent, generatedRoutes }),
     verify: verifyPublicationSnapshot,
     readEngineCommit: async () => commit,
+    readEngineRepository: async () => repository,
     build: async ({ outputDirectory }) => { await mkdir(outputDirectory); await writeFile(path.join(outputDirectory, "index.html"), "built public site"); },
     deploy,
     publishStatus: vi.fn(),
   });
   cleanups.push(() => service.stop());
-  return { service, deploy, file, settings, setCommit: (value: string) => { commit = value; }, changeScope: () => { settings = { ...settings, publishing: { ...settings.publishing!, siteUrl: "https://replacement.example/" } }; service.updateContext(); } };
+  return { service, deploy, file, settings, setRepository: (value: string) => { repository = value; }, setDestination: (value: string) => { settings = { ...settings, publishing: { ...settings.publishing!, destinationRepository: value } }; service.updateContext(); }, setCommit: (value: string) => { commit = value; }, changeScope: () => { settings = { ...settings, publishing: { ...settings.publishing!, siteUrl: "https://replacement.example/" } }; service.updateContext(); } };
 }
 
 it("requires explicit publication of the exact prepared id and records a confirmed deployment once", async () => {
@@ -90,4 +92,22 @@ it("ignores a late remote completion after publication scope replacement", async
   expect(result.phase).toBe("idle");
   expect(result.deployment).toBeUndefined();
   expect(f.service.getStatus().preparedId).toBeUndefined();
+});
+
+it("rejects an engine origin changed after preparation and invalidates a changed destination", async () => {
+  const f = await fixture();
+  const prepared = await f.service.build({ scope: f.settings, action: "prepare" });
+  f.setRepository("another/theme");
+  const result = await f.service.publish({ scope: f.settings, preparedId: prepared.preparedId! });
+  expect(result.error).toContain("origin changed"); expect(f.deploy).not.toHaveBeenCalled();
+  f.setDestination("another/site");
+  expect(f.service.getStatus().preparedId).toBeUndefined();
+  await expect(f.service.publish({ scope: f.settings, preparedId: prepared.preparedId! })).rejects.toThrow("Publication settings");
+});
+it("keeps local preparation available without a deployment destination", async () => {
+  const f = await fixture(); f.setDestination("");
+  const scope = { ...f.settings, publishing: { ...f.settings.publishing!, destinationRepository: "" } };
+  const result = await f.service.build({ scope, action: "prepare" });
+  expect(result).toMatchObject({ phase: "ready", deployment: { status: "setup-required" } });
+  expect(result.preparedId).toBeUndefined(); expect(f.deploy).not.toHaveBeenCalled();
 });

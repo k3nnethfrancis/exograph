@@ -25,6 +25,7 @@ export interface WorkspaceModel {
 }
 
 export interface PublishingSettings {
+  destinationRepository?: string;
   publicationDirectory: string;
   engineDirectory: string;
   siteUrl: string;

@@ -76,11 +76,16 @@ export function PublishingSection({ settings, setSettings }: {
         <input className="dialog-card__input" data-testid="publishing-engine" value={config.engineDirectory} onChange={(event) => update("engineDirectory", event.target.value)} />
         <button className="toolbar-button" type="button" onClick={() => void choose("engineDirectory")}>Select</button>
       </div>
-      <small>The site’s design and build tools. Keep this project outside your notes folders.</small>
+      <small>An installed Quartz 5 project with your theme and configuration. Keep it outside your notes folders.</small>
     </label>
     <label className="dialog-field">
       <span className="dialog-field__label">Site URL</span>
       <input className="dialog-card__input" data-testid="publishing-site-url" placeholder="https://example.com" type="url" value={config.siteUrl} onChange={(event) => update("siteUrl", event.target.value)} />
+    </label>
+    <label className="dialog-field">
+      <span className="dialog-field__label">Destination repository</span>
+      <input className="dialog-card__input" data-testid="publishing-repository" placeholder="owner/repository" value={config.destinationRepository ?? ""} onChange={(event) => update("destinationRepository", event.target.value)} />
+      <small>The GitHub repository for your website. Publishing uses its reviewed GitHub Pages workflow and publication branch.</small>
     </label>
     <div className="dialog-card__actions">
       <button className="toolbar-button" data-testid="publishing-preview" disabled={busy || !saved} type="button" onClick={() => void run("preview")}>Build preview</button>
@@ -88,7 +93,7 @@ export function PublishingSection({ settings, setSettings }: {
       <button className="toolbar-button" data-testid="publishing-publish" disabled={busy || !saved || status.phase !== "ready" || status.action !== "prepare" || !status.preparedId || status.deployment?.status === "deployed"} type="button" onClick={() => void publish()}>Publish prepared site</button>
       {busy || status.previewUrl ? <button className="toolbar-button" type="button" onClick={() => action(() => window.exograph.publishing.stop())}>{status.phase === "deploying" ? "Stop waiting" : busy ? "Cancel build" : "Stop preview"}</button> : null}
     </div>
-    <p className="dialog-card__hint">Prepare publish creates the site for review. Publish prepared site deploys that exact snapshot through your Quartz project’s configured workflow.</p>
+    <p className="dialog-card__hint">Prepare publish creates the site for review. Publish prepared site deploys that exact snapshot through the destination repository’s configured workflow.</p>
     <div role="status" aria-live="polite" data-testid="publishing-status">
       {status.phase === "exporting" ? "Preparing notes…" : status.phase === "building" ? "Building site…" : null}
       {status.phase === "deploying" ? "Publishing site… Stopping the local wait does not cancel a dispatched remote workflow; check its status before publishing again." : null}

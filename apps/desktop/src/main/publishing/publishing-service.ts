@@ -4,7 +4,7 @@ import path from "node:path";
 import type { PublicationSnapshot, WorkspaceModel, WorkspaceSettings, WorkspaceSettingsSnapshot } from "@exograph/core";
 import { publicationScope, type PublishingBuildRequest, type PublicationAction, type PublishingStatus, type PublicationDeployResult } from "../../shared/api";
 import { buildQuartzSite, type QuartzBuildInput } from "./quartz-build";
-import { deployQuartzSite, readPublicationEngineCommit, publicationSnapshotDigest } from "./quartz-deploy";
+import { deployQuartzSite, readPublicationEngineCommit, readPublicationEngineRepository, publicationSnapshotDigest } from "./quartz-deploy";
 import { servePublication, within } from "./preview-server";
 
 interface PublishingContext extends WorkspaceSettingsSnapshot { model: WorkspaceModel }
@@ -17,6 +17,7 @@ interface PublishingServiceOptions {
   build?: (input: QuartzBuildInput) => Promise<void>;
   deploy?: typeof deployQuartzSite;
   readEngineCommit?: typeof readPublicationEngineCommit;
+  readEngineRepository?: typeof readPublicationEngineRepository;
 }
 
 export class PublishingService {
@@ -27,7 +28,7 @@ export class PublishingService {
   private pending: Promise<PublishingStatus> | null = null;
   private retainedRoot: string | null = null;
   private preview: { close: () => void } | null = null;
-  private prepared: { id: string; snapshot: PublicationSnapshot; engineDirectory: string; engineCommit: string; siteUrl: string } | null = null;
+  private prepared: { id: string; snapshot: PublicationSnapshot; engineDirectory: string; engineCommit: string; engineRepository: string; repository: string; siteUrl: string } | null = null;
 
   constructor(private readonly options: PublishingServiceOptions) {}
 
@@ -112,10 +113,15 @@ export class PublishingService {
       const config = await validatePublishingSettings(context.settings, context.model, this.options.stagingParent);
       assertCurrent();
       let engineCommit: string | undefined;
+      let engineRepository: string | undefined;
       let deployment: PublicationDeployResult | undefined;
       if (action === "prepare") {
-        try { engineCommit = await (this.options.readEngineCommit ?? readPublicationEngineCommit)(config.engineDirectory); }
-        catch (error) { deployment = { status: "setup-required", message: `The site can be reviewed locally. Publishing requires a clean, committed Quartz project: ${error instanceof Error ? error.message : String(error)}` }; }
+        try {
+          if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository)) throw new Error("Choose a destination repository in owner/repository format.");
+          engineRepository = await (this.options.readEngineRepository ?? readPublicationEngineRepository)(config.engineDirectory);
+          engineCommit = await (this.options.readEngineCommit ?? readPublicationEngineCommit)(config.engineDirectory);
+        }
+        catch (error) { deployment = { status: "setup-required", message: `The site can be reviewed locally. Publishing setup: ${error instanceof Error ? error.message : String(error)}` }; }
       }
       assertCurrent();
       const generatedRoutes = await readGeneratedRoutes(config.engineDirectory);
@@ -140,11 +146,13 @@ export class PublishingService {
         this.preview = preview;
         previewUrl = preview.url;
       }
-      if (engineCommit) {
+      if (engineCommit && engineRepository) {
         try {
           if (await (this.options.readEngineCommit ?? readPublicationEngineCommit)(config.engineDirectory) !== engineCommit) throw new Error("Quartz changed during the build. Prepare a fresh site after committing the project.");
           assertCurrent();
-          this.prepared = { id: randomUUID(), snapshot, engineDirectory: config.engineDirectory, engineCommit, siteUrl: config.siteUrl };
+          if (await (this.options.readEngineRepository ?? readPublicationEngineRepository)(config.engineDirectory) !== engineRepository) throw new Error("The Quartz GitHub origin changed during preparation.");
+          assertCurrent();
+          this.prepared = { id: randomUUID(), snapshot, engineDirectory: config.engineDirectory, engineCommit, engineRepository, repository: config.repository, siteUrl: config.siteUrl };
         } catch (error) {
           assertCurrent();
           deployment = { status: "setup-required", message: error instanceof Error ? error.message : String(error) };
@@ -182,8 +190,10 @@ export class PublishingService {
       assertCurrent();
       if (await (this.options.readEngineCommit ?? readPublicationEngineCommit)(prepared.engineDirectory) !== prepared.engineCommit) throw new Error("Quartz changed after preparation. Prepare and review the site again.");
       assertCurrent();
+      if (await (this.options.readEngineRepository ?? readPublicationEngineRepository)(prepared.engineDirectory) !== prepared.engineRepository) throw new Error("The Quartz GitHub origin changed after preparation.");
+      assertCurrent();
       const deployment = await (this.options.deploy ?? deployQuartzSite)({
-        engineDirectory: prepared.engineDirectory, inputDirectory: prepared.snapshot.directory,
+        engineDirectory: prepared.engineDirectory, repository: prepared.repository, engineRepository: prepared.engineRepository, inputDirectory: prepared.snapshot.directory,
         snapshotHash: publicationSnapshotDigest(prepared.snapshot), engineCommit: prepared.engineCommit,
         siteUrl: prepared.siteUrl, signal,
       });
@@ -224,7 +234,7 @@ export async function validatePublishingSettings(settings: WorkspaceSettings, mo
   await mkdir(stagingParent, { recursive: true, mode: 0o700 });
   const canonicalStaging = await realpath(stagingParent);
   assertOutside(path.resolve(stagingParent), canonicalStaging);
-  return { publicationDirectory: config.publicationDirectory, engineDirectory, stagingParent: canonicalStaging, siteUrl: url.toString() };
+  return { publicationDirectory: config.publicationDirectory, engineDirectory, stagingParent: canonicalStaging, repository: config.destinationRepository?.trim() ?? "", siteUrl: url.toString() };
 }
 
 async function canonicalCreationPath(target: string): Promise<string> {
