@@ -12,6 +12,8 @@ files:
   - "!**/node_modules/**/prebuilds/!(darwin-${arch}){,/**}"
 
 extraResources:
+  - from: resources/publishing
+    to: publishing
   - from: ../../skills/find-and-connect-relevant-context
     to: skills/find-and-connect-relevant-context
 

@@ -1,3 +1,6 @@
+import type { PublishingApi } from "./api/publishing";
+export { publicationScope } from "./api/publishing";
+export type { PublishingStatus, PublicationAction, PublicationDiagnostic, PublishingBuildRequest, PublishingScope, PublicationDeployResult } from "./api/publishing";
 import type { WorkspaceFilesystemApi } from "./api/workspace-filesystem";
 import type { WorkspaceIndexApi } from "./api/workspace-index";
 import type { WorkspaceInvocationApi } from "./api/invocation-commands";
@@ -49,6 +52,7 @@ export interface DesktopApi {
   /** Present only in explicit test launches; absent from ordinary production. */
   test?: { graphHooks: true };
   workspace: WorkspaceSetupApi & WorkspaceIndexApi & WorkspaceFilesystemApi & WorkspaceInvocationApi;
+  publishing: PublishingApi;
   notes: NotesGraphApi;
   terminals: TerminalsApi;
   shell: ShellApi;

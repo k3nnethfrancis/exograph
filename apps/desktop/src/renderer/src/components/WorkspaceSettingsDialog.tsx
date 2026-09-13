@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type ComponentType, type Dispatch, type SetStateAction } from "react";
-import { Bot, FolderOpen, Keyboard, Palette, Search, TerminalSquare, X } from "lucide-react";
+import { Bot, Globe, FolderOpen, Keyboard, Palette, Search, TerminalSquare, X } from "lucide-react";
 import type { AgentCommand, IndexStatus, WorkspaceSettings } from "@exograph/core";
 import { normalizeDefaultAgentCommandId } from "@exograph/core/agent-command-configuration";
 import { defaultWorkspaceContentPolicy, repositoryWorkspaceContentPolicy } from "@exograph/core/workspace-content-policy";
@@ -18,6 +18,7 @@ import { AgentCommandConfigurator } from "./AgentCommandConfigurator";
 import { DefaultAgentSelector } from "./DefaultAgentSelector";
 import { OntologyReviewRow } from "./OntologyReviewRow";
 import { ExographMark } from "./ExographMark";
+import { PublishingSection } from "./PublishingSection";
 import { ShortcutsSection } from "./ShortcutsSection";
 
 interface WorkspaceSettingsDialogProps {
@@ -45,6 +46,7 @@ const SETTINGS_SECTIONS: Array<{
   { id: "graph", label: "Graph", description: "Navigation", icon: ExographMark },
   { id: "terminal", label: "Terminal", description: "Display", icon: TerminalSquare },
   { id: "shortcuts", label: "Shortcuts", description: "App commands", icon: Keyboard },
+  { id: "publishing", label: "Publishing", description: "Site and preview", icon: Globe },
   { id: "agents", label: "Agents", description: "@ mentions and commands", icon: Bot },
 ];
 
@@ -124,6 +126,7 @@ export function WorkspaceSettingsDialog({
             {settings.section === "graph" ? <GraphSection settings={settings} setSettings={setSettings} /> : null}
             {settings.section === "terminal" ? <TerminalSection settings={settings} setSettings={setSettings} /> : null}
             {settings.section === "shortcuts" ? <ShortcutsSection bindings={settings.shortcutBindings} onChange={(shortcutBindings) => setSettings((current) => current ? { ...current, shortcutBindings, saveStatus: "idle" } : current)} /> : null}
+            {settings.section === "publishing" ? <PublishingSection settings={settings} setSettings={setSettings} /> : null}
             {settings.section === "agents" ? <AgentsSection settings={settings} setSettings={setSettings} /> : null}
           </div>
         </div>
@@ -180,6 +183,7 @@ export function workspaceSettingsDialogIntroCopy(section: WorkspaceSettingsSecti
       : "Workspace changes are ready to apply.";
   }
 
+  if (section === "publishing") return "Build a website from a folder of notes.";
   if (section === "index") {
     return "Choose how Exograph searches this workspace.";
   }

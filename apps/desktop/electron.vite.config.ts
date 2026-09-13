@@ -1,4 +1,5 @@
 import path from "node:path";
+import { cp } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
@@ -29,7 +30,10 @@ export default defineConfig({
         },
       },
     },
-    plugins: [externalizeDepsPlugin({ exclude: ["@exograph/core"] })],
+    plugins: [externalizeDepsPlugin({ exclude: ["@exograph/core"] }), {
+      name: "publishing-resources",
+      closeBundle: () => cp(path.join(currentDirectory, "resources/publishing"), path.join(currentDirectory, "dist/publishing"), { recursive: true }),
+    }],
     resolve: {
       alias: {
         "@shared": path.resolve(currentDirectory, "src/shared"),

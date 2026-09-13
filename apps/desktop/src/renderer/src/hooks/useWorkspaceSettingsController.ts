@@ -194,6 +194,7 @@ export function useWorkspaceSettingsController(options: UseWorkspaceSettingsCont
       section,
       settingsRevision: snapshot.revision,
       ...structuralDraft,
+      publishing: settings.publishing,
       appearanceMode: settings.appearanceMode as AppearanceMode,
       colorThemeId: normalizeColorThemeId(settings.colorThemeId),
       editorFontSize: String(settings.editorFontSize),
@@ -529,6 +530,7 @@ export function workspaceSettingsFromDialog(
     searchEngine: options.includeStructural
       ? structuralSettings.searchEngine
       : currentSettings.searchEngine,
+    publishing: settingsDialog.publishing,
     appearanceMode: settingsDialog.appearanceMode,
     colorThemeId: normalizeColorThemeId(settingsDialog.colorThemeId),
     editorFontSize: clampNumber(Number(settingsDialog.editorFontSize), 11, 24),

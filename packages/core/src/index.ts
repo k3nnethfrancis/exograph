@@ -32,3 +32,5 @@ export * from "./search-provider";
 export * from "./command-protocol";
 
 export * from "./graph-traversal";
+
+export * from "./publication-export";

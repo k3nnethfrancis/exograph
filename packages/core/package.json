@@ -25,6 +25,11 @@
   "dependencies": {
     "@tobilu/qmd": "2.5.3",
     "gray-matter": "4.0.3",
+    "mdast-util-from-markdown": "2.0.3",
+    "parse5": "7.3.0",
     "yaml": "2.8.3"
+  },
+  "devDependencies": {
+    "@types/mdast": "4.0.4"
   }
 }
