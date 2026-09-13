@@ -73,6 +73,11 @@ test("Publishing persists its folder, exports a private-safe snapshot, previews,
     await page.getByTestId("workspace-settings-tab-publishing").click();
     await expect(page.getByTestId("publishing-folder")).toHaveValue(publication);
     await expect(page.getByTestId("publishing-site-url")).toHaveValue("https://updated.example/");
+  } catch (error) {
+    const activePage = relaunched?.page ?? fixture.page;
+    console.error("Publishing failure state", await activePage.evaluate(() => window.exograph.publishing.getStatus()).catch(String));
+    console.error("Publishing failure alerts", await activePage.getByRole("alert").allTextContents().catch(String));
+    throw error;
   } finally {
     await relaunched?.cleanup();
     await fixture.cleanup();
