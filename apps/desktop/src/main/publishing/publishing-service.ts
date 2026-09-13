@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { PublicationSnapshot, WorkspaceModel, WorkspaceSettings, WorkspaceSettingsSnapshot } from "@exograph/core";
-import { publicationScope, type PublishingBuildRequest, type PublicationAction, type PublishingStatus } from "../../shared/api";
+import { publicationScope, type PublishingBuildRequest, type PublicationAction, type PublishingStatus, type PublicationDeployResult } from "../../shared/api";
 import { buildQuartzSite, type QuartzBuildInput } from "./quartz-build";
+import { deployQuartzSite, readPublicationEngineCommit, publicationSnapshotDigest } from "./quartz-deploy";
 import { servePublication, within } from "./preview-server";
 
 interface PublishingContext extends WorkspaceSettingsSnapshot { model: WorkspaceModel }
@@ -13,6 +15,8 @@ interface PublishingServiceOptions {
   verify: (snapshot: PublicationSnapshot) => Promise<void>;
   publishStatus: (status: PublishingStatus) => void;
   build?: (input: QuartzBuildInput) => Promise<void>;
+  deploy?: typeof deployQuartzSite;
+  readEngineCommit?: typeof readPublicationEngineCommit;
 }
 
 export class PublishingService {
@@ -23,6 +27,7 @@ export class PublishingService {
   private pending: Promise<PublishingStatus> | null = null;
   private retainedRoot: string | null = null;
   private preview: { close: () => void } | null = null;
+  private prepared: { id: string; snapshot: PublicationSnapshot; engineDirectory: string; engineCommit: string; siteUrl: string } | null = null;
 
   constructor(private readonly options: PublishingServiceOptions) {}
 
@@ -39,10 +44,7 @@ export class PublishingService {
     this.updateContext();
     if (!input || (input.action !== "preview" && input.action !== "prepare")) throw new Error("Unknown publishing action.");
     const context = this.options.context();
-    let expectedKey: string;
-    try { expectedKey = JSON.stringify(publicationScope(input.scope)); }
-    catch { throw new Error("Invalid publication settings scope."); }
-    if (expectedKey !== contextKey(context)) throw new Error("Publication settings or Note Roots changed. Reopen Settings and review the current folders before building.");
+    this.assertScope(input.scope);
     if (this.pending) throw new Error("A publication build is already running.");
     this.invalidate();
     const generation = this.generation;
@@ -50,6 +52,25 @@ export class PublishingService {
     this.abort = controller;
     this.setStatus({ phase: "exporting", action: input.action, diagnostics: [] });
     const job = this.run(context, input.action, generation, controller.signal);
+    this.pending = job;
+    try { return await job; } finally {
+      if (this.pending === job) this.pending = null;
+      if (this.abort === controller) this.abort = null;
+    }
+  }
+
+  async publish(input: { scope: PublishingBuildRequest["scope"]; preparedId: string }): Promise<PublishingStatus> {
+    this.updateContext();
+    this.assertScope(input?.scope);
+    const prepared = this.prepared;
+    if (this.pending) throw new Error("A publication operation is already running.");
+    if (!prepared || input.preparedId !== prepared.id || this.status.phase !== "ready") throw new Error("Prepare and review a fresh site before publishing.");
+    if (this.status.deployment?.status === "deployed") throw new Error("This prepared site was already deployed. Prepare a fresh site to publish again.");
+    const generation = this.generation;
+    const controller = new AbortController();
+    this.abort = controller;
+    this.setStatus({ ...this.status, phase: "deploying", deployment: undefined });
+    const job = this.deployPrepared(prepared, generation, controller.signal);
     this.pending = job;
     try { return await job; } finally {
       if (this.pending === job) this.pending = null;
@@ -75,6 +96,7 @@ export class PublishingService {
     this.preview = null;
     const root = this.retainedRoot;
     this.retainedRoot = null;
+    this.prepared = null;
     if (root) void rm(root, { recursive: true, force: true }).catch(() => {});
     this.setStatus({ phase: "idle", diagnostics: [] });
   }
@@ -88,6 +110,13 @@ export class PublishingService {
     };
     try {
       const config = await validatePublishingSettings(context.settings, context.model, this.options.stagingParent);
+      assertCurrent();
+      let engineCommit: string | undefined;
+      let deployment: PublicationDeployResult | undefined;
+      if (action === "prepare") {
+        try { engineCommit = await (this.options.readEngineCommit ?? readPublicationEngineCommit)(config.engineDirectory); }
+        catch (error) { deployment = { status: "setup-required", message: `The site can be reviewed locally. Publishing requires a clean, committed Quartz project: ${error instanceof Error ? error.message : String(error)}` }; }
+      }
       assertCurrent();
       const generatedRoutes = await readGeneratedRoutes(config.engineDirectory);
       assertCurrent();
@@ -111,9 +140,19 @@ export class PublishingService {
         this.preview = preview;
         previewUrl = preview.url;
       }
+      if (engineCommit) {
+        try {
+          if (await (this.options.readEngineCommit ?? readPublicationEngineCommit)(config.engineDirectory) !== engineCommit) throw new Error("Quartz changed during the build. Prepare a fresh site after committing the project.");
+          assertCurrent();
+          this.prepared = { id: randomUUID(), snapshot, engineDirectory: config.engineDirectory, engineCommit, siteUrl: config.siteUrl };
+        } catch (error) {
+          assertCurrent();
+          deployment = { status: "setup-required", message: error instanceof Error ? error.message : String(error) };
+        }
+      }
       this.retainedRoot = snapshot.stagingRoot;
       retained = true;
-      this.setStatus({ phase: "ready", action, outputPath: output, previewUrl, diagnostics: snapshot.manifest.diagnostics });
+      this.setStatus({ phase: "ready", action, outputPath: output, previewUrl, preparedId: this.prepared?.id, deployment, diagnostics: snapshot.manifest.diagnostics });
     } catch (error) {
       if (generation === this.generation) {
         const diagnostics = error && typeof error === "object" && "diagnostics" in error && Array.isArray(error.diagnostics)
@@ -122,6 +161,36 @@ export class PublishingService {
       }
     } finally {
       if (snapshot && !retained) await rm(snapshot.stagingRoot, { recursive: true, force: true });
+    }
+    return this.status;
+  }
+
+  private assertScope(scope: PublishingBuildRequest["scope"]): void {
+    let expectedKey: string;
+    try { expectedKey = JSON.stringify(publicationScope(scope)); }
+    catch { throw new Error("Invalid publication settings scope."); }
+    if (expectedKey !== contextKey(this.options.context())) throw new Error("Publication settings or Note Roots changed. Reopen Settings and review the current folders before building.");
+  }
+
+  private async deployPrepared(prepared: NonNullable<PublishingService["prepared"]>, generation: number, signal: AbortSignal): Promise<PublishingStatus> {
+    const assertCurrent = () => {
+      this.updateContext();
+      if (signal.aborted || generation !== this.generation) throw new Error("Stopped waiting for publication. A remote deployment may still finish; check the deployment destination before trying again.");
+    };
+    try {
+      await this.options.verify(prepared.snapshot);
+      assertCurrent();
+      if (await (this.options.readEngineCommit ?? readPublicationEngineCommit)(prepared.engineDirectory) !== prepared.engineCommit) throw new Error("Quartz changed after preparation. Prepare and review the site again.");
+      assertCurrent();
+      const deployment = await (this.options.deploy ?? deployQuartzSite)({
+        engineDirectory: prepared.engineDirectory, inputDirectory: prepared.snapshot.directory,
+        snapshotHash: publicationSnapshotDigest(prepared.snapshot), engineCommit: prepared.engineCommit,
+        siteUrl: prepared.siteUrl, signal,
+      });
+      assertCurrent();
+      this.setStatus({ ...this.status, phase: "ready", deployment });
+    } catch (error) {
+      if (generation === this.generation) this.setStatus({ ...this.status, phase: "error", error: error instanceof Error ? error.message : String(error) });
     }
     return this.status;
   }
