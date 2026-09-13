@@ -448,6 +448,7 @@ export function normalizeWorkspaceSettings(input: Partial<WorkspaceSettings> | n
     ...(defaultAgentCommandId ? { defaultAgentCommandId } : {}),
     ...(agentInvocationPrompt ? { agentInvocationPrompt } : {}),
     ontologyDiscoveryPrompt,
+    publishing: normalizePublishingSettings(input.publishing),
     indexedRoots,
     contentPolicy: normalizeWorkspaceContentPolicy(input.contentPolicy),
     indexing,
@@ -467,6 +468,16 @@ export function normalizeWorkspaceSettings(input: Partial<WorkspaceSettings> | n
     exploreIndexSearchOnEnter: typeof input.exploreIndexSearchOnEnter === "boolean" ? input.exploreIndexSearchOnEnter : indexing.enabled && indexing.mode !== "off" && indexedRoots.length > 0,
     indexUpdateStrategy: input.indexUpdateStrategy === "manual" ? "manual" : "on-save",
     layout: normalizeWorkspaceLayout(input.layout),
+  };
+}
+
+function normalizePublishingSettings(value: unknown): WorkspaceSettings["publishing"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  return {
+    publicationDirectory: typeof input.publicationDirectory === "string" ? input.publicationDirectory.trim() : "",
+    engineDirectory: typeof input.engineDirectory === "string" ? input.engineDirectory.trim() : "",
+    siteUrl: typeof input.siteUrl === "string" ? input.siteUrl.trim() : "",
   };
 }
 

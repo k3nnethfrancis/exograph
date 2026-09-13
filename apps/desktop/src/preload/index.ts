@@ -27,6 +27,17 @@ window.addEventListener(
 
 const api: DesktopApi = {
   ...(process.env.EXOGRAPH_TEST === "1" ? { test: { graphHooks: true as const } } : {}),
+  publishing: {
+    getStatus: () => invokeDesktop("publishing:get-status"),
+    build: (input) => invokeDesktop("publishing:build", input),
+    stop: () => invokeDesktop("publishing:stop"),
+    revealOutput: () => invokeDesktop("publishing:reveal-output"),
+    onStatus: (callback) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: Awaited<ReturnType<DesktopApi["publishing"]["getStatus"]>>) => callback(status);
+      ipcRenderer.on("publishing:status", listener);
+      return () => ipcRenderer.removeListener("publishing:status", listener);
+    },
+  },
   workspace: {
     getModel: () => invokeDesktop("workspace:get-model"),
     getSettings: () => invokeDesktop("workspace:get-settings"),

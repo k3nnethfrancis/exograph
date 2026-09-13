@@ -24,7 +24,14 @@ export interface WorkspaceModel {
   searchEngine?: SearchEngine;
 }
 
+export interface PublishingSettings {
+  publicationDirectory: string;
+  engineDirectory: string;
+  siteUrl: string;
+}
+
 export interface WorkspaceSettings {
+  publishing?: PublishingSettings;
   /** Forward-compatible persisted settings are retained except explicit unsupported fields. */
   [key: string]: unknown;
   workspaceRoot: string;

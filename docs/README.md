@@ -12,6 +12,7 @@ contracts are linked from there.
 ## Use Exograph
 
 - [Using Exograph](using-exograph.md) — workspaces, Notes, navigation, panes, keyboard shortcuts, and daily work.
+- [Publishing](publishing.md) — folder exports, Quartz previews, and preparing a site for review.
 - [Search](search.md) — immediate search, optional QMD indexing, and recovery.
 - [Knowledge graph](knowledge-graph.md) — what the graph represents and what it deliberately does not.
 - [Agent invocations](document-agent-protocol.md) — inline `@` requests, review, durable response blocks, and session handoff.

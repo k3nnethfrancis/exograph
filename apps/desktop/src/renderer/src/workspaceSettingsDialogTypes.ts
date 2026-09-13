@@ -22,6 +22,7 @@ export function defaultIndexedRoot(path: string, index: number): IndexedRoot {
 }
 
 export interface WorkspaceSettingsDialogState {
+  publishing?: WorkspaceSettings["publishing"];
   section: WorkspaceSettingsSection;
   settingsRevision: WorkspaceSettingsRevision;
   workspaceRoot: string;

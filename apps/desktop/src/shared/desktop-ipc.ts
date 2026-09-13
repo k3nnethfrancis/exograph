@@ -7,6 +7,10 @@ type TerminalsApi = DesktopApi["terminals"];
 type ShellApi = DesktopApi["shell"];
 
 export interface DesktopInvokeHandlers {
+  "publishing:get-status": DesktopApi["publishing"]["getStatus"];
+  "publishing:build": DesktopApi["publishing"]["build"];
+  "publishing:stop": DesktopApi["publishing"]["stop"];
+  "publishing:reveal-output": DesktopApi["publishing"]["revealOutput"];
   "workspace:get-model": WorkspaceApi["getModel"];
   "workspace:get-settings": WorkspaceApi["getSettings"];
   "workspace:get-setup-state": WorkspaceApi["getSetupState"];
@@ -80,6 +84,7 @@ export interface DesktopInvokeHandlers {
 }
 
 export interface DesktopEventPayloads {
+  "publishing:status": Awaited<ReturnType<DesktopApi["publishing"]["getStatus"]>>;
   "workspace:changed": { rootPath: string; eventType: string; filePath: string | null };
   "workspace:index-sync-state": IndexSyncStateEvent;
   "workspace:graph-changed": { source: "ontology" };

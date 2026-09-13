@@ -5,6 +5,8 @@ import { appendFile, mkdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import {
+  exportPublication,
+  verifyPublicationSnapshot,
   createFolderWithIndex,
   DEFAULT_APPEARANCE_MODE,
   beginOnboardingProgress,
@@ -31,6 +33,8 @@ import {
 
 import type { DesktopEventChannel, DesktopEventPayloads } from "../shared/desktop-ipc";
 import type { WorkspaceSettingsSaveOutcome } from "../shared/api";
+import { PublishingService } from "./publishing/publishing-service";
+import { registerPublishingIpc } from "./publishing/publishing-ipc";
 import { InvocationRunner } from "./invocation/invocation-runner";
 import { awaitInvocationAwareQuit } from "./invocation/invocation-quit";
 import { AppLifecycleController } from "./app-lifecycle";
@@ -83,6 +87,7 @@ process.on("unhandledRejection", (reason) => {
 let appLifecycle: AppLifecycleController;
 let commandServerLifecycle: CommandServerLifecycle;
 let workspaceModel: WorkspaceModel;
+let publishingService: PublishingService | undefined;
 let workspaceSettings: WorkspaceSettings | null = null;
 let workspaceSettingsRevision: string | null = null;
 let workspaceConfig: WorkspaceConfigStore;
@@ -353,6 +358,18 @@ function isPathWithin(rootPath: string, candidatePath: string): boolean {
 }
 
 function registerIpcHandlers() {
+  publishingService = new PublishingService({
+    context: () => ({ ...currentSnapshot(), model: workspaceModel }),
+    stagingParent: path.join(app.getPath("userData"), "publishing"),
+    capture: async (model, publicationDirectory, stagingParent, generatedRoutes) => {
+      await appLifecycle.withDocumentsFlushed(async () => {});
+      if (model !== workspaceModel) throw new Error("Workspace changed before publication export.");
+      return exportPublication({ model, publicationDirectory, stagingParent, generatedRoutes });
+    },
+    verify: verifyPublicationSnapshot,
+    publishStatus: (status) => sendToRenderer("publishing:status", status),
+  });
+  registerPublishingIpc(publishingService);
   registerWorkspaceIpcHandlers({
     activateWorkspace: async (input) => {
       return switchWorkspace(input.workspaceId, input.expectedRevision);
@@ -847,6 +864,7 @@ app.whenReady().then(async () => {
       workspaceSettings = active.settings;
       workspaceSettingsRevision = active.revision;
       workspaceModel = active.model;
+      publishingService?.updateContext();
       workspaceSetupComplete = true;
       try {
         applyWorkspaceSettings(active.settings);
@@ -984,6 +1002,7 @@ app.on("before-quit", (event) => {
         await Promise.all([
           typeof invocationRunner === "undefined" ? Promise.resolve() : invocationRunner.stopAll(),
           stopActiveOntologyDiscoveries(),
+          publishingService?.stop() ?? Promise.resolve(),
         ]);
       },
       onError: (phase, error) => {
