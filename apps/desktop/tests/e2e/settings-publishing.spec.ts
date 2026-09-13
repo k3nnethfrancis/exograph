@@ -65,6 +65,11 @@ test("Publishing persists its folder, exports a private-safe snapshot, previews,
     expect(output).not.toContain("secret.md");
     expect(output).not.toContain("PRIVATE_SECRET_SENTINEL");
     expect(await readFile(path.join(publication, "index.md"), "utf8")).toBe(source);
+    // Refresh the settings editor after the deliberate external write; its save CAS remains strict.
+    await page.getByTestId("workspace-settings-close").click();
+    await page.getByTestId("workspace-menu-toggle").click();
+    await page.getByTestId("workspace-menu-settings").click();
+    await page.getByTestId("workspace-settings-tab-publishing").click();
     await page.getByTestId("publishing-site-url").fill("https://updated.example/");
     await expect.poll(() => page.evaluate(() => window.exograph.publishing.getStatus())).toMatchObject({ phase: "idle" });
     await expect(fetch(status.previewUrl!)).rejects.toThrow();
