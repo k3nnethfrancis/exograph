@@ -3,7 +3,7 @@ import os from "node:os";
 import { get } from "node:http";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { normalizeWorkspaceSettings, workspaceModelFromSettings, type PublicationSnapshot } from "@exograph/core";
+import { exportPublication, verifyPublicationSnapshot, normalizeWorkspaceSettings, workspaceModelFromSettings, type PublicationSnapshot } from "@exograph/core";
 import { PublishingService, validatePublishingSettings } from "./publishing-service";
 import { buildQuartzSite } from "./quartz-build";
 import { servePublication } from "./preview-server";
@@ -136,4 +136,32 @@ it("stops a ready preview and removes its private snapshot on configuration chan
   expect(service.getStatus().phase).toBe("idle");
   await expect(fetch(result.previewUrl!)).rejects.toThrow();
   await vi.waitFor(async () => { await expect(readFile(snapshotRoot)).rejects.toMatchObject({ code: "ENOENT" }); });
+});
+
+
+it("builds and serves a real Core export while keeping private links and source bytes out of the site", async () => {
+  const f = await fixture();
+  const authored = "# Garden\n\n[Public](public.md) [Private](../secret.md)\n";
+  await writeFile(path.join(f.publication, "index.md"), authored);
+  await writeFile(path.join(f.publication, "public.md"), "# Public\n");
+  await writeFile(path.join(f.notes, "secret.md"), "# PRIVATE_SENTINEL\n");
+  await writeFile(path.join(f.engine, "scripts/exograph-publish.mjs"), `import { mkdir, readFile, writeFile } from 'node:fs/promises';
+    const args=Object.fromEntries(Array.from({length:(process.argv.length-2)/2},(_,i)=>[process.argv[2+i*2],process.argv[3+i*2]]));
+    const body=await readFile(args['--input']+'/index.md','utf8');
+    await mkdir(args['--output']); await writeFile(args['--output']+'/index.html',body);
+    console.log(JSON.stringify({ok:true,outputPath:args['--output'],action:args['--action']}));`);
+  const service = new PublishingService({ context: () => ({ settings: f.settings, model: f.model, revision: "rev1" }), stagingParent: f.staging,
+    capture: (model, publicationDirectory, stagingParent, generatedRoutes) => exportPublication({ model, publicationDirectory, stagingParent, generatedRoutes }),
+    verify: verifyPublicationSnapshot, publishStatus: vi.fn() });
+  cleanups.push(() => service.stop());
+  const result = await service.build({ expectedRevision: "rev1", action: "preview" });
+  expect(result.error).toBeUndefined();
+  expect(result.phase).toBe("ready");
+  const body = await (await fetch(result.previewUrl!)).text();
+  expect(body).toContain("[Public](<public.md>)");
+  expect(body).toContain("Private");
+  expect(body).not.toContain("secret.md");
+  expect(body).not.toContain("PRIVATE_SENTINEL");
+  expect((await fetch(new URL("/publication.json", result.previewUrl!))).status).toBe(404);
+  expect(await readFile(path.join(f.publication, "index.md"), "utf8")).toBe(authored);
 });
