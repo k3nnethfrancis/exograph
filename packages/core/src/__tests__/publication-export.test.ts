@@ -1,3 +1,4 @@
+import { fromMarkdown } from "mdast-util-from-markdown";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -16,6 +17,18 @@ async function fixture(files: Record<string, string>) {
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 describe("publication export", () => {
+  it("keeps decoded URL delimiters inside the destination rather than creating unprocessed Markdown", async () => {
+    const f = await fixture({
+      "public/index.md": '[link](<page.md?x=&gt;&#41;&#32;!&#91;leak&#93;&#40;../private.png&#41;>)',
+      "public/page.md": "# Public", "private.png": "PRIVATE BYTES",
+    });
+    const snapshot = await exportPublication(f.request);
+    const output = await readFile(path.join(snapshot.directory, "index.md"), "utf8");
+    expect(output).toContain("page.md?x=%3E)%20");
+    expect(JSON.stringify(fromMarkdown(output))).not.toContain('"type":"image"');
+    expect(snapshot.manifest.files.map((file) => file.path)).toEqual(["index.md", "page.md"]);
+  });
+
   it("keeps generated public folder URLs when their index Note is a draft, without exposing that Note", async () => {
     const f = await fixture({
       "public/index.md": '[Reports](/reports) [Draft index](reports/index.md) [Private folder](/private-folder)',

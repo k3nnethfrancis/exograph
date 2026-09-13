@@ -6,6 +6,7 @@ export type PublicationResolution = { url: string; kind?: "note" | "asset" | "ge
 export type PublicationResolver = (url: string, wiki?: boolean) => PublicationResolution;
 type Edit = { from: number; to: number; value: string };
 const escapeText = (text: string) => text.replace(/[\\`*_[\]<>!]/g, "\\$&");
+const markdownDestination = (url: string) => url.replace(/[\\<>\u0000-\u0020]/g, (character) => encodeURIComponent(character));
 const escapeAttribute = (text: string) => text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 function apply(source: string, edits: Edit[]): string {
   let result = source;
@@ -34,7 +35,7 @@ export function projectPublicationMarkdown(source: string, resolve: PublicationR
     const label = aliases.length ? aliases.join("|") : target;
     const resolved = resolve(target.trim(), true);
     let value = escapeText(label);
-    if ("url" in resolved) value = match[1] && resolved.kind === "note" ? `![[${resolved.url}|${label}]]` : `${match[1]}[${projectPublicationMarkdown(label, resolve, diagnose)}](<${resolved.url}>)`;
+    if ("url" in resolved) value = match[1] && resolved.kind === "note" ? `![[${resolved.url}|${label}]]` : `${match[1]}[${projectPublicationMarkdown(label, resolve, diagnose)}](<${markdownDestination(resolved.url)}>)`;
     else diagnose(resolved.reason);
     wikiEdits.push({ from, to, value });
   }
@@ -58,7 +59,7 @@ export function projectPublicationMarkdown(source: string, resolve: PublicationR
       if ((node.type === "link" || node.type === "image") && label === originalLabel && resolved.url === url && /^(?:https?:|mailto:|tel:|\/\/)/i.test(url)) return;
       const image = node.type === "image" || node.type === "imageReference";
       const title = "title" in node ? node.title : ("identifier" in node ? definitions.get(node.identifier.toLowerCase())?.title : null);
-      replace(node, `${image ? "!" : ""}[${label}](<${resolved.url}>${title ? ` ${JSON.stringify(title)}` : ""})`);
+      replace(node, `${image ? "!" : ""}[${label}](<${markdownDestination(resolved.url)}>${title ? ` ${JSON.stringify(title)}` : ""})`);
       return;
     }
     if ("children" in node) for (const child of node.children) visit(child);
