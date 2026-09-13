@@ -16,6 +16,10 @@ files or symlinks, and modified staged bytes. Verify before the site build and
 again before any publication decision. This is detection between operations,
 not filesystem CAS or a deployment transaction.
 
+YAML frontmatter accepts a UTF-8 BOM and an explicit `---yaml`/`---yml` delimiter.
+Malformed or unsupported frontmatter fails before eligibility checks rather than
+becoming public body text.
+
 Normal Notes are listed. `draft: true` is excluded unless `preview: true` is also
 set (boolean or string `true`, matching the existing site). Those shared previews
 retain their draft/preview fields and gain `unlisted: true`; native unlisted Notes
@@ -24,7 +28,7 @@ unlisted membership when generating search, graph, backlinks, tags and feeds.
 
 Markdown is parsed into an AST. Offset edits leave code literals and unrelated
 body text intact. Standard links, references, wiki links/embeds, parsed HTML URL
-attributes and known frontmatter image fields resolve in the original source
+attributes, non-code HTML text, and known frontmatter image fields resolve in the original source
 inventory, before publication eligibility is applied. Explicit paths never fall
 back to a basename. Ambiguous short names are unlinked, not guessed. Excluded
 links retain authored display text without private target titles; excluded embeds
@@ -34,7 +38,7 @@ the public source page without copying private target metadata.
 Only reached resources inside the selected publication folder are copied:
 images, SVG, PDF, audio and video. Symlinks are not followed. SVG attributes use
 the same resource projection. Inline styles and local SVG fragment references
-are supported; scripts, srcdoc/srcset, CSS imports/resource functions and unknown
+are supported; scripts, SVG animation setters, srcdoc/srcset, CSS imports/resource functions and unknown
 frontmatter resource fields fail with explicit PublicationExportError diagnostics
 rather than leave unsafe references. External iframe src URLs are supported.
 HTML and arbitrary executable assets are not exported as opaque attachments.

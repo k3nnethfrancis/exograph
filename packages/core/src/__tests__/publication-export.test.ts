@@ -16,6 +16,55 @@ async function fixture(files: Record<string, string>) {
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 describe("publication export", () => {
+
+  it("recognizes BOM and YAML-labelled draft headers before eligibility and preserves shared-preview status", async () => {
+    const f = await fixture({
+      "public/index.md": "---\n---\n# Public",
+      "public/bom.md": "\ufeff---\ndraft: true\n---\nBOM PRIVATE",
+      "public/labelled.md": "---yaml\ndraft: true\n---\nLABELLED PRIVATE",
+      "public/preview.md": "\ufeff---yaml\ndraft: true\npreview: true\n---\nShared preview",
+    });
+    const snapshot = await exportPublication(f.request);
+    expect(snapshot.manifest.files.map((file) => file.path)).toEqual(["index.md", "preview.md"]);
+    expect(snapshot.manifest.files.find((file) => file.path === "preview.md")?.visibility).toBe("unlisted");
+    const preview = await readFile(path.join(snapshot.directory, "preview.md"), "utf8");
+    expect(preview).toContain("unlisted: true");
+    expect(preview).toContain("Shared preview");
+  });
+
+  it.each(["---\ndraft: true\nUNTERMINATED PRIVATE", "---toml\ndraft = true\n---\nPRIVATE"])("fails closed on unsupported metadata rather than exporting it as body: %s", async (body) => {
+    const f = await fixture({ "public/index.md": body });
+    await expect(exportPublication(f.request)).rejects.toThrow("publication frontmatter");
+  });
+
+  it("projects Markdown and wiki references inside HTML text while retaining literal code examples", async () => {
+    const f = await fixture({
+      "public/index.md": '<div>![[secret|embed label]] [[secret|link label]] [Private](../secret.md) [[page|Page]]<pre>![[secret]]</pre><code>[example](../secret.md)</code></div>',
+      "secret.md": "SECRET BODY", "public/page.md": "# Page",
+    });
+    const snapshot = await exportPublication(f.request);
+    const output = await readFile(path.join(snapshot.directory, "index.md"), "utf8");
+    expect(output).toContain("<div>embed label link label Private [Page](&lt;page.md&gt;)");
+    expect(output).toContain("<pre>![[secret]]</pre>");
+    expect(output).toContain("<code>[example](../secret.md)</code>");
+    expect(snapshot.manifest.diagnostics).toHaveLength(3);
+  });
+
+  it.each(['<set href="#pic" attributeName="href" to="../../private.png"/>', '<animate attributeName="href" values="#empty;../../private.png"/>'])("rejects SVG resource mutation %s", async (animation) => {
+    const f = await fixture({ "public/index.md": "![diagram](diagram.svg)", "public/diagram.svg": `<svg xmlns="http://www.w3.org/2000/svg"><image id="pic" href="#empty"/>${animation}</svg>` });
+    await expect(exportPublication(f.request)).rejects.toBeInstanceOf(PublicationExportError);
+  });
+
+  it("uses the first reference definition as CommonMark does before filtering private targets", async () => {
+    const f = await fixture({ "public/index.md": "[label][id]\n\n[id]: ../secret.md\n[id]: page.md\n", "public/page.md": "# Public", "secret.md": "PRIVATE" });
+    const snapshot = await exportPublication(f.request);
+    const output = await readFile(path.join(snapshot.directory, "index.md"), "utf8");
+    expect(output).not.toContain("page.md");
+    expect(output).not.toContain("secret.md");
+    expect(output).toContain("label");
+    expect(snapshot.manifest.diagnostics.map((item) => item.code)).toEqual(["excluded-local-target"]);
+  });
+
   it("stages only eligible Notes and reached assets, keeps preview visibility/tags, leaves all source bytes unchanged", async () => {
     const files = {
       "public/index.md": '---\ntags: [shared]\n---\n[[page|**Page**]] [[secret|authored label]] ![[secret]] ![public image](images/ok.png) ![private image](../private.png)\n`[[secret]]`\n```md\n![[secret]]\n```\n',

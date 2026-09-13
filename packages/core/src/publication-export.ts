@@ -227,12 +227,16 @@ async function prospectiveRealPath(file: string): Promise<string> {
 }
 function parseSource(file: string, bytes: Buffer): SourceFile {
   const text = bytes.toString("utf8");
-  const header = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  const bomLength = text.startsWith("\ufeff") ? 1 : 0;
+  const content = text.slice(bomLength);
+  const header = content.match(/^---(?:yaml|yml)?[ \t]*\r?\n((?:[\s\S]*?\r?\n)?)---[ \t]*(?:\r?\n|$)/);
+  if (content.startsWith("---") && !header) throw new Error(`Unsupported or unterminated publication frontmatter in ${path.basename(file)}.`);
+  const headerEnd = header ? bomLength + header[0].length : 0;
   const document = header ? parseDocument(header[1]) : null;
   if (document?.errors.length) throw new Error(`Invalid publication frontmatter in ${path.basename(file)}.`);
   const metadata: unknown = document?.toJS() ?? {};
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) throw new Error("Publication frontmatter must be a mapping.");
-  return { path: file, bytes, body: text.slice(header?.[0].length ?? 0), metadata: metadata as Record<string, unknown>, document, headerEnd: header?.[0].length ?? 0, published: false, unlisted: false };
+  return { path: file, bytes, body: text.slice(headerEnd), metadata: metadata as Record<string, unknown>, document, headerEnd, published: false, unlisted: false };
 }
 function publicRelative(source: string, destination: string): string {
   const relative = slash(path.relative(path.dirname(source), destination));

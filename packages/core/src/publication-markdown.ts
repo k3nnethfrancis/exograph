@@ -20,7 +20,7 @@ export function projectPublicationMarkdown(source: string, resolve: PublicationR
   const edits: Edit[] = [];
   const protectedRanges: Array<[number, number]> = [];
   function collect(node: Root | RootContent): void {
-    if (node.type === "definition") definitions.set(node.identifier.toLowerCase(), node);
+    if (node.type === "definition" && !definitions.has(node.identifier.toLowerCase())) definitions.set(node.identifier.toLowerCase(), node);
     if (["code", "inlineCode", "html", "definition", "link", "image", "linkReference", "imageReference"].includes(node.type)) protectedRanges.push([node.position!.start.offset!, node.position!.end.offset!]);
     if ("children" in node) for (const child of node.children) collect(child);
   }
@@ -71,9 +71,16 @@ export function projectPublicationMarkdown(source: string, resolve: PublicationR
 export function projectPublicationHtml(source: string, resolve: PublicationResolver, diagnose: (reason: string) => void): string {
   const fragment = parseFragment(source, { sourceCodeLocationInfo: true });
   const edits: Edit[] = [];
-  function visit(node: typeof fragment.childNodes[number]): void {
+  function visit(node: typeof fragment.childNodes[number], literal = false): void {
+    if (node.nodeName === "#text" && "value" in node && !literal && node.sourceCodeLocation) {
+      const projected = projectPublicationMarkdown(node.value, resolve, diagnose);
+      if (projected !== node.value) edits.push({
+        from: node.sourceCodeLocation.startOffset, to: node.sourceCodeLocation.endOffset,
+        value: projected.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"),
+      });
+    }
     if ("tagName" in node) {
-      if (["script", "object", "embed", "base", "link", "meta"].includes(node.tagName)) throw new Error(`Unsupported active HTML element: ${node.tagName}`);
+      if (["script", "object", "embed", "base", "link", "meta", "animate", "set", "animatemotion", "animatetransform", "discard"].includes(node.tagName.toLowerCase())) throw new Error(`Unsupported active HTML element: ${node.tagName}`);
       for (const attribute of node.attrs) {
         if (attribute.name.startsWith("on") || ["srcdoc", "srcset", "ping", "action", "formaction"].includes(attribute.name)) throw new Error(`Unsupported HTML resource attribute: ${attribute.name}`);
         if (attribute.name === "style" || /url\s*\(|@import|image-set\s*\(/i.test(attribute.value)) checkCss(attribute.value);
@@ -85,9 +92,10 @@ export function projectPublicationHtml(source: string, resolve: PublicationResol
         else { diagnose(resolved.reason); edits.push({ from: location.startOffset, to: location.endOffset, value: "" }); }
       }
       if (node.tagName === "style") for (const child of node.childNodes) if ("value" in child) checkCss(child.value);
-      if ("content" in node) for (const child of node.content.childNodes) visit(child);
+      literal ||= ["pre", "code", "style", "textarea", "title"].includes(node.tagName);
+      if ("content" in node) for (const child of node.content.childNodes) visit(child, literal);
     }
-    if ("childNodes" in node) for (const child of node.childNodes) visit(child);
+    if ("childNodes" in node) for (const child of node.childNodes) visit(child, literal);
   }
   for (const node of fragment.childNodes) visit(node);
   return apply(source, edits);
