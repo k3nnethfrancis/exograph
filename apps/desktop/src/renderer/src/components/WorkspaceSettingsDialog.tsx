@@ -1,3 +1,4 @@
+import "./settingsSearch.css";
 import { useEffect, useId, useRef, useState, type ComponentType, type Dispatch, type SetStateAction } from "react";
 import { Bot, Globe, FolderOpen, Keyboard, Palette, Search, TerminalSquare, X } from "lucide-react";
 import type { AgentCommand, IndexStatus, WorkspaceSettings } from "@exograph/core";
@@ -327,164 +328,108 @@ function IndexSection({
   onRunIndexUpdate,
   settings,
   setSettings,
-}: Pick<WorkspaceSettingsDialogProps, "indexBusy" | "indexStatus" | "onRunIndexUpdate" | "settings" | "setSettings">) {
+}: Pick<WorkspaceSettingsDialogProps, "indexBusy" | "indexStatus" | "settings" | "setSettings" | "onRunIndexUpdate">) {
   const statusCopy = indexSettingsStatusCopy(indexStatus, indexBusy, settings.indexUpdateStrategy);
   const qmdSelected = settings.searchEngine === "qmd";
+  const actionsDisabled = indexBusy !== null || !indexStatus?.enabled || indexStatus.mode === "off" || indexStatus.indexedRoots.length === 0;
+  const lexicalIndex = indexStatus?.mode === "lexical";
+  const actionHint = !indexStatus ? "Index status unavailable. Reopen Settings to retry."
+    : !indexStatus.enabled || indexStatus.mode === "off" || indexStatus.indexedRoots.length === 0 ? "Apply QMD settings to enable index actions."
+    : "Actions use the applied search settings.";
 
   function selectSearchEngine(searchEngine: "qmd" | "filesystem") {
-    setSettings((current) =>
-      current ? selectWorkspaceSettingsSearchEngine(current, searchEngine) : current);
+    setSettings((current) => current ? selectWorkspaceSettingsSearchEngine(current, searchEngine) : current);
   }
 
   return (
-    <>
-      <div className="dialog-field dialog-field--section">
-        <div className="dialog-field__label">Search engine</div>
-        <label className="dialog-check">
+    <div className="settings-search">
+      <fieldset className="settings-search__engines">
+        <legend className="dialog-field__label">Search engine</legend>
+        <label className="settings-search__choice">
           <input checked={qmdSelected} data-testid="workspace-settings-search-engine-qmd" onChange={() => selectSearchEngine("qmd")} type="radio" name="workspace-search-engine" />
-          <span>QMD <small>Recommended · local indexed search</small></span>
+          <span><strong>QMD</strong><small>Indexed content search</small></span>
         </label>
-        <label className="dialog-check">
+        <label className="settings-search__choice">
           <input checked={!qmdSelected} data-testid="workspace-settings-search-engine-simple" onChange={() => selectSearchEngine("filesystem")} type="radio" name="workspace-search-engine" />
-          <span>Simple search <small>Immediate filename and path matches</small></span>
+          <span><strong>Simple search</strong><small>Filenames and paths</small></span>
         </label>
-      </div>
-      {!qmdSelected ? (
-        <div className="onboarding-section__hint" data-testid="workspace-settings-simple-search-note">
-          Simple search matches filenames and paths. Choose QMD for indexed search.
-        </div>
-      ) : null}
-      {qmdSelected ? (
-        <>
-          <div className="index-summary">
-            <div className="index-summary__stats">
-              <span>QMD</span>
-              <span>{indexStatus?.mode ?? settings.indexMode}</span>
-              <span>
-                {indexStatus?.indexedRoots.length ?? settings.indexedRoots.length} root
-                {(indexStatus?.indexedRoots.length ?? settings.indexedRoots.length) === 1 ? "" : "s"}
-              </span>
-              <span>{indexStatus?.documentCount ?? 0} docs</span>
-              {(indexStatus?.mode ?? settings.indexMode) !== "lexical" ? (
-                <span>{waitingEmbeddingsCopy(indexStatus?.pendingEmbeddings ?? 0)}</span>
-              ) : (
-                <span>semantic off</span>
-              )}
-            </div>
-          </div>
-          {statusCopy ? (
-            <div className={`onboarding-section__hint ${statusCopy.tone === "error" ? "dialog-card__status--error" : ""}`} data-testid="workspace-settings-index-status-note">
-              {statusCopy.text}
-            </div>
-          ) : null}
-          <label className="dialog-field dialog-field--section">
-            <span className="dialog-field__label">QMD retrieval</span>
-        <select
-          className="dialog-card__input"
-          data-testid="workspace-settings-index-mode"
-          value={settings.indexMode}
-          onChange={(event) => {
-            const nextMode = event.target.value as Exclude<WorkspaceSettings["indexing"]["mode"], "off">;
-            setSettings((current) =>
-              current
-                ? {
-                  ...current,
-                  indexMode: nextMode,
-                    applyStatus: "idle",
-                    applyErrorMessage: null,
-                  }
-                : current,
-            );
-          }}
-        >
-          <option value="lexical">Lexical</option>
-          <option value="semantic">Semantic</option>
-          <option value="hybrid">Hybrid</option>
-        </select>
+      </fieldset>
+      {qmdSelected ? <>
+        <div className="settings-search__options">
+          <label className="dialog-field">
+            <span className="dialog-field__label">Search mode</span>
+            <select className="dialog-card__input" data-testid="workspace-settings-index-mode" value={settings.indexMode}
+              onChange={(event) => {
+                const indexMode = event.target.value as Exclude<WorkspaceSettings["indexing"]["mode"], "off">;
+                setSettings((current) => current ? { ...current, indexMode, applyStatus: "idle", applyErrorMessage: null } : current);
+              }}>
+              <option value="lexical">Keywords</option>
+              <option value="semantic">Meaning</option>
+              <option value="hybrid">Keywords + meaning</option>
+            </select>
           </label>
-      <label className="dialog-check">
-        <input
-          checked={settings.exploreIndexSearchOnEnter}
-          data-testid="workspace-settings-explore-index-enter"
-          onChange={(event) =>
-            setSettings((current) => (current ? { ...current, exploreIndexSearchOnEnter: event.target.checked, saveStatus: "idle", errorMessage: null } : current))
-          }
-          type="checkbox"
-        />
-        <span>Use QMD when I press Enter in Explore.</span>
-      </label>
-      <label className="dialog-field dialog-field--section">
-        <span className="dialog-field__label">Search updates</span>
-        <select
-          className="dialog-card__input"
-          data-testid="workspace-settings-index-update-strategy"
-          value={settings.indexUpdateStrategy}
-          onChange={(event) =>
-            setSettings((current) =>
-              current ? { ...current, indexUpdateStrategy: event.target.value as WorkspaceSettings["indexUpdateStrategy"], saveStatus: "idle", errorMessage: null } : current,
-            )
-          }
-        >
-          <option value="on-save">On save</option>
-          <option value="manual">Manual only</option>
-        </select>
-      </label>
-      <div className="dialog-field dialog-field--section">
-        <div className="dialog-field__header">
-          <span className="dialog-field__label">Documents</span>
+          <label className="dialog-field">
+            <span className="dialog-field__label">Index updates</span>
+            <select className="dialog-card__input" data-testid="workspace-settings-index-update-strategy" value={settings.indexUpdateStrategy}
+              onChange={(event) => setSettings((current) => current ? { ...current, indexUpdateStrategy: event.target.value as WorkspaceSettings["indexUpdateStrategy"], saveStatus: "idle", errorMessage: null } : current)}>
+              <option value="on-save">On save</option>
+              <option value="manual">Manual</option>
+            </select>
+          </label>
         </div>
-        <div className="dialog-card__actions dialog-card__actions--split">
-          <button
-            className="toolbar-button"
-            data-testid="workspace-settings-sync-index"
-            disabled={indexBusy !== null || !indexStatus?.enabled || indexStatus.indexedRoots.length === 0}
-            onClick={() => void onRunIndexUpdate("syncing")}
-            type="button"
-          >
-            {indexBusy === "syncing" ? "Syncing..." : "Sync documents"}
-          </button>
-        </div>
-      </div>
-      <details className="dialog-details dialog-details--section settings-maintenance">
-        <summary>Search maintenance</summary>
-        <p className="dialog-card__hint">Use these controls when QMD is stale or embeddings are incomplete.</p>
-        {indexStatus?.recentJobs?.length ? (
-          <div className="index-activity" data-testid="workspace-settings-index-activity">
-            <div className="index-activity__title">Recent activity</div>
-            {indexStatus.recentJobs.slice(0, 3).map((job) => (
-              <div className="index-activity__row" key={job.id}>
-                <span>{job.kind}</span>
-                <span>{formatDuration(job.durationMs)}</span>
-                <span>{formatRelativeTime(job.completedAt)}</span>
-                <span>{job.status === "failed" ? "failed" : job.pendingEmbeddings === undefined ? "complete" : `${job.pendingEmbeddings} embeddings waiting`}</span>
-              </div>
-            ))}
+        <label className="dialog-check">
+          <input checked={settings.exploreIndexSearchOnEnter} data-testid="workspace-settings-explore-index-enter" type="checkbox"
+            onChange={(event) => setSettings((current) => current ? { ...current, exploreIndexSearchOnEnter: event.target.checked, saveStatus: "idle", errorMessage: null } : current)} />
+          <span>Search content when I press Enter in Explore</span>
+        </label>
+        <section className="settings-search__index" aria-label="Current index">
+          <div className="settings-search__index-heading">
+            <span className="dialog-field__label">Current index</span>
+            {indexStatus ? <span className="settings-search__count">{indexStatus.documentCount} documents · {indexStatus.indexedRoots.length} folders</span> : null}
           </div>
-        ) : null}
-        <div className="dialog-card__actions dialog-card__actions--split">
-          <button
-            className="toolbar-button"
-            data-testid="workspace-settings-update-index"
-            disabled={indexBusy !== null || !indexStatus?.enabled || indexStatus.indexedRoots.length === 0}
-            onClick={() => void onRunIndexUpdate("updating")}
-            type="button"
-          >
-            {indexBusy === "updating" ? "Refreshing..." : "Reconcile documents"}
-          </button>
-          <button
-            className="toolbar-button"
-            data-testid="workspace-settings-embed-index"
-            disabled={indexBusy !== null || !indexStatus?.enabled || indexStatus.mode === "lexical" || indexStatus.indexedRoots.length === 0}
-            onClick={() => void onRunIndexUpdate("embedding")}
-            type="button"
-          >
-            {indexBusy === "embedding" ? "Embedding..." : "Build embeddings"}
-          </button>
-        </div>
-      </details>
-        </>
-      ) : null}
-    </>
+          {statusCopy ? <div className={`onboarding-section__hint ${statusCopy.tone === "error" ? "dialog-card__status--error" : ""}`} data-testid="workspace-settings-index-status-note" role="status">{statusCopy.text}</div> : null}
+          <div className="settings-search__action">
+            <div>
+              <strong>Sync index</strong>
+              <small>{lexicalIndex ? "Update indexed documents." : "Update documents and build missing embeddings."}</small>
+            </div>
+            <button className="toolbar-button" data-testid="workspace-settings-sync-index" disabled={actionsDisabled}
+              aria-describedby="settings-search-action-hint" aria-busy={indexBusy === "syncing"}
+              onClick={() => void onRunIndexUpdate("syncing")} type="button">
+              {indexBusy === "syncing" ? "Syncing…" : "Sync now"}
+            </button>
+          </div>
+          <p id="settings-search-action-hint" className="settings-search__hint">{actionHint}</p>
+          <details className="settings-search__maintenance settings-maintenance">
+            <summary>Search maintenance</summary>
+            <div className="settings-search__action">
+              <div><strong>Documents only</strong><small>Refresh document changes without building embeddings.</small></div>
+              <button className="toolbar-button" data-testid="workspace-settings-update-index" disabled={actionsDisabled}
+                aria-describedby="settings-search-action-hint" aria-busy={indexBusy === "updating"}
+                onClick={() => void onRunIndexUpdate("updating")} type="button">
+                {indexBusy === "updating" ? "Updating…" : "Update documents"}
+              </button>
+            </div>
+            <div className="settings-search__action">
+              <div><strong>Embeddings only</strong><small>{lexicalIndex ? "Apply a meaning-based search mode to enable embeddings." : "Build missing embeddings for meaning-based search."}</small></div>
+              <button className="toolbar-button" data-testid="workspace-settings-embed-index" disabled={actionsDisabled || lexicalIndex}
+                aria-describedby="settings-search-action-hint" aria-busy={indexBusy === "embedding"}
+                onClick={() => void onRunIndexUpdate("embedding")} type="button">
+                {indexBusy === "embedding" ? "Building…" : "Build embeddings"}
+              </button>
+            </div>
+            {indexStatus?.recentJobs?.length ? <div className="index-activity" data-testid="workspace-settings-index-activity">
+              <div className="index-activity__title">Recent activity</div>
+              {indexStatus.recentJobs.slice(0, 3).map((job) => <div className="index-activity__row" key={job.id}>
+                <span>{job.kind === "sync" ? "Sync" : job.kind === "embed" ? "Embeddings" : "Documents"}</span>
+                <span>{formatDuration(job.durationMs)}</span><span>{formatRelativeTime(job.completedAt)}</span>
+                <span>{job.status === "failed" ? "Failed" : job.pendingEmbeddings === undefined ? "Complete" : `${job.pendingEmbeddings} embeddings waiting`}</span>
+              </div>)}
+            </div> : null}
+          </details>
+        </section>
+      </> : null}
+    </div>
   );
 }
 

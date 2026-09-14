@@ -17,6 +17,8 @@ function key(code: string, extra = {}) {
 describe("shortcut capture", () => {
   it("requires activation, visibly captures, then reports and stages a normalized binding", async () => {
     const fixture = await mount();
+    expect(fixture.button().children.join("")).not.toContain("Change shortcut");
+    expect(fixture.button().props["aria-label"]).toBe("Change Explorer shortcut");
     await act(async () => fixture.button().props.onKeyDown(key("KeyE", { altKey: true })));
     expect(fixture.onChange).not.toHaveBeenCalled();
     await act(async () => fixture.button().props.onClick());

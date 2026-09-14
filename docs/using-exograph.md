@@ -71,7 +71,7 @@ overwrites an existing Note. The Explorer's New Note flow also starts from
 `untitled.md` but lets you choose a name first.
 
 The lower workspace menu has the current keyboard and CLI reference. Change
-global app shortcuts per Workspace in **Settings → Shortcuts**. Choose **Change shortcut**, press a combination, or press Escape to cancel; conflicts name the existing command. **Reset all** restores defaults. System and editor-native combinations remain reserved. Help always
+global app shortcuts per Workspace in **Settings → Shortcuts**. Select the displayed shortcut, press a combination, or press Escape to cancel; conflicts name the existing command. **Reset all** restores defaults. System and editor-native combinations remain reserved. Help always
 shows the active bindings.
 
 ## Ask an agent

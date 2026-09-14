@@ -222,11 +222,36 @@ describe("workspace settings footer copy", () => {
     expect(html).toContain("3 content embeddings waiting");
     expect(html).toContain("catch up automatically while Exograph is idle");
     expect(html).toContain("Search engine");
-    expect(html).toContain("QMD retrieval");
+    expect(html).toContain("Search mode");
     expect(html).not.toContain("3 pending embeddings");
     expect(html).toContain("Search maintenance");
     expect(html).toContain("QMD");
     expect(html).not.toContain("Press Apply");
+  });
+
+  it("describes maintenance against the applied mode while a different mode is drafted", () => {
+    const html = renderSearchSettings(indexStatusFixture({ mode: "lexical" }));
+    expect(html).toContain("Update indexed documents.");
+    expect(html).toContain("Actions use the applied search settings.");
+    expect(html).toContain("Apply a meaning-based search mode to enable embeddings.");
+    const embed = html.match(/<button[^>]*data-testid="workspace-settings-embed-index"[^>]*>/)?.[0];
+    expect(embed).toContain('disabled=""');
+    expect(html).toContain('<option value="hybrid" selected="">Keywords + meaning</option>');
+  });
+
+  it.each(["syncing", "updating", "embedding"] as const)("disables index actions and identifies the running %s operation", (busy) => {
+    const html = renderSearchSettings(indexStatusFixture(), busy);
+    const buttons = html.match(/<button[^>]*data-testid="workspace-settings-(?:sync|update|embed)-index"[^>]*>/g)!;
+    expect(buttons).toHaveLength(3);
+    expect(buttons.every(button => button.includes('disabled=""'))).toBe(true);
+    expect(buttons.filter(button => button.includes('aria-busy="true"'))).toHaveLength(1);
+  });
+
+  it.each([{ enabled: false, indexedRoots: [] }, { mode: "off" as const }])("explains unavailable index actions without claiming the draft index is ready: %j", (status) => {
+    const html = renderSearchSettings(indexStatusFixture(status));
+    expect(html).toContain("Apply QMD settings to enable index actions.");
+    const buttons = html.match(/<button[^>]*data-testid="workspace-settings-(?:sync|update|embed)-index"[^>]*>/g)!;
+    expect(buttons.every(button => button.includes('disabled=""'))).toBe(true);
   });
 
   it("keeps QMD maintenance out of Simple search settings", () => {
@@ -245,9 +270,9 @@ describe("workspace settings footer copy", () => {
       />,
     );
 
-    expect(html).toContain("Simple search matches filenames and paths. Choose QMD for indexed search.");
+    expect(html).toContain("Filenames and paths");
     expect(html).not.toContain("Search maintenance");
-    expect(html).not.toContain("Sync documents");
+    expect(html).not.toContain("Sync now");
   });
 
   it("does not present an embedding backlog as document work in lexical mode", () => {
@@ -266,7 +291,7 @@ describe("workspace settings footer copy", () => {
       />,
     );
 
-    expect(html).toContain("semantic off");
+    expect(html).toContain("Apply a meaning-based search mode to enable embeddings.");
     expect(html).not.toContain("303 content embeddings waiting");
     expect(html).not.toContain("303 notes waiting");
   });
@@ -298,4 +323,13 @@ function indexStatusFixture(overrides: Partial<IndexStatus> = {}): IndexStatus {
     errors: [],
     ...overrides,
   };
+}
+
+function renderSearchSettings(status: IndexStatus, busy: "syncing" | "updating" | "embedding" | null = null) {
+  return renderToStaticMarkup(<WorkspaceSettingsDialog
+    indexBusy={busy} indexStatus={status} onChooseFolder={() => {}} onClose={() => {}}
+    onOpenWorkspaceSwitcher={() => {}} onRunIndexUpdate={() => {}} onSave={() => {}}
+    settings={workspaceSettingsDialogFixture({ section: "index", indexMode: "hybrid", searchEngine: "qmd" })}
+    setSettings={() => {}} structuralDraftKey={workspaceSettingsStructuralDraftKey}
+  />);
 }

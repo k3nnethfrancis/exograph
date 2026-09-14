@@ -24,11 +24,12 @@ test("Search maintenance help expands with the keyboard and fits a narrow settin
     await page.getByTestId("workspace-menu-settings").click();
     await page.getByTestId("workspace-settings-tab-index").click();
     const summary = page.locator(".settings-maintenance > summary");
-    const help = page.locator(".settings-maintenance > p");
+    const help = page.locator(".settings-maintenance .settings-search__action small").first();
     await expect(help).toBeHidden();
     await summary.focus();
     await summary.press("Enter");
     await expect(help).toBeVisible();
+    await expect(help).toHaveText("Refresh document changes without building embeddings.");
     await help.scrollIntoViewIfNeeded();
     const bounds = await help.boundingBox();
     const dialog = await page.getByTestId("workspace-settings-dialog").boundingBox();

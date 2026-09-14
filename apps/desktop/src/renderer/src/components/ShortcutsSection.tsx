@@ -23,7 +23,7 @@ export function ShortcutsSection({ bindings, onChange }: ShortcutsSectionProps) 
         <span className="dialog-field__label">Global shortcuts</span>
         <button className="toolbar-button" onClick={() => { setCapturing(null); setMessage("Default shortcuts restored."); onChange({}); }} type="button">Reset all</button>
       </div>
-      <div className="onboarding-section__hint">Choose Change shortcut, then press Command (or Control) plus a letter. Escape cancels. System and editor commands stay unchanged.</div>
+      <div className="onboarding-section__hint">Select a shortcut to change it. Escape cancels.</div>
       {rows.map(({ id: rowId, label }) => {
         const id = rowId as WorkspaceShortcutId;
         const active = capturing === id;
@@ -34,7 +34,7 @@ export function ShortcutsSection({ bindings, onChange }: ShortcutsSectionProps) 
               aria-label={`Change ${label} shortcut`}
               aria-describedby={statusId}
               aria-pressed={active}
-              className="toolbar-button"
+              className="toolbar-button settings-shortcut-value"
               data-testid={`workspace-settings-shortcut-${id}`}
               onClick={() => { setCapturing(id); setMessage(`Press a shortcut for ${label}. Escape cancels.`); }}
               onBlur={() => { if (active) cancel(); }}
@@ -54,7 +54,7 @@ export function ShortcutsSection({ bindings, onChange }: ShortcutsSectionProps) 
                 setMessage(`${label} shortcut changed to ${shortcutLabel(binding)}.`);
               }}
               type="button"
-            >{active ? "Press a shortcut…" : `${shortcutLabel(resolved[id])} · Change shortcut`}</button>
+            >{active ? "Press a shortcut…" : shortcutLabel(resolved[id])}</button>
           </div>
         );
       })}
