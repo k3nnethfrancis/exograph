@@ -54,7 +54,7 @@ export class ManagedSiteSetup {
       const headers = await this.run(this.gh, ["api", "--include", "user"]);
       const scopes = headers.match(/^x-oauth-scopes:\s*(.*)$/im)?.[1];
       if (scopes !== undefined && !scopes.split(",").map(value => value.trim()).includes("workflow")) {
-        return { authenticated: false, login, managed, engineDirectory, message: "Reconnect GitHub to allow Exo to install the website publishing workflow." };
+        return { authenticated: false, login, managed, engineDirectory, pending: Boolean(this.auth), deviceCode: this.deviceCode, verificationUrl: this.deviceCode ? "https://github.com/login/device" : undefined, message: "Reconnect GitHub to allow Exo to install the website publishing workflow." };
       }
       return { authenticated: true, login, managed, engineDirectory };
     } catch {
@@ -73,8 +73,10 @@ export class ManagedSiteSetup {
       env: { ...commandEnvironment(), GH_BROWSER: "true", BROWSER: "true" }, stdio: ["ignore", "pipe", "pipe"],
     });
     this.auth = child;
+    let output = "";
     const receive = (data: Buffer) => {
-      const text = data.toString();
+      output = (output + data.toString()).slice(-4096);
+      const text = output;
       const code = text.match(/\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/);
       if (code) this.deviceCode = code[0];
     };
@@ -212,7 +214,7 @@ export class ManagedSiteSetup {
       if (this.options.install) await this.options.install(checkout, controller.signal);
       else {
         const npmPackage = createRequire(import.meta.url).resolve("npm/package.json");
-        const npmCli = path.join(path.dirname(npmPackage), "bin", "npm-cli.js").replace("app.asar/", "app.asar.unpacked/");
+        const npmCli = path.join(path.dirname(npmPackage), "bin", "npm-cli.js");
         const bin = path.join(temporary, "bin");
         await mkdir(bin);
         const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";

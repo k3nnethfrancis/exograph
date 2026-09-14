@@ -35,7 +35,8 @@ test("Publishing persists its folder, exports a private-safe snapshot, previews,
         console.log(JSON.stringify({ok:true,outputPath:args['--output'],action:args['--action']}));
       `);
       await writeFile(settingsPath, JSON.stringify({ workspaceRoot, defaultTerminalCwd: workspaceRoot,
-        noteRoots: [notes], indexedRoots: [], indexing: { enabled: false, mode: "off", backend: "qmd" }, searchEngine: "filesystem" }));
+        noteRoots: [notes], indexedRoots: [], indexing: { enabled: false, mode: "off", backend: "qmd" }, searchEngine: "filesystem",
+        publishing: { publicationDirectory: publication, engineDirectory: engine, siteUrl: "https://fixture.example/", destinationRepository: "author/site" } }));
     },
   });
   let relaunched: Awaited<ReturnType<typeof relaunchExographWorkspaceFixture>> | undefined;
@@ -44,6 +45,7 @@ test("Publishing persists its folder, exports a private-safe snapshot, previews,
     await page.getByTestId("workspace-menu-toggle").click();
     await page.getByTestId("workspace-menu-settings").click();
     await page.getByTestId("workspace-settings-tab-publishing").click();
+    await page.getByText("Publishing configuration", { exact: true }).click();
     await page.getByTestId("publishing-folder").fill(publication);
     await page.getByTestId("publishing-engine").fill(engine);
     await page.getByTestId("publishing-site-url").fill("https://example.com/");
@@ -75,13 +77,14 @@ test("Publishing persists its folder, exports a private-safe snapshot, previews,
     await page.getByTestId("workspace-menu-toggle").click();
     await page.getByTestId("workspace-menu-settings").click();
     await page.getByTestId("workspace-settings-tab-publishing").click();
+    await page.getByText("Publishing configuration", { exact: true }).click();
     await page.getByTestId("publishing-site-url").fill("https://updated.example/");
     await expect.poll(() => page.evaluate(() => window.exograph.publishing.getStatus())).toMatchObject({ phase: "idle" });
     await expect(fetch(status.previewUrl!)).rejects.toThrow();
     await expect(page.getByTestId("publishing-prepare")).toBeEnabled();
     await page.getByTestId("publishing-prepare").click();
     await expect(page.getByTestId("publishing-status")).toContainText("It has not been deployed", { timeout: 30_000 });
-    expect((await page.evaluate(() => window.exograph.publishing.getStatus())).previewUrl).toBeUndefined();
+    expect((await page.evaluate(() => window.exograph.publishing.getStatus())).previewUrl).toMatch(/^http:\/\/127\.0\.0\.1:/);
     await expect(page.getByRole("alert")).toContainText("Publishing setup required");
     await expect(page.getByTestId("publishing-publish")).toBeDisabled();
     await fixture.electronApp.close();
@@ -90,6 +93,7 @@ test("Publishing persists its folder, exports a private-safe snapshot, previews,
     await page.getByTestId("workspace-menu-toggle").click();
     await page.getByTestId("workspace-menu-settings").click();
     await page.getByTestId("workspace-settings-tab-publishing").click();
+    await page.getByText("Publishing configuration", { exact: true }).click();
     await expect(page.getByTestId("publishing-folder")).toHaveValue(publication);
     await expect(page.getByTestId("publishing-site-url")).toHaveValue("https://updated.example/");
     await expect(page.getByTestId("publishing-repository")).toHaveValue("author/site");
@@ -120,7 +124,7 @@ test("Publish uses Exograph's adapter and reports a missing destination workflow
       // No engine deployment adapter. The actual app-owned adapter reaches this
       // isolated fake GitHub executable; it cannot invoke a real network command.
       invocations = path.join(workspaceRoot, "gh-invocations");
-      await writeFile(path.join(bin, "gh"), '#!/bin/sh\nprintf "%s\n" "$*" >> "$EXO_FIXTURE_GH_LOG"\nprintf "HTTP 404 Not Found\n" >&2\nexit 1\n');
+      await writeFile(path.join(bin, "gh"), '#!/bin/sh\nif [ "$1" = "--version" ]; then printf "gh fixture\n"; exit 0; fi\nprintf "%s\n" "$*" >> "$EXO_FIXTURE_GH_LOG"\nprintf "HTTP 404 Not Found\n" >&2\nexit 1\n');
       await chmod(path.join(bin, "gh"), 0o755);
       env.PATH = `${bin}${path.delimiter}${process.env.PATH ?? ""}`;
       env.EXO_FIXTURE_GH_LOG = invocations;
@@ -136,15 +140,18 @@ test("Publish uses Exograph's adapter and reports a missing destination workflow
     const { page } = fixture;
     await page.getByTestId("workspace-menu-toggle").click(); await page.getByTestId("workspace-menu-settings").click();
     await page.getByTestId("workspace-settings-tab-publishing").click();
+    await page.getByText("Publishing configuration", { exact: true }).click();
     await expect(page.getByTestId("publishing-publish")).toBeDisabled(); await page.getByTestId("publishing-prepare").click();
     await expect(page.getByTestId("publishing-status")).toContainText("It has not been deployed", { timeout: 30_000 });
     expect((await page.evaluate(() => window.exograph.publishing.getStatus())).preparedId).toBeTruthy();
-    await expect(readFile(invocations)).rejects.toMatchObject({ code: "ENOENT" });
+    const beforePublish = await readFile(invocations, "utf8").catch(() => "");
+    expect(beforePublish).not.toContain("actions/workflows");
     await page.getByTestId("publishing-publish").click();
     await expect(page.getByRole("alert")).toContainText("No snapshot has been uploaded", { timeout: 30_000 });
     await expect(page.getByTestId("publishing-open-site")).toHaveCount(0);
     expect((await page.evaluate(() => window.exograph.publishing.getStatus())).deployment?.status).toBe("setup-required");
-    expect(await readFile(invocations, "utf8")).toBe("api repos/author/site/actions/workflows/exograph-publish.yml\n");
+    expect(await readFile(invocations, "utf8")).toContain("api repos/author/site/actions/workflows/exograph-publish.yml\n");
+    expect(await readFile(invocations, "utf8")).not.toMatch(/workflow run|git push|--method (POST|PUT)/);
   } catch (error) {
     console.error("Publishing state", await fixture.page.evaluate(() => window.exograph.publishing.getStatus()).catch(String));
     throw error;

@@ -14,6 +14,7 @@ export function PublishingSetup({ scope, onConfigured, onClose }: {
   const [importTheme, setImportTheme] = useState(Boolean(scope.publishing?.engineDirectory));
   const [auth, setAuth] = useState<PublishingAuthStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
   useEffect(() => {
@@ -35,9 +36,10 @@ export function PublishingSetup({ scope, onConfigured, onClose }: {
     } catch (cause) { setError(String(cause)); }
   };
   const connect = async () => {
-    setError(null);
+    setConnecting(true); setError(null);
     try { setAuth(await window.exograph.publishing.startAuth()); }
     catch (cause) { setError(String(cause)); }
+    finally { setConnecting(false); }
   };
   const setup = async () => {
     setBusy(true); setError(null);
@@ -57,7 +59,7 @@ export function PublishingSetup({ scope, onConfigured, onClose }: {
         <small>Notes stay here. Drafts and private links are excluded from the published copy.</small>
       </label>
       <div className="dialog-field"><span className="dialog-field__label">GitHub</span>
-        {auth?.authenticated ? <span>Connected{auth.login ? ` as ${auth.login}` : ""}</span> : <button className="toolbar-button" type="button" disabled={auth?.pending} onClick={() => void connect()}>Connect GitHub</button>}
+        {auth?.authenticated ? <span>Connected{auth.login ? ` as ${auth.login}` : ""}</span> : <button className="toolbar-button" type="button" disabled={connecting || auth?.pending} onClick={() => void connect()}>{connecting ? "Connecting…" : "Connect GitHub"}</button>}
         {auth?.deviceCode ? <p>Enter <strong>{auth.deviceCode}</strong> on GitHub to connect.</p> : null}
         {auth?.verificationUrl ? <button className="toolbar-button" type="button" onClick={() => void window.exograph.shell.openExternal(auth.verificationUrl!).catch(e => setError(String(e)))}>Open GitHub sign-in</button> : null}
         {!auth?.authenticated && auth?.message ? <small>{auth.message}</small> : null}

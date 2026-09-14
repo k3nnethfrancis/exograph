@@ -11,9 +11,6 @@ files:
   - package.json
   - "!**/node_modules/**/prebuilds/!(darwin-${arch}){,/**}"
 
-asarUnpack:
-  - "node_modules/npm/**/*"
-
 extraResources:
   - from: ../../skills/exograph-publishing
     to: skills/exograph-publishing
