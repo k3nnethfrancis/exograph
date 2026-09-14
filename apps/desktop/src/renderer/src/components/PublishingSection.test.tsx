@@ -12,6 +12,7 @@ const settings = { workspaceRoot: "/workspace", noteRoots: ["/workspace/notes"],
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("window", { exograph: { publishing: {
+    getSetupStatus: async () => ({ authenticated: true, managed: false }),
     getStatus: async () => ({ phase: "idle", diagnostics: [] }),
     onStatus: (callback: typeof receive) => { receive = callback; return () => {}; }, publish, build,
   } } });

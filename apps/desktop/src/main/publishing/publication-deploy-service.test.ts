@@ -44,6 +44,7 @@ it("requires explicit publication of the exact prepared id and records a confirm
   const prepared = await f.service.build({ scope: f.settings, action: "prepare" });
   expect(prepared.phase).toBe("ready");
   expect(prepared.preparedId).toBeTruthy();
+  expect(await (await fetch(prepared.previewUrl!)).text()).toBe("built public site");
   expect(f.deploy).not.toHaveBeenCalled();
   await expect(f.service.publish({ scope: f.settings, preparedId: "another-preparation" })).rejects.toThrow("Prepare and review");
   const result = await f.service.publish({ scope: f.settings, preparedId: prepared.preparedId! });

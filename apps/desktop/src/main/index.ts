@@ -33,6 +33,7 @@ import {
 
 import type { DesktopEventChannel, DesktopEventPayloads } from "../shared/desktop-ipc";
 import type { WorkspaceSettingsSaveOutcome } from "../shared/api";
+import { ManagedSiteSetup } from "./publishing/managed-site-setup";
 import { PublishingService } from "./publishing/publishing-service";
 import { registerPublishingIpc } from "./publishing/publishing-ipc";
 import { InvocationRunner } from "./invocation/invocation-runner";
@@ -87,6 +88,7 @@ process.on("unhandledRejection", (reason) => {
 let appLifecycle: AppLifecycleController;
 let commandServerLifecycle: CommandServerLifecycle;
 let workspaceModel: WorkspaceModel;
+let managedSiteSetup: ManagedSiteSetup | undefined;
 let publishingService: PublishingService | undefined;
 let workspaceSettings: WorkspaceSettings | null = null;
 let workspaceSettingsRevision: string | null = null;
@@ -369,7 +371,17 @@ function registerIpcHandlers() {
     verify: verifyPublicationSnapshot,
     publishStatus: (status) => sendToRenderer("publishing:status", status),
   });
-  registerPublishingIpc(publishingService);
+  managedSiteSetup = new ManagedSiteSetup({
+    context: () => ({ ...currentSnapshot(), model: workspaceModel }),
+    sitesParent: path.join(app.getPath("userData"), "publishing-sites"),
+    capture: async (model, publicationDirectory, stagingParent, generatedRoutes, assertCurrent) => {
+      await appLifecycle.withDocumentsFlushed(async () => {});
+      assertCurrent();
+      return exportPublication({ model, publicationDirectory, stagingParent, generatedRoutes });
+    },
+    verify: verifyPublicationSnapshot,
+  });
+  registerPublishingIpc(publishingService, managedSiteSetup);
   registerWorkspaceIpcHandlers({
     activateWorkspace: async (input) => {
       return switchWorkspace(input.workspaceId, input.expectedRevision);
@@ -865,6 +877,7 @@ app.whenReady().then(async () => {
       workspaceSettingsRevision = active.revision;
       workspaceModel = active.model;
       publishingService?.updateContext();
+      managedSiteSetup?.updateContext();
       workspaceSetupComplete = true;
       try {
         applyWorkspaceSettings(active.settings);
@@ -1003,6 +1016,7 @@ app.on("before-quit", (event) => {
           typeof invocationRunner === "undefined" ? Promise.resolve() : invocationRunner.stopAll(),
           stopActiveOntologyDiscoveries(),
           publishingService?.stop() ?? Promise.resolve(),
+          managedSiteSetup?.cancelSetup() ?? Promise.resolve(),
         ]);
       },
       onError: (phase, error) => {

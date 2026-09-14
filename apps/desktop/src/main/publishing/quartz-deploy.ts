@@ -1,8 +1,9 @@
 import { commandEnvironment } from "../command/command-environment";
 import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { realpath } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { promisify } from "node:util";
+import path from "node:path";
 import type { PublicationSnapshot } from "@exograph/core";
 import type { PublicationDeployResult } from "../../shared/api";
 import { publishingResource } from "./publishing-resources";
@@ -17,6 +18,7 @@ export interface PublicationDeployInput {
   engineCommit: string;
   siteUrl: string;
   signal: AbortSignal;
+  githubCliPath?: string;
 }
 
 /** Matches the engine adapter's exact sorted path/raw-byte digest; excludes the private receipt. */
@@ -24,6 +26,18 @@ export function publicationSnapshotDigest(snapshot: PublicationSnapshot): string
   const files = snapshot.manifest.files.map((file) => ({ path: file.path, sha256: file.outputHash }))
     .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   return createHash("sha256").update(JSON.stringify(files)).digest("hex");
+}
+
+/** Managed sites contain their theme and publishing workflow in one repository. */
+export async function isManagedPublicationSite(engineDirectory: string): Promise<boolean> {
+  try {
+    const marker = JSON.parse(await readFile(`${engineDirectory}/exograph-site.json`, "utf8")) as { schemaVersion?: unknown };
+    if (marker.schemaVersion !== 1) throw new Error("Unsupported managed site version.");
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 /** Publication pins a clean project root, not a mutable branch name or executable shell string. */
@@ -59,13 +73,16 @@ export async function deployQuartzSite(input: PublicationDeployInput): Promise<P
   if (await readPublicationEngineRepository(input.engineDirectory) !== input.engineRepository) throw new Error("The Quartz GitHub origin changed. Prepare the site again.");
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository)) throw new Error("Choose a destination repository in owner/repository format.");
   const adapter = await publishingResource("quartz-deploy.mjs");
-  const workflow = await publishingResource("github-pages.yml");
+  const workflow = await publishingResource(await isManagedPublicationSite(input.engineDirectory) ? "managed-github-pages.yml" : "github-pages.yml");
   const buildScript = await publishingResource("quartz-build.mjs");
   const result = await new Promise<{ stdout: string; code: number | null }>((resolve, reject) => {
     if (input.signal.aborted) { reject(new Error("Publishing cancelled before deployment.")); return; }
     const child = spawn(process.execPath, [adapter, "--engine", input.engineDirectory, "--repository", input.repository, "--engine-repository", input.engineRepository, "--workflow", workflow, "--build-script", buildScript, "--input", input.inputDirectory, "--snapshot-hash", input.snapshotHash,
       "--engine-commit", input.engineCommit, "--site-url", input.siteUrl], {
-      cwd: input.engineDirectory, env: { ...commandEnvironment(), ELECTRON_RUN_AS_NODE: "1" },
+      cwd: input.engineDirectory, env: {
+        ...commandEnvironment(), ELECTRON_RUN_AS_NODE: "1",
+        ...(input.githubCliPath && path.isAbsolute(input.githubCliPath) ? { PATH: `${path.dirname(input.githubCliPath)}${path.delimiter}${commandEnvironment().PATH ?? ""}` } : {}),
+      },
       stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32",
     });
     let stdout = "";

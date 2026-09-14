@@ -25,12 +25,19 @@ export async function deploySnapshot(options, dependencies = {}) {
   const sleep = dependencies.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)))
   const now = dependencies.now ?? Date.now
   const engine = options.engineDirectory
+  let managed = false
+  try {
+    const marker = JSON.parse(await readFile(path.join(engine, "exograph-site.json"), "utf8"))
+    if (marker.schemaVersion !== 1) throw new Error("Unsupported managed site version")
+    if (marker.repository !== options.repository || marker.contentDirectory !== "garden") throw new Error("Managed site destination changed; review the selected site configuration")
+    managed = true
+  } catch (error) { if (error.code !== "ENOENT") throw error }
   const git = (args, cwd = engine) => run("git", args, cwd)
   const gh = args => run("gh", args, engine)
   const api = async endpoint => JSON.parse(await gh(["api", endpoint]))
   const profile = { repository: options.repository, engineRepository: options.engineRepository, workflow: "exograph-publish.yml", workflowRef: "main", siteUrl: options.siteUrl }
   const repositoryName = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
-  if (!repositoryName.test(profile.repository ?? "") || !repositoryName.test(profile.engineRepository ?? "")) throw new Error("Choose GitHub repositories in owner/repository format")
+  if (!repositoryName.test(profile.repository ?? "") || (!managed && !repositoryName.test(profile.engineRepository ?? ""))) throw new Error("Choose GitHub repositories in owner/repository format")
   if (!/^[0-9a-f]{40}$/.test(options.engineCommit) || !/^[0-9a-f]{64}$/.test(options.snapshotHash)) throw new Error("Expected immutable engine commit and snapshot SHA-256")
   const url = new URL(options.siteUrl)
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw new Error("Use an HTTPS site URL without credentials, query, or fragment")
@@ -41,6 +48,11 @@ export async function deploySnapshot(options, dependencies = {}) {
   if (!files.length || snapshotHash(files) !== options.snapshotHash) throw new Error("Publication snapshot changed; prepare a new preview")
   const expectedWorkflow = await readFile(options.workflowPath)
   const expectedBuildScript = await readFile(options.buildScriptPath)
+  if (managed) {
+    const localWorkflow = await readFile(path.join(engine, ".github/workflows/exograph-publish.yml"))
+    const localRunner = await readFile(path.join(engine, ".github/scripts/exograph-quartz-build.mjs"))
+    if (sha256(localWorkflow) !== sha256(expectedWorkflow) || sha256(localRunner) !== sha256(expectedBuildScript)) return setup("Update the managed site's publishing workflow and runner, then prepare it again. No snapshot has been uploaded.")
+  }
   let workflow
   async function installedWorkflow() {
     const content = await api(`repos/${profile.repository}/contents/.github/workflows/${profile.workflow}?ref=${encodeURIComponent(profile.workflowRef)}`)
@@ -51,8 +63,10 @@ export async function deploySnapshot(options, dependencies = {}) {
   try {
     workflow = await api(`repos/${profile.repository}/actions/workflows/${profile.workflow}`)
     if (workflow.state !== "active" || !(await installedWorkflow())) return setup("Install the reviewed Exograph publishing workflow before publishing. No snapshot has been uploaded.")
+    if (!managed) {
     const remoteEngine = await api(`repos/${profile.engineRepository}/commits/${options.engineCommit}`)
     if (remoteEngine.sha !== options.engineCommit) return setup("Push the reviewed engine commit to its configured repository before publishing. No snapshot has been uploaded.")
+    }
   } catch (error) {
     if (error.notFound) return setup("The publishing workflow or reviewed engine commit is not installed. No snapshot has been uploaded.")
     throw error
@@ -67,11 +81,34 @@ export async function deploySnapshot(options, dependencies = {}) {
     await git(["init", "--quiet"], temporary)
     const remoteBranch = (await git([...credentials, "ls-remote", "--heads", remote, `refs/heads/${branch}`], temporary)).trim()
     const baseBranch = remoteBranch ? branch : profile.workflowRef
+    let expectedBase
+    if (managed) {
+      const knownRef = `refs/exograph/${baseBranch}`
+      const known = (await git(["for-each-ref", "--format=%(objectname)", knownRef])).trim()
+      expectedBase = known
+      const current = remoteBranch || (await git([...credentials, "ls-remote", "--heads", remote, `refs/heads/${baseBranch}`], temporary)).trim()
+      if (!known || current.split(/\s+/)[0] !== known) throw new Error("The published site changed elsewhere. Refresh and review its theme before preparing another publication")
+    }
     await git([...credentials, "fetch", "--quiet", "--depth=1", "--no-tags", remote, `refs/heads/${baseBranch}`], temporary)
+    if (managed && (await git(["rev-parse", "FETCH_HEAD"], temporary)).trim() !== expectedBase) throw new Error("The published site changed while preparing deployment. Refresh and review it before publishing")
     await git(["symbolic-ref", "HEAD", `refs/heads/${branch}`], temporary)
     await git(["update-ref", `refs/heads/${branch}`, "FETCH_HEAD"], temporary)
     // Replace the tree, not its history; removed publication files cannot survive.
-    await git(["read-tree", "--empty"], temporary)
+    let themeFiles = []
+    if (managed) {
+      // Import the reviewed tree's objects locally, but never make its commit a
+      // parent. Only destination history can become reachable from the push.
+      await git(["fetch", "--quiet", "--depth=1", "--no-tags", engine, options.engineCommit], temporary)
+      const entries = (await git(["ls-tree", "-r", "-z", options.engineCommit], temporary)).split("\0").filter(Boolean)
+      if (entries.some(entry => entry.startsWith("160000 "))) throw new Error("Managed sites must contain their engine files, not Git submodules")
+      themeFiles = entries.map(entry => entry.slice(entry.indexOf("\t") + 1)).filter(name => name !== "garden" && !name.startsWith("garden/"))
+      await git(["read-tree", options.engineCommit], temporary)
+      await git(["checkout-index", "--all", "--force"], temporary)
+      await git(["rm", "-r", "--cached", "--ignore-unmatch", "--", "garden"], temporary)
+      await rm(path.join(temporary, "garden"), { recursive: true, force: true })
+    } else {
+      await git(["read-tree", "--empty"], temporary)
+    }
     const publication = path.join(temporary, "garden")
     for (const file of files) {
       const target = path.join(publication, file.path)
@@ -79,17 +116,27 @@ export async function deploySnapshot(options, dependencies = {}) {
       await copyFile(path.join(options.input, file.path), target)
     }
     if (snapshotHash(await snapshotFiles(publication)) !== options.snapshotHash || snapshotHash(await snapshotFiles(options.input)) !== options.snapshotHash) throw new Error("Snapshot changed while preparing deployment; nothing was uploaded")
-    await git(["-c", "core.autocrlf=false", "add", "--force", "--all", "--", "garden"], temporary)
+    // Publication bytes are already reviewed. Bypass theme .gitattributes,
+    // including clean filters and line-ending normalization, for this subtree.
+    for (const file of files) {
+      const blob = (await git(["hash-object", "-w", "--no-filters", "--", path.join(publication, file.path)], temporary)).trim()
+      await git(["update-index", "--add", "--cacheinfo", "100644", blob, `garden/${file.path}`], temporary)
+    }
     await git(["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Exograph Publishing", "-c", "user.email=publishing@exograph.local", "commit", "--quiet", "--allow-empty", "-m", `Publish reviewed snapshot ${options.snapshotHash}\n\nRequest: ${randomUUID()}`], temporary)
     snapshotCommit = (await git(["rev-parse", "HEAD"], temporary)).trim()
     const tree = (await git(["ls-tree", "-r", "--name-only", "-z", "HEAD"], temporary)).split("\0").filter(Boolean).sort()
-    if (JSON.stringify(tree) !== JSON.stringify(files.map(file => `garden/${file.path}`).sort())) throw new Error("Deployment commit does not match the reviewed file inventory")
+    if (JSON.stringify(tree) !== JSON.stringify([...themeFiles, ...files.map(file => `garden/${file.path}`)].sort())) throw new Error("Deployment commit does not match the reviewed file inventory")
     // Recheck authority before a normal fast-forward push. Concurrent publishers
     // cause a rejected push, never a force update or an automatic retry.
     if ((await git(["rev-parse", "HEAD"])).trim() !== options.engineCommit || (await git(["status", "--porcelain", "--untracked-files=all"])).trim()) throw new Error("Engine changed while preparing deployment")
     if (!(await installedWorkflow())) return setup("The deployment workflow changed. Review setup again before publishing; nothing was uploaded.")
     await git(["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential", "push", `https://github.com/${profile.repository}.git`, `HEAD:refs/heads/${branch}`], temporary)
-    await gh(["workflow", "run", profile.workflow, "--repo", profile.repository, "--ref", profile.workflowRef, "-f", `snapshot_commit=${snapshotCommit}`, "-f", `engine_commit=${options.engineCommit}`, "-f", `engine_repository=${profile.engineRepository}`, "-f", `site_url=${url.href}`])
+    if (managed) {
+      await git(["fetch", "--quiet", "--no-tags", temporary, snapshotCommit])
+      await git(["update-ref", "refs/exograph/publication", snapshotCommit])
+    }
+    const engineArgs = managed ? [] : ["-f", `engine_repository=${profile.engineRepository}`]
+    await gh(["workflow", "run", profile.workflow, "--repo", profile.repository, "--ref", profile.workflowRef, "-f", `snapshot_commit=${snapshotCommit}`, "-f", `engine_commit=${options.engineCommit}`, ...engineArgs, "-f", `site_url=${url.href}`])
     const title = `Publish ${snapshotCommit} with ${options.engineCommit}`
     const deadline = now() + 20 * 60 * 1000
     while (now() < deadline) {

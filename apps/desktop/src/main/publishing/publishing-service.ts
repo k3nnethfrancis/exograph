@@ -1,3 +1,5 @@
+import { resolveGitHubCli } from "./github-cli";
+import { saveManagedTheme } from "./managed-theme";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -118,6 +120,8 @@ export class PublishingService {
       if (action === "prepare") {
         try {
           if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository)) throw new Error("Choose a destination repository in owner/repository format.");
+          if (!this.options.readEngineCommit) await saveManagedTheme(config.engineDirectory, signal);
+          assertCurrent();
           engineRepository = await (this.options.readEngineRepository ?? readPublicationEngineRepository)(config.engineDirectory);
           engineCommit = await (this.options.readEngineCommit ?? readPublicationEngineCommit)(config.engineDirectory);
         }
@@ -140,7 +144,7 @@ export class PublishingService {
       // The private receipt never sits in the web root. A prepared artifact is not deployed.
       await writeFile(path.join(snapshot.stagingRoot, "publication.json"), JSON.stringify(snapshot.manifest, null, 2), { flag: "wx", mode: 0o600 });
       let previewUrl: string | undefined;
-      if (action === "preview") {
+      {
         const preview = await servePublication(output, new URL(config.siteUrl).pathname);
         try { assertCurrent(); } catch (error) { preview.close(); throw error; }
         this.preview = preview;
@@ -192,7 +196,10 @@ export class PublishingService {
       assertCurrent();
       if (await (this.options.readEngineRepository ?? readPublicationEngineRepository)(prepared.engineDirectory) !== prepared.engineRepository) throw new Error("The Quartz GitHub origin changed after preparation.");
       assertCurrent();
+      const githubCliPath = this.options.deploy ? undefined : await resolveGitHubCli(path.join(path.dirname(this.options.stagingParent), "publishing-sites", ".tools"), signal);
+      assertCurrent();
       const deployment = await (this.options.deploy ?? deployQuartzSite)({
+        githubCliPath,
         engineDirectory: prepared.engineDirectory, repository: prepared.repository, engineRepository: prepared.engineRepository, inputDirectory: prepared.snapshot.directory,
         snapshotHash: publicationSnapshotDigest(prepared.snapshot), engineCommit: prepared.engineCommit,
         siteUrl: prepared.siteUrl, signal,
@@ -246,7 +253,7 @@ async function canonicalCreationPath(target: string): Promise<string> {
   }
 }
 
-async function readGeneratedRoutes(engine: string): Promise<readonly string[]> {
+export async function readGeneratedRoutes(engine: string): Promise<readonly string[]> {
   const configPath = path.join(engine, "exograph-publishing.json");
   let source: string;
   try {

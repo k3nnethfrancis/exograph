@@ -28,6 +28,11 @@ window.addEventListener(
 const api: DesktopApi = {
   ...(process.env.EXOGRAPH_TEST === "1" ? { test: { graphHooks: true as const } } : {}),
   publishing: {
+    getSetupStatus: () => invokeDesktop("publishing:get-setup-status"),
+    startAuth: () => invokeDesktop("publishing:start-auth"),
+    setup: (input) => invokeDesktop("publishing:setup", input),
+    cancelSetup: () => invokeDesktop("publishing:cancel-setup"),
+    revealTheme: () => invokeDesktop("publishing:reveal-theme"),
     getStatus: () => invokeDesktop("publishing:get-status"),
     build: (input) => invokeDesktop("publishing:build", input),
     publish: (input) => invokeDesktop("publishing:publish", input),

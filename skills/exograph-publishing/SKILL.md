@@ -39,20 +39,28 @@ versions and profiles. Do not infer that a feature exists from this skill alone.
    location and build inputs. Repository names need not match local folder names.
    Report a short map of content, theme code, destination, and generated output.
 
-## Current deployment contract
+## Identify the deployment contract
 
-The current flow uses a separate Quartz engine repository. The website repository
-has its workflow/runner on `main` and exported `garden/` content on `publication`.
-Exo supplies exact content and engine commits to
-`.github/workflows/exograph-publish.yml`. GitHub Actions checks out both, builds
-with Quartz, and uploads the finished HTML/CSS/JavaScript to GitHub Pages.
-Pages serves those artifacts; it does not read the user's Mac.
+Managed publishing starts at Settings → Publishing → Set up website. The user
+chooses content, connects GitHub, creates/selects a repository, and chooses the
+Quartz default or imports a committed theme. Setup returns the managed checkout
+path into `publishing.engineDirectory`; do not reconstruct that path yourself.
+The checkout is under the app profile's `publishing-sites/`, outside Note Roots.
 
-The agreed next design is a self-contained website repository containing exported
-content, Quartz/theme code, pinned dependencies, and the Pages workflow, with a
-local checkout managed by Exo. Do not assume that onboarding or a managed checkout
-exists until verified in the installed app. Do not invent its directory. When
-that design ships, update this section and the location contract together.
+A managed checkout has `exograph-site.json` with `schemaVersion: 1`. Its website
+repository owns Quartz/theme code, exported `garden/`, pinned dependencies, and
+`.github/workflows/exograph-publish.yml`. GitHub Actions checks out one exact
+publication commit, builds it, and uploads the finished site to Pages. Setup
+installs the workflow but does not deploy. Customize theme opens the managed
+checkout; Prepare saves theme edits locally and builds a content snapshot;
+Publish website explicitly deploys it. Canonical notes remain in the selected
+source folder. The public derivative is not a second editing location.
+
+Older configurations can still have a separate Quartz engine repository and a
+two-checkout workflow. Inspect the marker and installed workflow rather than
+assuming migration. Use managed setup to import the existing theme and preserve
+the repository and domain. Never delete the old theme until the managed build
+and deployment are verified and its local-only changes are preserved.
 
 ## Support the requested operation
 
@@ -61,13 +69,13 @@ that design ships, update this section and the location contract together.
   shared previews: `draft: true` excludes a note; `draft: true` plus
   `preview: true` publishes it unlisted and accessible by link.
 - **Edit theme:** use the resolved engine/site checkout, preserving user changes.
-  Current publishing requires its reviewed commit to be clean and pushed to its
-  GitHub origin. Personal theme code does not belong in Exo's application source.
+  Legacy separate-engine publishing requires its reviewed commit to be clean
+  and pushed to its GitHub origin; managed Prepare saves theme edits locally. Personal theme code does not belong in Exo's application source.
   Pin a tested Quartz version; offer upgrades explicitly rather than silently
   replacing a customized theme with upstream latest.
 - **Inspect before deploying:** Build preview is a local whole-site build, not
   an unlisted preview post. Prepare publish creates a new reviewed snapshot;
-  Publish prepared site deploys it. Edits alone do not publish. Use the existing
+  Publish website deploys it. Edits alone do not publish. Use the existing
   authorization for publishing; theme editing or diagnosis alone is not a request
   to deploy a live website.
 - **Diagnose a failed publish:** check app status and the matching GitHub Actions
