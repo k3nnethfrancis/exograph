@@ -1,5 +1,8 @@
 # Publishing a folder of notes
 
+Agent support: [exograph-publishing](../skills/exograph-publishing/SKILL.md)
+explains how to locate the active user profile, content, theme, and deployment.
+
 Settings → Publishing selects a publication folder inside a Note Root, an
 installed Quartz 5 project outside your notes, the site's URL, and an optional
 GitHub destination repository in `owner/repository` format. Your Quartz project

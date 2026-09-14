@@ -1,11 +1,14 @@
 # Exograph Skills
 
-These are repository-owned contributor Skills: reusable Markdown instructions
-for people and compatible coding agents changing Exograph itself. They are
-distinct from the product workflow Skills delivered to configured Commands.
+These are repository-owned Skills: reusable Markdown instructions for people
+and compatible coding agents using or changing Exograph. The publishing support
+Skill is also bundled in the app’s resources; installing it into an agent host
+remains separate from product workflow Skills delivered to configured Commands.
 They do not execute automatically and do not grant filesystem, process, or
 network authority.
 
+- [exograph-publishing](exograph-publishing/SKILL.md) — locate a user’s publishing
+  configuration and support content, themes, deployments, and safe cleanup.
 - [ontology-design](ontology-design/SKILL.md) — inspect a
   Markdown workspace and propose the smallest evidence-backed `ontology.yaml`.
 - [find-and-connect-relevant-context](find-and-connect-relevant-context/SKILL.md)
