@@ -7,6 +7,12 @@ type TerminalsApi = DesktopApi["terminals"];
 type ShellApi = DesktopApi["shell"];
 
 export interface DesktopInvokeHandlers {
+  "publishing:get-setup-status": DesktopApi["publishing"]["getSetupStatus"];
+  "publishing:start-auth": DesktopApi["publishing"]["startAuth"];
+  "publishing:setup": DesktopApi["publishing"]["setup"];
+  "publishing:cancel-setup": DesktopApi["publishing"]["cancelSetup"];
+  "publishing:reveal-theme": DesktopApi["publishing"]["revealTheme"];
+
   "publishing:get-status": DesktopApi["publishing"]["getStatus"];
   "publishing:build": DesktopApi["publishing"]["build"];
   "publishing:publish": DesktopApi["publishing"]["publish"];

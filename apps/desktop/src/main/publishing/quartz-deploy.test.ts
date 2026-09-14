@@ -80,3 +80,25 @@ it("rejects a changed origin before starting the app deployment adapter", async 
   await f.git("remote", "set-url", "origin", "https://github.com/other/theme.git");
   await expect(deployQuartzSite(f.input)).rejects.toThrow("origin changed");
 });
+
+
+it("selects the self-contained workflow for managed sites", async () => {
+  const f = await fixture(`${argv}
+    if(!args['--workflow'].endsWith('managed-github-pages.yml')) process.exit(1);
+    console.log(JSON.stringify({ok:false,status:'setup-required',message:'Managed workflow selected'}));process.exitCode=2;`);
+  await writeFile(path.join(f.input.engineDirectory, "exograph-site.json"), JSON.stringify({schemaVersion:1,repository:"author/site",contentDirectory:"garden"}));
+  await f.git("add", ".");
+  await f.git("-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "managed");
+  f.input.engineCommit = await readPublicationEngineCommit(f.input.engineDirectory);
+  await expect(deployQuartzSite(f.input)).resolves.toEqual({status:"setup-required",message:"Managed workflow selected"});
+});
+
+it("makes the provisioned GitHub CLI available to deployment and Git credential helpers", async () => {
+  const f = await fixture(`${argv}
+    import path from 'node:path';
+    const expected=path.join(path.dirname(args['--input']),'tools','bin')+path.delimiter;
+    if(!process.env.PATH.startsWith(expected)) process.exit(1);
+    console.log(JSON.stringify({ok:false,status:'setup-required',message:'Managed CLI available'}));process.exitCode=2;`);
+  f.input.githubCliPath = path.join(f.root,"tools","bin","gh");
+  await expect(deployQuartzSite(f.input)).resolves.toEqual({status:"setup-required",message:"Managed CLI available"});
+});

@@ -33,10 +33,43 @@ export function publicationScope(settings: PublishingScope): PublishingScope {
 }
 
 export interface PublishingApi {
+  getSetupStatus: () => Promise<PublishingAuthStatus>;
+  startAuth: () => Promise<PublishingAuthStatus>;
+  setup: (input: PublishingSetupRequest) => Promise<PublishingSetupResult>;
+  cancelSetup: () => Promise<void>;
+  revealTheme: () => Promise<void>;
   getStatus: () => Promise<PublishingStatus>;
   build: (input: PublishingBuildRequest) => Promise<PublishingStatus>;
   publish: (input: { scope: PublishingScope; preparedId: string }) => Promise<PublishingStatus>;
   stop: () => Promise<void>;
   revealOutput: () => Promise<void>;
   onStatus: (callback: (status: PublishingStatus) => void) => () => void;
+}
+
+export interface PublishingAuthStatus {
+  authenticated: boolean;
+  login?: string;
+  pending?: boolean;
+  deviceCode?: string;
+  verificationUrl?: string;
+  message?: string;
+  managed: boolean;
+  engineDirectory?: string;
+}
+export interface PublishingSetupRequest {
+  scope: PublishingScope;
+  publicationDirectory: string;
+  repository: string;
+  createRepository: boolean;
+  visibility?: "public" | "private";
+  themeDirectory?: string;
+  siteUrl?: string;
+}
+export interface PublishingSetupResult {
+  status: "ready" | "setup-required";
+  repository: string;
+  engineDirectory: string;
+  siteUrl: string;
+  branch: string;
+  message?: string;
 }

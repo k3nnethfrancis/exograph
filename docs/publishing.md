@@ -1,5 +1,39 @@
 # Publishing a folder of notes
 
+Agent support: [exograph-publishing](../skills/exograph-publishing/SKILL.md)
+explains how to locate the active user profile, content, theme, and deployment.
+
+The default macOS profile is `~/Library/Application Support/Exograph/`.
+On upgrade, Exo copies the former `@exograph/desktop/` profile, relocates saved
+managed-site paths, and retains the original for rollback. Quit the older app
+before upgrading. Explicit `EXOGRAPH_USER_DATA_PATH` overrides are unchanged.
+The local checkout is the editable copy; the GitHub repository is its remote
+counterpart and the source GitHub Pages builds.
+
+## Managed setup
+
+Choose **Set up website** in Settings → Publishing, then select a content folder,
+connect GitHub, and create or choose a website repository. New repositories are
+public. Choose the pinned Quartz default or import an existing committed Quartz
+project. Existing custom domains and repository history are preserved. Exo
+creates a local checkout under the app profile's `published-sites/` and saves
+its actual location in the workspace settings. Users need no separate local
+website checkout or manually installed Pages workflow.
+
+The managed website repository is self-contained: Quartz and theme code live at
+its root, `garden/` holds the exported content, and its workflow builds one exact
+publication commit. **Customize theme** opens the editable checkout. **Prepare
+publish** saves theme edits locally and builds a snapshot; **Publish website**
+deploys it. The selected notes folder stays authoritative. Edits in the exported
+`garden/` copy are rejected during theme preparation so they can be recovered
+into the source notes instead of silently overwritten.
+
+Setup never deploys the site. A failed setup retains recoverable work and does
+not replace the active configuration. Existing separate-engine configurations
+continue to work and can be migrated through setup by importing their theme.
+
+## Existing separate-engine setup
+
 Settings → Publishing selects a publication folder inside a Note Root, an
 installed Quartz 5 project outside your notes, the site's URL, and an optional
 GitHub destination repository in `owner/repository` format. Your Quartz project

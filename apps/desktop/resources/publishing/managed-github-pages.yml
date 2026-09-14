@@ -1,0 +1,97 @@
+# Install in the selected site repository after preview/cutover review.
+# The publication branch contains the complete theme and sanitized garden/.
+name: Publish reviewed Exograph snapshot
+run-name: Publish ${{ inputs.snapshot_commit }} with ${{ inputs.engine_commit }}
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot_commit:
+        description: Reviewed immutable site-repository commit containing garden/
+        type: string
+        required: true
+      engine_commit:
+        description: Reviewed immutable Quartz engine commit
+        type: string
+        required: true
+      site_url:
+        description: HTTPS URL for this site
+        type: string
+        required: true
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require immutable revisions
+        env:
+          SNAPSHOT: ${{ inputs.snapshot_commit }}
+          ENGINE: ${{ inputs.engine_commit }}
+          SITE_URL: ${{ inputs.site_url }}
+        run: |
+          [[ "$SNAPSHOT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ENGINE" =~ ^[0-9a-f]{40}$ ]]
+          node -e 'const u=new URL(process.env.SITE_URL);if(u.protocol!=="https:"||u.username||u.password||u.search||u.hash)process.exit(1)'
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.snapshot_commit }}
+          path: snapshot
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+        working-directory: snapshot
+      - name: Restore reviewed garden bytes without theme filters
+        working-directory: snapshot
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const {execFileSync} = require('node:child_process');
+          const entries = execFileSync('git', ['ls-tree', '-r', '-z', 'HEAD', '--', 'garden'], {maxBuffer: 16 * 1024 * 1024}).toString().split('\0').filter(Boolean);
+          fs.rmSync('garden', {recursive: true, force: true});
+          for (const entry of entries) {
+            const tab = entry.indexOf('\t');
+            const [mode, type, oid] = entry.slice(0, tab).split(' ');
+            const name = entry.slice(tab + 1);
+            if (mode !== '100644' || type !== 'blob' || !name.startsWith('garden/') || name.split('/').some(part => part === '..' || part === '.')) throw new Error('Invalid publication tree');
+            fs.mkdirSync(path.dirname(name), {recursive: true});
+            fs.writeFileSync(name, execFileSync('git', ['cat-file', 'blob', oid], {maxBuffer: 512 * 1024 * 1024}));
+          }
+          NODE
+      - name: Build the reviewed snapshot
+        env:
+          SITE_URL: ${{ inputs.site_url }}
+        run: node snapshot/.github/scripts/exograph-quartz-build.mjs --engine snapshot --input snapshot/garden --output public --site-url "$SITE_URL" --action prepare
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
+
+      - name: Record completed deployment
+        env:
+          SNAPSHOT_COMMIT: ${{ inputs.snapshot_commit }}
+          ENGINE_COMMIT: ${{ inputs.engine_commit }}
+          DEPLOYMENT_URL: ${{ steps.deployment.outputs.page_url }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          node -e 'require("fs").writeFileSync("deployment.json", JSON.stringify({snapshotCommit:process.env.SNAPSHOT_COMMIT,engineCommit:process.env.ENGINE_COMMIT,deploymentUrl:process.env.DEPLOYMENT_URL,runId:process.env.RUN_ID}))'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exograph-deployment
+          path: deployment.json
+          retention-days: 14

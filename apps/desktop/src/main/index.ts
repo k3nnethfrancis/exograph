@@ -1,5 +1,6 @@
+import { prepareAppProfile } from "./runtime/app-profile";
 import { planWorkspaceSettingsApply } from "./runtime/workspace-settings-apply-plan";
-import { app, nativeTheme, powerMonitor } from "electron";
+import { app, dialog, nativeTheme, powerMonitor } from "electron";
 import path from "node:path";
 import { appendFile, mkdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -33,6 +34,7 @@ import {
 
 import type { DesktopEventChannel, DesktopEventPayloads } from "../shared/desktop-ipc";
 import type { WorkspaceSettingsSaveOutcome } from "../shared/api";
+import { ManagedSiteSetup } from "./publishing/managed-site-setup";
 import { PublishingService } from "./publishing/publishing-service";
 import { registerPublishingIpc } from "./publishing/publishing-ipc";
 import { InvocationRunner } from "./invocation/invocation-runner";
@@ -72,8 +74,15 @@ const sourceProjectRoot = resolveSourceProjectRoot();
 const gpuStartupPolicy = configureGpuStartup(app, process.env);
 const BOOTSTRAP_WORKSPACE_GENERATION = 0;
 
-if (process.env.EXOGRAPH_USER_DATA_PATH) {
-  app.setPath("userData", process.env.EXOGRAPH_USER_DATA_PATH);
+try {
+  app.setName("Exograph");
+  const profile = prepareAppProfile(app.getPath("appData"), process.env.EXOGRAPH_USER_DATA_PATH);
+  app.setPath("userData", profile);
+  app.setPath("sessionData", profile);
+} catch (error) {
+  dialog.showErrorBox("Exograph could not migrate app data", String(error));
+  app.exit(1);
+  throw error;
 }
 
 process.on("uncaughtException", (error) => {
@@ -87,6 +96,7 @@ process.on("unhandledRejection", (reason) => {
 let appLifecycle: AppLifecycleController;
 let commandServerLifecycle: CommandServerLifecycle;
 let workspaceModel: WorkspaceModel;
+let managedSiteSetup: ManagedSiteSetup | undefined;
 let publishingService: PublishingService | undefined;
 let workspaceSettings: WorkspaceSettings | null = null;
 let workspaceSettingsRevision: string | null = null;
@@ -369,7 +379,17 @@ function registerIpcHandlers() {
     verify: verifyPublicationSnapshot,
     publishStatus: (status) => sendToRenderer("publishing:status", status),
   });
-  registerPublishingIpc(publishingService);
+  managedSiteSetup = new ManagedSiteSetup({
+    context: () => ({ ...currentSnapshot(), model: workspaceModel }),
+    sitesParent: path.join(app.getPath("userData"), "published-sites"),
+    capture: async (model, publicationDirectory, stagingParent, generatedRoutes, assertCurrent) => {
+      await appLifecycle.withDocumentsFlushed(async () => {});
+      assertCurrent();
+      return exportPublication({ model, publicationDirectory, stagingParent, generatedRoutes });
+    },
+    verify: verifyPublicationSnapshot,
+  });
+  registerPublishingIpc(publishingService, managedSiteSetup);
   registerWorkspaceIpcHandlers({
     activateWorkspace: async (input) => {
       return switchWorkspace(input.workspaceId, input.expectedRevision);
@@ -865,6 +885,7 @@ app.whenReady().then(async () => {
       workspaceSettingsRevision = active.revision;
       workspaceModel = active.model;
       publishingService?.updateContext();
+      managedSiteSetup?.updateContext();
       workspaceSetupComplete = true;
       try {
         applyWorkspaceSettings(active.settings);
@@ -1003,6 +1024,7 @@ app.on("before-quit", (event) => {
           typeof invocationRunner === "undefined" ? Promise.resolve() : invocationRunner.stopAll(),
           stopActiveOntologyDiscoveries(),
           publishingService?.stop() ?? Promise.resolve(),
+          managedSiteSetup?.cancelSetup() ?? Promise.resolve(),
         ]);
       },
       onError: (phase, error) => {

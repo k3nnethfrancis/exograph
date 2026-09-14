@@ -161,6 +161,7 @@ export function registerWorkspaceIpcHandlers(handlers: WorkspaceIpcHandlers) {
       const dialogOptions: OpenDialogOptions = {
         title: options?.title,
         buttonLabel: options?.buttonLabel,
+        defaultPath: options?.defaultPath,
         properties: [
           "openDirectory",
           "createDirectory",

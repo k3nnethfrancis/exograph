@@ -25,7 +25,7 @@
     "test:packaged:containment": "pnpm --filter @exograph/desktop test:packaged:containment",
     "dist:mac": "pnpm --filter @exograph/desktop dist:mac",
     "typecheck": "pnpm -r typecheck",
-    "test": "node --test scripts/install-local.test.mjs scripts/ci-contract.test.mjs apps/desktop/scripts/electron-runtime.test.mjs apps/desktop/scripts/pack-mac.test.mjs apps/desktop/scripts/package-evidence.test.mjs apps/desktop/scripts/publishing-deploy.test.mjs skills/exograph-code-quality-review/scripts/review-map.test.mjs skills/agent-first-software-engineering/scripts/qualification-report.test.mjs && pnpm --dir packages/core test && pnpm --dir apps/desktop test && pnpm --dir packages/cli test && pnpm graph:eval:test",
+    "test": "node --test scripts/install-local.test.mjs scripts/ci-contract.test.mjs apps/desktop/scripts/electron-runtime.test.mjs apps/desktop/scripts/pack-mac.test.mjs apps/desktop/scripts/package-evidence.test.mjs apps/desktop/scripts/packaged-npm.test.mjs apps/desktop/scripts/publishing-deploy.test.mjs skills/exograph-code-quality-review/scripts/review-map.test.mjs skills/agent-first-software-engineering/scripts/qualification-report.test.mjs && pnpm --dir packages/core test && pnpm --dir apps/desktop test && pnpm --dir packages/cli test && pnpm graph:eval:test",
     "test:e2e": "pnpm build && playwright test -c apps/desktop/playwright.config.ts",
     "test:visual": "pnpm --filter @exograph/desktop build && playwright test -c apps/desktop/playwright.visual.config.ts",
     "graph:eval:test": "pnpm --filter @exograph/graph-eval test",

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** App-owned executables; never resolve deployment code from the user's engine. */
-export async function publishingResource(name: "quartz-build.mjs" | "quartz-deploy.mjs" | "github-pages.yml"): Promise<string> {
+export async function publishingResource(name: "quartz-build.mjs" | "quartz-deploy.mjs" | "github-pages.yml" | "managed-github-pages.yml"): Promise<string> {
   const candidates = [
     ...(process.resourcesPath ? [path.join(process.resourcesPath, "publishing", name)] : []),
     fileURLToPath(new URL(`../../../resources/publishing/${name}`, import.meta.url)),

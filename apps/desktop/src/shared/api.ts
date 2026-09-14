@@ -1,6 +1,6 @@
 import type { PublishingApi } from "./api/publishing";
 export { publicationScope } from "./api/publishing";
-export type { PublishingStatus, PublicationAction, PublicationDiagnostic, PublishingBuildRequest, PublishingScope, PublicationDeployResult } from "./api/publishing";
+export type { PublishingAuthStatus, PublishingSetupRequest, PublishingSetupResult, PublishingStatus, PublicationAction, PublicationDiagnostic, PublishingBuildRequest, PublishingScope, PublicationDeployResult } from "./api/publishing";
 import type { WorkspaceFilesystemApi } from "./api/workspace-filesystem";
 import type { WorkspaceIndexApi } from "./api/workspace-index";
 import type { WorkspaceInvocationApi } from "./api/invocation-commands";
