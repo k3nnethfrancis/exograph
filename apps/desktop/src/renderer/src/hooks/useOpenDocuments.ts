@@ -607,12 +607,11 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
   async function recoverDeletedDocument(sourcePath: string, destinationPath: string): Promise<void> {
     const document = openDocumentsRef.current[sourcePath];
     if (!document || document.filesystemState !== "deleted") return;
-    await window.exograph.workspace.createFile(destinationPath);
-    await window.exograph.notes.save(destinationPath, document.frontmatter, document.body);
+    await window.exograph.notes.saveCopy(destinationPath, document.frontmatter, document.body);
     const diskVersion = await window.exograph.notes.stat(destinationPath);
     const next = { ...openDocumentsRef.current };
     delete next[sourcePath];
-    next[destinationPath] = { ...document, filePath: destinationPath, dirty: false, diskVersion, filesystemState: undefined };
+    next[destinationPath] = { ...document, filePath: destinationPath, dirty: false, diskVersion, filesystemState: undefined, saveConflict: undefined };
     openDocumentsRef.current = next;
     setOpenDocuments(next);
     setDocumentSaveStatuses((current) => {

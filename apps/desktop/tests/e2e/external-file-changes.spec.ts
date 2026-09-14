@@ -141,6 +141,8 @@ test("does not overwrite an unsaved document when the file changes on disk", asy
 
   await expect(page.getByTestId("editor-panel")).toContainText("local unsaved line");
   await expect(page.getByTestId("editor-panel")).not.toContainText("external overwrite attempt");
+  await page.getByRole("button", { name: "Discard local edits and reload", exact: true }).click();
+  await expect(page.getByTestId("editor-panel")).toContainText("external overwrite attempt");
 
   await cleanup();
 });
