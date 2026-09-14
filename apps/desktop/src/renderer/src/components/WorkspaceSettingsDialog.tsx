@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ComponentType, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useId, useRef, useState, type ComponentType, type Dispatch, type SetStateAction } from "react";
 import { Bot, Globe, FolderOpen, Keyboard, Palette, Search, TerminalSquare, X } from "lucide-react";
 import type { AgentCommand, IndexStatus, WorkspaceSettings } from "@exograph/core";
 import { normalizeDefaultAgentCommandId } from "@exograph/core/agent-command-configuration";
@@ -63,11 +63,28 @@ export function WorkspaceSettingsDialog({
   structuralDraftKey,
 }: WorkspaceSettingsDialogProps) {
   const titleId = useId();
+  const backdropPress = useRef(false);
   const { dialogRef, closeRef, onKeyDown } = useSettingsDialogFocus(onClose);
   const hasStructuralChanges = structuralDraftKey(settings) !== settings.appliedWorkspaceKey;
 
   return (
-    <div className="dialog-overlay" data-testid="workspace-settings-overlay">
+    <div
+      className="dialog-overlay"
+      data-testid="workspace-settings-overlay"
+      onPointerDown={(event) => {
+        backdropPress.current = event.button === 0 && event.target === event.currentTarget;
+        if (backdropPress.current) event.preventDefault();
+      }}
+      onPointerCancel={() => { backdropPress.current = false; }}
+      onPointerUp={(event) => {
+        backdropPress.current = backdropPress.current && event.target === event.currentTarget;
+      }}
+      onClick={(event) => {
+        const closeFromBackdrop = backdropPress.current && event.target === event.currentTarget && !event.defaultPrevented;
+        backdropPress.current = false;
+        if (closeFromBackdrop) onClose();
+      }}
+    >
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={onKeyDown} className="dialog-card dialog-card--settings" data-testid="workspace-settings-dialog">
         <div className="dialog-card__header">
           <div id={titleId} className="dialog-card__title">Workspace Settings</div>

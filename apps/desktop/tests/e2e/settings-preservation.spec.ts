@@ -263,6 +263,13 @@ test("keeps an invalid existing Agent Command in Settings instead of discarding 
     await expect(fixture.page.getByLabel("Retry workspace settings")).toHaveCount(0);
     expect((await persistedSettings(fixture.settingsPath)).agentCommands).toEqual(persistedBefore.agentCommands);
 
+    await fixture.page.getByTestId("workspace-settings-overlay").click({ position: { x: 5, y: 5 } });
+    await expect(fixture.page.getByTestId("workspace-settings-dialog")).toBeVisible();
+    await claudeCommand.focus();
+    await fixture.page.keyboard.press("Escape");
+    await expect(fixture.page.getByTestId("workspace-settings-dialog")).toBeVisible();
+    expect((await persistedSettings(fixture.settingsPath)).agentCommands).toEqual(persistedBefore.agentCommands);
+
     await claudeCommand.fill(String((persistedBefore.agentCommands as Array<{ id: string; command: string }>)
       .find((command) => command.id === "claude")?.command));
     await expect(fixture.page.getByTestId("workspace-settings-status")).toContainText("Settings saved.");
