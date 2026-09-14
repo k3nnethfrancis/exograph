@@ -1,3 +1,4 @@
+import { normalizeAgentCommandAppearance, type AgentCommand, type AgentCommandAppearance } from "@exograph/core/agent-command-configuration";
 import { Facet, Prec, StateEffect, StateField, type EditorState, type Extension, type Range, type Transaction } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, WidgetType, keymap } from "@codemirror/view";
 import type { InvocationSkillContext } from "@exograph/core";
@@ -78,8 +79,12 @@ const composerDecorations = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(value, transaction) {
     let next = value.map(transaction.changes);
+    if (transaction.reconfigured) {
+      const composer = transaction.state.field(composerState);
+      if (composer) next = decorationsForComposer(composer, transaction.state);
+    }
     for (const effect of transaction.effects) {
-      if (effect.is(openComposer)) next = decorationsForComposer(effect.value);
+      if (effect.is(openComposer)) next = decorationsForComposer(effect.value, transaction.state);
       if (effect.is(closeComposer)) next = Decoration.none;
     }
     return next;
@@ -87,7 +92,8 @@ const composerDecorations = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
-function decorationsForComposer(composer: ComposerState): DecorationSet {
+function decorationsForComposer(composer: ComposerState, state: EditorState): DecorationSet {
+  const appearance = normalizeAgentCommandAppearance(state.facet(composerCallbackFacet).getCommand?.(composer.handle)?.appearance);
   return Decoration.set([
     Decoration.mark({
       class: `inline-agent-composer__mark inline-agent-composer__mark--${agentPresentation(composer.handle)}`,
@@ -97,7 +103,7 @@ function decorationsForComposer(composer: ComposerState): DecorationSet {
       class: `inline-agent-composer__mention inline-agent-composer__mention--${agentPresentation(composer.handle)}`,
     }).range(composer.from, composer.messageFrom),
     Decoration.widget({
-      widget: new InlineAgentAffordanceWidget(composer),
+      widget: new InlineAgentAffordanceWidget(composer, appearance),
       side: 1,
     }).range(composer.to),
   ]);
@@ -181,12 +187,13 @@ export function inlineAgentComposerExtension(options: {
   onClose?: (documentBody: string) => void;
   onRestore?: (documentBody: string) => void;
   renderPersistedInvocations?: boolean;
+  getCommand?: (handle: string) => AgentCommand | undefined;
 }): Extension {
   return [
     composerState,
     composerDecorations,
     ...(options.renderPersistedInvocations === false ? [] : [persistedInvocationDecorations]),
-    composerCallbackFacet.of({ onSend: options.onSend, onRestore: options.onRestore }),
+    composerCallbackFacet.of({ onSend: options.onSend, onRestore: options.onRestore, getCommand: options.getCommand }),
     Prec.highest(keymap.of([
       { key: "Cmd-Enter", run: sendInlineAgentComposer },
       { key: "Ctrl-Enter", run: sendInlineAgentComposer },
@@ -277,6 +284,7 @@ export function isPersistedInvocationPosition(state: EditorState, position: numb
 }
 
 interface ComposerCallbacks {
+  getCommand?: (handle: string) => AgentCommand | undefined;
   onSend: (draft: InlineAgentDraft) => void;
   onRestore?: (documentBody: string) => void;
 }
@@ -409,12 +417,13 @@ function closeInlineAgentComposer(view: EditorView): boolean {
 }
 
 export class InlineAgentAffordanceWidget extends WidgetType {
-  constructor(private readonly composer: ComposerState) {
+  constructor(private readonly composer: ComposerState, private readonly appearance?: AgentCommandAppearance) {
     super();
   }
 
   eq(other: InlineAgentAffordanceWidget): boolean {
-    return this.composer.id === other.composer.id && this.composer.handle === other.composer.handle;
+    return this.composer.id === other.composer.id && this.composer.handle === other.composer.handle
+      && this.appearance?.color === other.appearance?.color && this.appearance?.iconDataUrl === other.appearance?.iconDataUrl;
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -432,7 +441,20 @@ export class InlineAgentAffordanceWidget extends WidgetType {
     button.className = "inline-agent-composer__send";
     button.type = "button";
     button.setAttribute("aria-label", `Send message to @${this.composer.handle}`);
-    button.append(createAgentIcon(agentPresentation(this.composer.handle)));
+    const appearance = this.appearance;
+    const mark = document.createElement("span");
+    mark.className = "agent-command-icon";
+    mark.setAttribute("aria-hidden", "true");
+    if (appearance?.color) { mark.style.color = appearance.color; mark.style.borderColor = appearance.color; }
+    if (appearance?.iconDataUrl) {
+      const image = document.createElement("img");
+      image.src = appearance.iconDataUrl;
+      image.alt = "";
+      image.width = image.height = 16;
+      image.addEventListener("error", () => mark.replaceChildren(createAgentIcon(agentPresentation(this.composer.handle))), { once: true });
+      mark.append(image);
+    } else mark.append(createAgentIcon(agentPresentation(this.composer.handle)));
+    button.append(mark);
     button.addEventListener("mousedown", (event) => event.preventDefault());
     button.addEventListener("click", (event) => {
       event.preventDefault();

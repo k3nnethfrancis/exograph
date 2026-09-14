@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { InvocationRecord } from "@exograph/core";
+import { createDefaultClaudeAgentCommand, type InvocationRecord } from "@exograph/core";
 import type { InvocationActivityEvent } from "@exograph/core/invocation-activity";
 
 import {
+  invocationCommandPresentation,
   acknowledgeInvocationActivity,
   applyInvocationActivityEvent,
   applyInvocationRecord,
@@ -46,6 +47,12 @@ function record(status: InvocationRecord["status"]): InvocationRecord {
 }
 
 describe("invocation activity state", () => {
+  it("keeps configured appearance while checking and after launch failure", () => {
+    const styled = { ...createDefaultClaudeAgentCommand(), appearance: { color: "#112233" } };
+    const presentation = invocationCommandPresentation(styled.handle, [styled]);
+    expect(acknowledgeInvocationActivity(presentation).commandAppearance).toEqual(styled.appearance);
+    expect(failInvocationActivity(presentation, "failure").commandAppearance).toEqual(styled.appearance);
+  });
   it("acknowledges a send synchronously without claiming provider work began", () => {
     expect(acknowledgeInvocationActivity(command, "pane-a")).toEqual({
       invocationId: null,

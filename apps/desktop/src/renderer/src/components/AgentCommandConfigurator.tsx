@@ -1,3 +1,5 @@
+import { AgentCommandAppearanceEditor } from "./AgentCommandAppearanceEditor";
+import { AgentCommandIcon } from "./AgentCommandIcon";
 import { useState } from "react";
 import {
   agentCommandConfigurationError,
@@ -19,6 +21,7 @@ interface AgentCommandConfiguratorProps {
 }
 
 export interface CustomCommandDraft {
+  appearance?: AgentCommand["appearance"];
   label: string;
   handle: string;
   command: string;
@@ -41,6 +44,7 @@ export function AgentCommandConfigurator({
 }: AgentCommandConfiguratorProps) {
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
   const [addingCustom, setAddingCustom] = useState(false);
+  const [customIconPending, setCustomIconPending] = useState(false);
   const [customDraft, setCustomDraft] = useState<CustomCommandDraft>(EMPTY_CUSTOM_COMMAND);
   const recommended = [
     commands.find((command) => command.id === "claude"),
@@ -198,12 +202,14 @@ export function AgentCommandConfigurator({
                 </label>
               ) : null}
             </div>
+            <AgentCommandAppearanceEditor onPendingChange={setCustomIconPending} label="Custom command" handle={customDraft.handle} appearance={customDraft.appearance} onChange={(appearance) => setCustomDraft((current) => ({ ...current, appearance }))} />
             {customError ? <div className="dialog-field__error" data-testid={`${testId}-custom-error`}>{customError}</div> : null}
             <div className="agent-command__actions">
               <button
                 className="toolbar-button"
                 onClick={() => {
                   setAddingCustom(false);
+                  setCustomIconPending(false);
                   setCustomDraft(EMPTY_CUSTOM_COMMAND);
                 }}
                 type="button"
@@ -213,12 +219,13 @@ export function AgentCommandConfigurator({
               <button
                 className="toolbar-button toolbar-button--primary"
                 data-testid={`${testId}-confirm-custom`}
-                disabled={Boolean(customError)}
+                disabled={Boolean(customError) || customIconPending}
                 onClick={() => {
                   const next = customAgentCommand(customDraft);
                   if (!next) return;
                   publish([...commands, next], "confirm");
                   setAddingCustom(false);
+                  setCustomIconPending(false);
                   setCustomDraft(EMPTY_CUSTOM_COMMAND);
                 }}
                 type="button"
@@ -271,7 +278,7 @@ function AgentCommandEditor({
     <section className="agent-command" data-testid={`${testId}-command-${command.id}`}>
       <div className="agent-command__header">
         <div>
-          <strong>{command.label || `@${command.handle}`}{recommended ? <em>Recommended</em> : null}</strong>
+          <strong><AgentCommandIcon command={command} /> {command.label || `@${command.handle}`}{recommended ? <em>Recommended</em> : null}</strong>
           <span>@{command.handle}</span>
         </div>
         <label className="dialog-check dialog-check--inline">
@@ -377,6 +384,7 @@ function AgentCommandEditor({
           ) : <span className="dialog-field__hint">Fresh each time</span>}
         </div>
       </div>
+      {!recommended ? <AgentCommandAppearanceEditor label={command.label || "Custom command"} handle={command.handle} appearance={command.appearance} onChange={(appearance) => update({ appearance }, "confirm")} /> : null}
       {pendingRemoval ? (
         <div className="agent-command__remove-confirmation" data-testid={`${testId}-remove-confirmation-${command.id}`}>
           <span>Remove @{command.handle} configuration? Invocation History stays available.</span>
@@ -441,6 +449,7 @@ function customAgentCommand(draft: CustomCommandDraft): AgentCommand | null {
   const handle = normalizeAgentHandle(draft.handle);
   if (!handle || !draft.label.trim() || !draft.command.trim()) return null;
   return normalizeAgentCommand({
+    appearance: draft.appearance,
     id: "custom",
     label: draft.label,
     handle,

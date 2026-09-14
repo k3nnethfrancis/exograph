@@ -1,10 +1,10 @@
-import { ArrowUpRight, Bot, ExternalLink, X } from "lucide-react";
+import { ArrowUpRight, ExternalLink, X } from "lucide-react";
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
 import type { NoteDocument, SearchResult, WorkspaceGraphContext } from "@exograph/core";
 import type { InvocationHistoryItem } from "../../../shared/api";
 
 import { buildNoteGraphContext } from "../graphAffordances";
-import { AgentIcon } from "./AgentIcon";
+import { AgentCommandIcon } from "./AgentCommandIcon";
 
 type ConnectionTab = "outline" | "links" | "history";
 const CONNECTION_TABS: readonly { id: Exclude<ConnectionTab, "history">; label: string }[] = [
@@ -220,9 +220,7 @@ export function InvocationHistoryTab({ error, items, onOpen, onResume, onRetry }
           {item.changeIds.length > 0 ? <button className="invocation-history__open" onClick={() => onOpen(item)} type="button">
             <span className={`invocation-history__status invocation-history__status--${item.outcome}`} aria-hidden="true" />
             <span className="invocation-history__agent" aria-hidden="true">
-              {item.command.handle === "claude" || item.command.handle === "codex"
-                ? <AgentIcon kind={item.command.handle} size={14} />
-                : <Bot size={14} />}
+              <AgentCommandIcon command={item.command} size={14} />
             </span>
             <span>
               <strong>@{item.command.handle}</strong>
@@ -231,9 +229,7 @@ export function InvocationHistoryTab({ error, items, onOpen, onResume, onRetry }
           </button> : <div className="invocation-history__open invocation-history__open--status">
             <span className={`invocation-history__status invocation-history__status--${item.outcome}`} aria-hidden="true" />
             <span className="invocation-history__agent" aria-hidden="true">
-              {item.command.handle === "claude" || item.command.handle === "codex"
-                ? <AgentIcon kind={item.command.handle} size={14} />
-                : <Bot size={14} />}
+              <AgentCommandIcon command={item.command} size={14} />
             </span>
             <span>
               <strong>@{item.command.handle}</strong>

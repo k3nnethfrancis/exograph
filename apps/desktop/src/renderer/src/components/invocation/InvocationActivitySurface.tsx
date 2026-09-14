@@ -1,6 +1,5 @@
 import {
   ArrowUpRight,
-  Bot,
   Check,
   CircleAlert,
   CircleStop,
@@ -10,7 +9,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, type CSSProperties, type FocusEvent, type MouseEvent, type ReactNode } from "react";
 
-import { AgentIcon } from "../AgentIcon";
+import { AgentCommandIcon } from "../AgentCommandIcon";
+import type { AgentCommandAppearance } from "@exograph/core/agent-command-configuration";
 import "./invocation-ui.css";
 import type { InvocationReviewPosition } from "./InvocationReviewControls";
 
@@ -25,6 +25,7 @@ export type InvocationActivityKind =
 export interface InvocationActivitySurfaceProps {
   kind: InvocationActivityKind;
   commandHandle: string;
+  commandAppearance?: AgentCommandAppearance;
   commandLabel?: string;
   label?: string;
   errorDetail?: string;
@@ -40,6 +41,7 @@ export interface InvocationActivitySurfaceProps {
 export function InvocationActivitySurface({
   kind,
   commandHandle,
+  commandAppearance,
   commandLabel,
   label,
   errorDetail,
@@ -80,7 +82,7 @@ export function InvocationActivitySurface({
       style={style}
     >
       <span className={`invocation-agent-mark invocation-agent-mark--${agentKind(commandHandle)}`}>
-        <ActivityAgentIcon handle={commandHandle} />
+        <AgentCommandIcon command={{ handle: commandHandle, appearance: commandAppearance }} size={15} />
       </span>
       <ActivityStateIcon kind={kind} />
       <div className="invocation-activity__copy">
@@ -114,13 +116,6 @@ function ActivityStateIcon({ kind }: { kind: InvocationActivityKind }) {
   if (kind === "stopped") return <CircleStop aria-hidden="true" className="invocation-activity__state" size={15} />;
   if (kind === "failed") return <CircleAlert aria-hidden="true" className="invocation-activity__state" size={15} />;
   return <LoaderCircle aria-hidden="true" className="invocation-activity__state invocation-activity__state--working" size={15} />;
-}
-
-function ActivityAgentIcon({ handle }: { handle: string }) {
-  const kind = agentKind(handle);
-  return kind === "default"
-    ? <Bot aria-hidden="true" size={15} strokeWidth={1.8} />
-    : <AgentIcon kind={kind} size={15} />;
 }
 
 function agentKind(handle: string): "claude" | "codex" | "default" {

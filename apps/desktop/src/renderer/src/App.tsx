@@ -1237,6 +1237,7 @@ export function App() {
                 render: (position) => (
                   <InvocationActivitySurface
                     commandHandle={invocationActivity.commandHandle}
+                    commandAppearance={invocationActivity.commandAppearance}
                     commandLabel={invocationActivity.commandLabel}
                     kind={invocationActivity.kind}
                     label={invocationActivity.label}

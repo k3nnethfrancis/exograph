@@ -12,6 +12,7 @@ export interface InvocationActivityState {
   kind: InvocationSurfaceKind;
   commandHandle: string;
   commandLabel: string;
+  commandAppearance?: AgentCommand["appearance"];
   label?: string;
   errorDetail?: string;
   providerSessionId?: string;
@@ -48,7 +49,7 @@ export function takeEarlyInvocationActivityEvents(
 }
 
 export function beginInvocationActivity(
-  command: Pick<AgentCommand, "handle" | "label">,
+  command: Pick<AgentCommand, "handle" | "label" | "appearance">,
   paneId?: string,
   protocolInvocationId?: string,
 ): InvocationActivityState {
@@ -59,12 +60,13 @@ export function beginInvocationActivity(
     kind: "working",
     commandHandle: command.handle,
     commandLabel: command.label,
+    ...(command.appearance ? { commandAppearance: command.appearance } : {}),
   };
 }
 
 /** A synchronous, truthful acknowledgement while Exograph checks launch authority. */
 export function acknowledgeInvocationActivity(
-  command: Pick<AgentCommand, "handle" | "label">,
+  command: Pick<AgentCommand, "handle" | "label" | "appearance">,
   paneId?: string,
   protocolInvocationId?: string,
 ): InvocationActivityState {
@@ -75,11 +77,12 @@ export function acknowledgeInvocationActivity(
     kind: "checking",
     commandHandle: command.handle,
     commandLabel: command.label,
+    ...(command.appearance ? { commandAppearance: command.appearance } : {}),
   };
 }
 
 export function failInvocationActivity(
-  command: Pick<AgentCommand, "handle" | "label">,
+  command: Pick<AgentCommand, "handle" | "label" | "appearance">,
   error?: unknown,
   paneId?: string,
 ): InvocationActivityState {
@@ -89,6 +92,7 @@ export function failInvocationActivity(
     kind: "failed",
     commandHandle: command.handle,
     commandLabel: command.label,
+    ...(command.appearance ? { commandAppearance: command.appearance } : {}),
     errorDetail: boundedInvocationErrorDetail(error),
   };
 }
@@ -178,6 +182,7 @@ export function applyInvocationRecord(
     kind,
     commandHandle: record.command.handle,
     commandLabel: record.command.label,
+    ...(record.command.appearance ? { commandAppearance: record.command.appearance } : {}),
     ...(kind === "failed" ? { errorDetail: boundedInvocationErrorDetail(record.failureReason) } : {}),
     ...(kind === activeKind && current?.label ? { label: current.label } : {}),
     ...(record.providerSessionId ? { providerSessionId: record.providerSessionId } : {}),
@@ -215,9 +220,9 @@ export function boundedInvocationErrorDetail(error: unknown): string {
 export function invocationCommandPresentation(
   handle: string,
   commands: readonly AgentCommand[],
-): Pick<AgentCommand, "handle" | "label"> {
+): Pick<AgentCommand, "handle" | "label" | "appearance"> {
   const configured = commands.find((command) => command.handle === handle);
   return configured
-    ? { handle: configured.handle, label: configured.label }
+    ? { handle: configured.handle, label: configured.label, ...(configured.appearance ? { appearance: configured.appearance } : {}) }
     : { handle, label: handle.charAt(0).toUpperCase() + handle.slice(1) };
 }

@@ -66,6 +66,7 @@ export type InvocationStatus =
 export type InvocationMentionProvenance = "human-authored" | "prior-invocation-authored" | "unknown";
 
 export interface AgentCommandSnapshot {
+  appearance?: AgentCommand["appearance"];
   id: string;
   label: string;
   handle: string;

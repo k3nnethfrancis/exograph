@@ -16,7 +16,7 @@ import type { InvocationFileReviewPayload } from "../../../shared/api";
 import { exographEditorTheme, exographSyntaxHighlighting } from "../theme/codemirror";
 import type { ExographThemeVariant } from "../theme/types";
 import { codeLanguageForPath } from "./codeLanguages";
-import { AgentIcon } from "./AgentIcon";
+import { AgentCommandIcon } from "./AgentCommandIcon";
 import { ExographMark } from "./ExographMark";
 import { coerceFrontmatterValue, getDocumentDisplayTitle, stringifyFrontmatterValue } from "./documentDisplay";
 import { markdownInlineFormattingEdit } from "./markdownInlineFormatting";
@@ -273,6 +273,8 @@ export function NoteEditor(props: NoteEditorProps) {
   }, [graphContext, rawMarkdownMode, showNoteMetadata]);
   const graphReferencesRef = useRef(graphReferences);
   graphReferencesRef.current = graphReferences;
+  const agentCommandsRef = useRef(agentCommands);
+  agentCommandsRef.current = agentCommands;
   const invocationCommands = useMemo(() => agentCommands.filter((command) => command.enabled), [agentCommands]);
   const invokeAgentRef = useRef(onInvokeAgent);
   const bodyChangeRef = useRef(onBodyChange);
@@ -312,6 +314,7 @@ export function NoteEditor(props: NoteEditorProps) {
   });
   const agentComposer = useMemo(
     () => inlineAgentComposerExtension({
+      getCommand: (handle) => agentCommandsRef.current.find((command) => command.handle === handle),
       onSend: (draft) => {
         setInlineComposerActive(false);
         setInlineComposerHandle(null);
@@ -328,7 +331,7 @@ export function NoteEditor(props: NoteEditorProps) {
       },
       renderPersistedInvocations: !rawMarkdownMode,
     }),
-    [rawMarkdownMode],
+    [rawMarkdownMode, agentCommands],
   );
   const normalizedNewPropertyKey = normalizeFrontmatterPropertyKey(newPropertyKey);
   const newPropertyKeyFeedback = frontmatterPropertyKeyFeedback(newPropertyKey, document?.frontmatter ?? {});
@@ -1235,7 +1238,7 @@ export function NoteEditor(props: NoteEditorProps) {
                   acceptAgentSuggestion(command);
                 }}
               >
-                {command.handle === "claude" || command.handle === "codex" ? <AgentIcon kind={command.handle} size={16} /> : null}
+                <AgentCommandIcon command={command} size={16} />
                 <span className="agent-suggestions__copy">
                   <span className="agent-suggestions__label">{command.label}</span>
                   <span className="agent-suggestions__command">{command.command}</span>

@@ -112,7 +112,7 @@ export interface InvocationReviewListItem {
   invocationId: string;
   createdAt: string;
   endedAt?: string;
-  command: Pick<InvocationRecord["command"], "handle" | "label">;
+  command: Pick<InvocationRecord["command"], "handle" | "label" | "appearance">;
   changedFileCount: number;
   pendingFileCount: number;
   pendingChangeIds: string[];
@@ -123,7 +123,7 @@ export interface InvocationHistoryItem {
   invocationId: string;
   createdAt: string;
   endedAt?: string;
-  command: Pick<InvocationRecord["command"], "handle" | "label">;
+  command: Pick<InvocationRecord["command"], "handle" | "label" | "appearance">;
   outcome: "kept" | "rejected" | "pending" | "failed";
   changedFileCount: number;
   changeIds: string[];
@@ -742,7 +742,7 @@ export class InvocationRunner extends EventEmitter {
         ...(record.protocolInvocationId ? { protocolInvocationId: record.protocolInvocationId } : {}),
         createdAt: record.createdAt,
         ...(record.endedAt ? { endedAt: record.endedAt } : {}),
-        command: { handle: record.command.handle, label: record.command.label },
+        command: { handle: record.command.handle, label: record.command.label, ...(record.command.appearance ? { appearance: record.command.appearance } : {}) },
         outcome: invocationHistoryOutcome(record),
         changedFileCount: record.changeset?.files.length ?? 0,
         changeIds: record.changeset?.files.map((change) => change.id) ?? [],
@@ -1421,7 +1421,7 @@ function reviewListItem(record: InvocationRecord): InvocationReviewListItem {
     invocationId: record.id,
     createdAt: record.createdAt,
     ...(record.endedAt ? { endedAt: record.endedAt } : {}),
-    command: { handle: record.command.handle, label: record.command.label },
+    command: { handle: record.command.handle, label: record.command.label, ...(record.command.appearance ? { appearance: record.command.appearance } : {}) },
     changedFileCount: record.changeset?.files.length ?? 0,
     pendingFileCount: record.changeset?.files.filter((change) => isUnresolvedReviewDecision(change.decision.status)).length ?? 0,
     pendingChangeIds: record.changeset?.files

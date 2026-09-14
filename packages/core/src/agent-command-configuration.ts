@@ -13,7 +13,39 @@ export type InvocationContinuityPolicy = "continuous" | "fresh";
 
 export const DEFAULT_AGENT_COMMAND_PROMPT_DELIVERY: AgentCommandPromptDelivery = "stdin";
 
+export interface AgentCommandAppearance {
+  color?: string;
+  iconDataUrl?: string;
+}
+
+export const AGENT_ICON_MAX_BYTES = 64 * 1024;
+export const AGENT_ICON_MAX_DIMENSION = 128;
+
+/** Only bounded raster PNGs are persisted; never paths, remote URLs, or SVG. */
+export function normalizeAgentCommandAppearance(input: unknown): AgentCommandAppearance | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const candidate = input as AgentCommandAppearance;
+  const color = typeof candidate.color === "string" && /^#[0-9a-f]{6}$/.test(candidate.color) ? candidate.color : undefined;
+  const iconDataUrl = validAgentIcon(candidate.iconDataUrl) ? candidate.iconDataUrl : undefined;
+  return color || iconDataUrl ? { ...(color ? { color } : {}), ...(iconDataUrl ? { iconDataUrl } : {}) } : undefined;
+}
+
+function validAgentIcon(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 22 + Math.ceil(AGENT_ICON_MAX_BYTES / 3) * 4
+    || !/^data:image\/png;base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return false;
+  const bytes = Uint8Array.from(atob(value.slice(22)), (character) => character.charCodeAt(0));
+  if (bytes.length < 45 || bytes.length > AGENT_ICON_MAX_BYTES) return false;
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82];
+  if (!signature.every((byte, index) => bytes[index] === byte)) return false;
+  const view = new DataView(bytes.buffer);
+  const width = view.getUint32(16);
+  const height = view.getUint32(20);
+  return width > 0 && height > 0 && width <= AGENT_ICON_MAX_DIMENSION && height <= AGENT_ICON_MAX_DIMENSION
+    && bytes.slice(-12).every((byte, index) => byte === [0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130][index]);
+}
+
 export interface AgentCommand {
+  appearance?: AgentCommandAppearance;
   id: string;
   label: string;
   handle: string;
@@ -51,7 +83,9 @@ export function normalizeAgentCommand(input: unknown, fallbackId?: string): Agen
   if (!promptDelivery) return null;
 
   const adapter = normalizeAgentCommandAdapter(candidate.adapter, { ...candidate, command });
+  const appearance = normalizeAgentCommandAppearance(candidate.appearance);
   const normalized: AgentCommand = {
+    ...(appearance ? { appearance } : {}),
     id,
     label,
     handle,
@@ -148,6 +182,12 @@ function canonicalAgentCommandError(input: unknown, index: number): string | nul
   const candidate = input as Record<string, unknown>;
   const command = normalizeAgentCommand(candidate, `agent-command-${index + 1}`);
   if (!command) return malformed();
+  if (candidate.appearance !== undefined) {
+    const appearance = candidate.appearance as AgentCommandAppearance;
+    if (!command.appearance || !appearance || typeof appearance !== "object"
+      || Object.keys(appearance).some((key) => key !== "color" && key !== "iconDataUrl")
+      || appearance.color !== command.appearance.color || appearance.iconDataUrl !== command.appearance.iconDataUrl) return malformed("appearance");
+  }
   if (candidate.id !== command.id) return malformed("id");
   if (candidate.label !== command.label) return malformed("label");
   if (candidate.handle !== command.handle) return malformed("handle");

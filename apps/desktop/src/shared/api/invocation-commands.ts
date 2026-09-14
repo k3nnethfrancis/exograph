@@ -47,7 +47,7 @@ export interface InvocationReviewListItem {
   invocationId: string;
   createdAt: string;
   endedAt?: string;
-  command: Pick<InvocationRecord["command"], "handle" | "label">;
+  command: Pick<InvocationRecord["command"], "handle" | "label" | "appearance">;
   changedFileCount: number;
   pendingFileCount: number;
   /** Opaque review keys in deterministic changeset order. */
@@ -60,7 +60,7 @@ export interface InvocationHistoryItem {
   protocolInvocationId?: string;
   createdAt: string;
   endedAt?: string;
-  command: Pick<InvocationRecord["command"], "handle" | "label">;
+  command: Pick<InvocationRecord["command"], "handle" | "label" | "appearance">;
   outcome: "kept" | "rejected" | "pending" | "failed";
   changedFileCount: number;
   /** Opaque review keys in deterministic changeset order. */

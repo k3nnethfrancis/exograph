@@ -33,6 +33,7 @@ export function AppInvocationAuthorizationGate({
   return (
     <InvocationAuthorizationPopover
       commandHandle={pending.command.handle}
+      commandAppearance={pending.command.appearance}
       commandLabel={pending.command.label}
       details={{
         command: pending.command.command,
