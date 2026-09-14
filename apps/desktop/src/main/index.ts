@@ -1,5 +1,6 @@
+import { prepareAppProfile } from "./runtime/app-profile";
 import { planWorkspaceSettingsApply } from "./runtime/workspace-settings-apply-plan";
-import { app, nativeTheme, powerMonitor } from "electron";
+import { app, dialog, nativeTheme, powerMonitor } from "electron";
 import path from "node:path";
 import { appendFile, mkdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -73,8 +74,15 @@ const sourceProjectRoot = resolveSourceProjectRoot();
 const gpuStartupPolicy = configureGpuStartup(app, process.env);
 const BOOTSTRAP_WORKSPACE_GENERATION = 0;
 
-if (process.env.EXOGRAPH_USER_DATA_PATH) {
-  app.setPath("userData", process.env.EXOGRAPH_USER_DATA_PATH);
+try {
+  app.setName("Exograph");
+  const profile = prepareAppProfile(app.getPath("appData"), process.env.EXOGRAPH_USER_DATA_PATH);
+  app.setPath("userData", profile);
+  app.setPath("sessionData", profile);
+} catch (error) {
+  dialog.showErrorBox("Exograph could not migrate app data", String(error));
+  app.exit(1);
+  throw error;
 }
 
 process.on("uncaughtException", (error) => {
@@ -373,7 +381,7 @@ function registerIpcHandlers() {
   });
   managedSiteSetup = new ManagedSiteSetup({
     context: () => ({ ...currentSnapshot(), model: workspaceModel }),
-    sitesParent: path.join(app.getPath("userData"), "publishing-sites"),
+    sitesParent: path.join(app.getPath("userData"), "exo-quartz-sites"),
     capture: async (model, publicationDirectory, stagingParent, generatedRoutes, assertCurrent) => {
       await appLifecycle.withDocumentsFlushed(async () => {});
       assertCurrent();

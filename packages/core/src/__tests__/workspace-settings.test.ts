@@ -1,7 +1,7 @@
 import { access, chmod, mkdir, mkdtemp, open, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createDefaultClaudeAgentCommand, createDefaultCodexAgentCommand } from "../agent-invocation";
 import type { WorkspaceSettings } from "../types";
@@ -19,6 +19,23 @@ import {
   workspaceEnvOverrides,
   workspaceModelFromSettings,
 } from "../workspace-settings";
+
+it("resolves conventional profiles, with a legacy fallback until the desktop migrates", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "exo-profile-resolver-"));
+  const spy = vi.spyOn(os, "homedir").mockReturnValue(home);
+  const appData = process.platform === "darwin" ? path.join(home, "Library", "Application Support")
+    : process.platform === "win32" ? path.join(home, "AppData", "Roaming") : path.join(home, ".config");
+  const legacy = path.join(appData, "@exograph", "desktop");
+  const current = path.join(appData, "Exograph");
+  try {
+    expect(resolveWorkspaceSettingsPath({})).toBe(path.join(current, "workspace-settings.json"));
+    await mkdir(legacy, { recursive: true });
+    expect(resolveWorkspaceSettingsPath({})).toBe(path.join(legacy, "workspace-settings.json"));
+    await mkdir(current);
+    expect(resolveWorkspaceSettingsPath({})).toBe(path.join(current, "workspace-settings.json"));
+    expect(resolveWorkspaceSettingsPath({ EXOGRAPH_USER_DATA_PATH: "/custom" })).toBe(path.join("/custom", "workspace-settings.json"));
+  } finally { spy.mockRestore(); await rm(home, { recursive: true, force: true }); }
+});
 
 describe("workspace settings registry", () => {
   it.each([

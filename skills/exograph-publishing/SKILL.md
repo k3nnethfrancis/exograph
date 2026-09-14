@@ -19,9 +19,9 @@ versions and profiles. Do not infer that a feature exists from this skill alone.
    CLI settings resolver, `EXOGRAPH_SETTINGS_PATH` overrides the settings file;
    `EXOGRAPH_USER_DATA_PATH` overrides the profile directory. The running app's
    actual profile and settings path are authoritative. Default profiles are:
-   - macOS: `~/Library/Application Support/@exograph/desktop/`
-   - Linux: `${XDG_CONFIG_HOME:-~/.config}/@exograph/desktop/`
-   - Windows: `%APPDATA%/@exograph/desktop/`
+   - macOS: `~/Library/Application Support/Exograph/`
+   - Linux: `${XDG_CONFIG_HOME:-~/.config}/Exograph/`
+   - Windows: `%APPDATA%/Exograph/`
    Settings are in `workspace-settings.json`; `workspace-registry.json` records
    other workspaces. Inspect only the relevant publishing fields, not an entire
    private workspace dump.
@@ -45,7 +45,7 @@ Managed publishing starts at Settings → Publishing → Set up website. The use
 chooses content, connects GitHub, creates/selects a repository, and chooses the
 Quartz default or imports a committed theme. Setup returns the managed checkout
 path into `publishing.engineDirectory`; do not reconstruct that path yourself.
-The checkout is under the app profile's `publishing-sites/`, outside Note Roots.
+The checkout is under the app profile's `exo-quartz-sites/`, outside Note Roots.
 
 A managed checkout has `exograph-site.json` with `schemaVersion: 1`. Its website
 repository owns Quartz/theme code, exported `garden/`, pinned dependencies, and

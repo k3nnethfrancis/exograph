@@ -3,13 +3,20 @@
 Agent support: [exograph-publishing](../skills/exograph-publishing/SKILL.md)
 explains how to locate the active user profile, content, theme, and deployment.
 
+The default macOS profile is `~/Library/Application Support/Exograph/`.
+On upgrade, Exo copies the former `@exograph/desktop/` profile, relocates saved
+managed-site paths, and retains the original for rollback. Quit the older app
+before upgrading. Explicit `EXOGRAPH_USER_DATA_PATH` overrides are unchanged.
+The local checkout is the editable copy; the GitHub repository is its remote
+counterpart and the source GitHub Pages builds.
+
 ## Managed setup
 
 Choose **Set up website** in Settings → Publishing, then select a content folder,
 connect GitHub, and create or choose a website repository. New repositories are
 public. Choose the pinned Quartz default or import an existing committed Quartz
 project. Existing custom domains and repository history are preserved. Exo
-creates a local checkout under the app profile's `publishing-sites/` and saves
+creates a local checkout under the app profile's `exo-quartz-sites/` and saves
 its actual location in the workspace settings. Users need no separate local
 website checkout or manually installed Pages workflow.
 

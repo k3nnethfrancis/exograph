@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -656,13 +656,13 @@ function resolveDesktopUserDataPath(env: NodeJS.ProcessEnv): string {
     return env.EXOGRAPH_USER_DATA_PATH;
   }
   const home = os.homedir();
-  if (process.platform === "darwin") {
-    return path.join(home, "Library", "Application Support", "@exograph", "desktop");
-  }
-  if (process.platform === "win32") {
-    return path.join(env.APPDATA ?? path.join(home, "AppData", "Roaming"), "@exograph", "desktop");
-  }
-  return path.join(env.XDG_CONFIG_HOME ?? path.join(home, ".config"), "@exograph", "desktop");
+  const appData = process.platform === "darwin" ? path.join(home, "Library", "Application Support")
+    : process.platform === "win32" ? env.APPDATA ?? path.join(home, "AppData", "Roaming")
+    : env.XDG_CONFIG_HOME ?? path.join(home, ".config");
+  const conventional = path.join(appData, "Exograph");
+  const legacy = path.join(appData, "@exograph", "desktop");
+  // App-off CLI remains usable before the desktop app performs the migration.
+  return existsSync(conventional) || !existsSync(legacy) ? conventional : legacy;
 }
 
 function workspaceIdForNotesFolder(notesFolder: string): string {
