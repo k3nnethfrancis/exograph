@@ -31,7 +31,7 @@ export function PublishingSetup({ scope, onConfigured, onClose }: {
   }, [auth?.pending]);
   const choose = async (target: "folder" | "theme") => {
     try {
-      const paths = await window.exograph.workspace.selectFolder({ title: target === "folder" ? "Choose website content" : "Choose existing Quartz theme" });
+      const paths = await window.exograph.workspace.selectFolder({ title: target === "folder" ? "Choose website content" : "Choose existing Quartz theme", defaultPath: (target === "folder" ? folder : theme) || undefined });
       if (paths[0] && mounted.current) (target === "folder" ? setFolder : setTheme)(paths[0]);
     } catch (cause) { setError(String(cause)); }
   };

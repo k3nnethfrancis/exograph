@@ -21,6 +21,19 @@ beforeEach(() => {
 afterEach(async () => { if (mounted) await act(async () => mounted!.unmount()); mounted = undefined; vi.unstubAllGlobals(); });
 async function mount() { await act(async () => { mounted = create(<PublishingSection settings={settings} setSettings={vi.fn()} />); }); }
 const button = () => mounted!.root.findByProps({ "data-testid": "publishing-publish" });
+it("refreshes managed controls after migrated settings finish saving", async () => {
+  const getSetupStatus = vi.fn().mockResolvedValue({ authenticated: true, managed: false });
+  window.exograph.publishing.getSetupStatus = getSetupStatus;
+  await mount();
+  const migrated = { ...settings, publishing: { ...settings.publishing!, engineDirectory: "/managed-site" } };
+  await act(async () => mounted!.update(<PublishingSection settings={{ ...migrated, saveStatus: "saving" }} setSettings={vi.fn()} />));
+  expect(getSetupStatus).toHaveBeenCalledTimes(1);
+  getSetupStatus.mockResolvedValue({ authenticated: true, managed: true });
+  await act(async () => mounted!.update(<PublishingSection settings={migrated} setSettings={vi.fn()} />));
+  expect(getSetupStatus).toHaveBeenCalledTimes(2);
+  expect(JSON.stringify(mounted!.toJSON())).toContain("Customize theme");
+  expect(JSON.stringify(mounted!.toJSON())).not.toContain("Use managed publishing");
+});
 it("enables publication only for a saved prepared snapshot, never a preview or pending build", async () => {
   await mount();
   expect(button().props.disabled).toBe(true);

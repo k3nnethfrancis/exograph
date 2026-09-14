@@ -14,10 +14,11 @@ export function PublishingSection({ settings, setSettings }: {
   const [managed, setManaged] = useState(false);
   const [setupNotice, setSetupNotice] = useState<string | null>(null);
   useEffect(() => {
+    if (settings.saveStatus !== "saved" || settings.applyStatus === "applying") return;
     let current = true;
     void window.exograph.publishing.getSetupStatus().then(result => { if (current) setManaged(result.managed); }).catch(() => {});
     return () => { current = false; };
-  }, [settings.publishing?.engineDirectory]);
+  }, [settings.publishing?.engineDirectory, settings.saveStatus, settings.applyStatus]);
   const identity = JSON.stringify([settings.workspaceRoot, settings.noteRoots, settings.publishing]);
   const identityRef = useRef(identity);
   identityRef.current = identity;

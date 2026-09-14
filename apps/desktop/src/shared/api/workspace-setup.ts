@@ -42,7 +42,7 @@ export interface WorkspaceSetupApi {
   listWorkspaces: () => Promise<WorkspaceRegistryEntry[]>;
   activateWorkspace: (input: { workspaceId: string; expectedRevision: WorkspaceSettingsSaveRequest["expectedRevision"] }) => Promise<WorkspaceSettingsSaveOutcome>;
   saveSettings: (request: WorkspaceSettingsSaveRequest) => Promise<WorkspaceSettingsSaveOutcome>;
-  selectFolder: (options?: { title?: string; allowMultiple?: boolean; buttonLabel?: string }) => Promise<string[]>;
+  selectFolder: (options?: { title?: string; allowMultiple?: boolean; buttonLabel?: string; defaultPath?: string }) => Promise<string[]>;
   inspectContentScope: (rootPath: string) => Promise<WorkspaceContentInspection>;
   previewOntology: (sourcePath?: string | null) => Promise<OntologyReviewState>;
   keepOntology: (guard: OntologyReviewGuard) => Promise<OntologyKeepResult>;
