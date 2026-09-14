@@ -169,7 +169,7 @@ test("keeps backlink note navigation within the editor latency budget", async ()
   try {
     await page.getByRole("button", { name: "focus-note" }).first().click();
     await page.getByTestId("utility-pane-toggle").click();
-    await page.getByTestId("utility-pane-connections").click();
+    await page.getByTestId("utility-pane-context").click();
     await page.getByTestId("connections-tab-links").click();
     const backlinks = page.getByTestId("connections-panel-links");
     await expect(backlinks.getByRole("button", { name: "Related Note" }).first()).toBeVisible();

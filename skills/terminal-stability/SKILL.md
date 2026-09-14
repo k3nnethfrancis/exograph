@@ -13,7 +13,7 @@ Read these current sources first:
 
 - `AGENTS.md`
 - the relevant GitHub Issue or pull request when one exists
-- `docs/terminal-runtime-decision.md`
+- `docs/adr/0009-direct-pty-terminal-runtime.md`
 - `apps/desktop/src/main/terminal/terminal-runtime.ts`
 - `apps/desktop/src/main/terminal/terminal-runtime-pty.ts`
 - `apps/desktop/src/main/terminal/terminal-manager.ts`

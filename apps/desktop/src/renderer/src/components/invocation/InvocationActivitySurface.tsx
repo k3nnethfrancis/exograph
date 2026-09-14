@@ -1,34 +1,31 @@
 import {
   ArrowUpRight,
-  Bot,
   Check,
   CircleAlert,
-  FilePenLine,
+  CircleStop,
   LoaderCircle,
   RotateCcw,
-  Search,
-  Square,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, type FocusEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type CSSProperties, type FocusEvent, type MouseEvent, type ReactNode } from "react";
 
-import { AgentIcon } from "../AgentIcon";
+import { AgentCommandIcon } from "../AgentCommandIcon";
+import type { AgentCommandAppearance } from "@exograph/core/agent-command-configuration";
 import "./invocation-ui.css";
+import type { InvocationReviewPosition } from "./InvocationReviewControls";
 
 export type InvocationActivityKind =
   | "checking"
   | "working"
-  | "reading"
-  | "searching"
-  | "editing"
-  | "running"
-  | "finishing"
+  | "review"
   | "done"
+  | "stopped"
   | "failed";
 
 export interface InvocationActivitySurfaceProps {
   kind: InvocationActivityKind;
   commandHandle: string;
+  commandAppearance?: AgentCommandAppearance;
   commandLabel?: string;
   label?: string;
   errorDetail?: string;
@@ -38,11 +35,13 @@ export interface InvocationActivitySurfaceProps {
   onDismiss?: () => void;
   onResume?: () => void;
   onShowDetails?: () => void;
+  position?: InvocationReviewPosition;
 }
 
 export function InvocationActivitySurface({
   kind,
   commandHandle,
+  commandAppearance,
   commandLabel,
   label,
   errorDetail,
@@ -52,38 +51,47 @@ export function InvocationActivitySurface({
   onDismiss,
   onResume,
   onShowDetails,
+  position,
 }: InvocationActivitySurfaceProps) {
   const autoDismiss = useHoverFocusAutoDismiss({
-    enabled: kind === "done" && Boolean(onDismiss),
+    enabled: (kind === "done" || kind === "stopped") && Boolean(onDismiss),
     delayMs: autoDismissMs,
     onDismiss,
   });
   const failed = kind === "failed";
-  const active = !failed && kind !== "done";
+  const terminal = kind === "done" || kind === "stopped";
+  const active = !failed && !terminal && kind !== "review";
+  const style = position ? {
+    "--invocation-activity-left": `${position.left}px`,
+    "--invocation-activity-top": `${position.top}px`,
+    "--invocation-activity-origin": position.origin ?? "top left",
+  } as CSSProperties : undefined;
 
   return (
     <aside
       aria-atomic="true"
       aria-live="polite"
-      className={`invocation-activity invocation-activity--${failed ? "failed" : kind === "done" ? "done" : "active"}`}
+      className={`invocation-activity invocation-activity--${failed ? "failed" : terminal ? "done" : "active"}`}
       data-testid="invocation-activity"
       onBlur={autoDismiss.onBlur}
       onFocus={autoDismiss.onFocus}
       onMouseEnter={autoDismiss.onMouseEnter}
       onMouseLeave={autoDismiss.onMouseLeave}
       role="status"
+      data-positioned={position ? "true" : "false"}
+      style={style}
     >
       <span className={`invocation-agent-mark invocation-agent-mark--${agentKind(commandHandle)}`}>
-        <ActivityAgentIcon handle={commandHandle} />
+        <AgentCommandIcon command={{ handle: commandHandle, appearance: commandAppearance }} size={15} />
       </span>
       <ActivityStateIcon kind={kind} />
       <div className="invocation-activity__copy">
-        <strong>{activityTitle(kind, label)}</strong>
-        <span>{failed ? errorDetail ?? `${commandLabel ?? commandHandle} could not finish.` : commandLabel ?? `@${commandHandle}`}</span>
+        <strong>{activityTitle(kind)}</strong>
+        <span>{failed ? errorDetail ?? `${commandLabel ?? commandHandle} could not finish.` : label ?? commandLabel ?? `@${commandHandle}`}</span>
       </div>
       <div aria-label="Invocation actions" className="invocation-activity__actions" role="group">
         {active && onStop ? (
-          <IconAction label="Stop" onClick={onStop}><Square size={13} /></IconAction>
+          <IconAction label="Stop" onClick={onStop}><CircleStop size={14} /></IconAction>
         ) : null}
         {failed && onRetry ? (
           <IconAction label="Retry" onClick={onRetry}><RotateCcw size={14} /></IconAction>
@@ -94,7 +102,7 @@ export function InvocationActivitySurface({
         {failed && errorDetail && onShowDetails ? (
           <button className="invocation-activity__details" onClick={onShowDetails} type="button">Details</button>
         ) : null}
-        {(failed || kind === "done") && onDismiss ? (
+        {(failed || terminal) && onDismiss ? (
           <IconAction label="Dismiss" onClick={onDismiss}><X size={14} /></IconAction>
         ) : null}
       </div>
@@ -103,35 +111,25 @@ export function InvocationActivitySurface({
 }
 
 function ActivityStateIcon({ kind }: { kind: InvocationActivityKind }) {
+  if (kind === "review") return <Check aria-hidden="true" className="invocation-activity__state" size={15} />;
   if (kind === "done") return <Check aria-hidden="true" className="invocation-activity__state" size={15} />;
+  if (kind === "stopped") return <CircleStop aria-hidden="true" className="invocation-activity__state" size={15} />;
   if (kind === "failed") return <CircleAlert aria-hidden="true" className="invocation-activity__state" size={15} />;
-  if (kind === "searching") return <Search aria-hidden="true" className="invocation-activity__state" size={15} />;
-  if (kind === "editing") return <FilePenLine aria-hidden="true" className="invocation-activity__state" size={15} />;
   return <LoaderCircle aria-hidden="true" className="invocation-activity__state invocation-activity__state--working" size={15} />;
-}
-
-function ActivityAgentIcon({ handle }: { handle: string }) {
-  const kind = agentKind(handle);
-  return kind === "default"
-    ? <Bot aria-hidden="true" size={15} strokeWidth={1.8} />
-    : <AgentIcon kind={kind} size={15} />;
 }
 
 function agentKind(handle: string): "claude" | "codex" | "default" {
   return handle === "claude" || handle === "codex" ? handle : "default";
 }
 
-export function activityTitle(kind: InvocationActivityKind, label?: string): string {
-  const base = kind === "checking" ? "Checking"
+export function activityTitle(kind: InvocationActivityKind): string {
+  const base = kind === "checking" ? "Starting"
     : kind === "working" ? "Working"
-    : kind === "reading" ? "Reading"
-      : kind === "searching" ? "Searching"
-        : kind === "editing" ? "Editing"
-          : kind === "running" ? "Running"
-            : kind === "finishing" ? "Finishing"
-              : kind === "done" ? "Done"
-                : "Failed";
-  return label && kind !== "done" && kind !== "failed" ? `${base} ${label}` : base;
+      : kind === "review" ? "Review"
+      : kind === "done" ? "Done"
+        : kind === "stopped" ? "Stopped"
+        : "Failed";
+  return base;
 }
 
 function IconAction({ label, onClick, children }: {

@@ -43,13 +43,23 @@ export async function inspectCliInstallation(
     ? path.join(sourceProjectRoot, "packages", "cli", "bin", "exograph")
     : undefined;
   const installCommand = sourceProjectRoot ? `cd ${shellQuote(sourceProjectRoot)} && ./scripts/install-local` : undefined;
+  const shellCommandPath = await findExecutable("exo", env.PATH);
   const commandPath = await findExecutable("exo", commandEnvironment(env).PATH);
 
   if (!commandPath) {
-    return sourcePath ? { state: "missing", sourcePath, installCommand } : { state: "unavailable" };
+    return sourcePath
+      ? { state: "missing", shellPathAvailable: false, sourcePath, installCommand }
+      : { state: "unavailable", shellPathAvailable: false };
   }
 
-  const common = { commandPath, ...(sourcePath ? { sourcePath, installCommand } : {}) };
+  const shellPathAvailable = shellCommandPath !== undefined
+    && path.resolve(shellCommandPath) === path.resolve(commandPath);
+  const common = {
+    commandPath,
+    shellPathAvailable,
+    ...(!shellPathAvailable ? { shellPathCommand: shellPathInstruction(commandPath, env) } : {}),
+    ...(sourcePath ? { sourcePath, installCommand } : {}),
+  };
   if (packagedCli && await isPackagedExographCli(commandPath)) {
     return { state: "current", ...common };
   }
@@ -148,4 +158,13 @@ function packagedCliLauncher(packagedCli: PackagedCliPaths): string {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\\"'\\\"'")}'`;
+}
+
+function shellPathInstruction(commandPath: string, env: NodeJS.ProcessEnv): string {
+  const directory = path.dirname(commandPath);
+  const home = env.HOME || process.env.HOME;
+  if (home && directory === path.join(home, ".local", "bin")) {
+    return 'export PATH="$HOME/.local/bin:$PATH"';
+  }
+  return `export PATH=${shellQuote(directory)}:"$PATH"`;
 }

@@ -17,6 +17,58 @@ const mixedRepositoryFixture = path.join(path.dirname(fileURLToPath(import.meta.
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("WorkspaceGraph", () => {
+  it.each(["[[nested/Cedar|Cedar alias]]", "[[ nested/Cedar#Overview | Cedar alias ]]"])("joins aliased and bare wikilinks to one existing Note Concept: %s", async (aliasedLink) => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "exograph-workspace-graph-alias-"));
+    roots.push(workspace);
+    const notes = path.join(workspace, "notes");
+    await mkdir(path.join(notes, "nested"), { recursive: true });
+    const atlasPath = path.join(notes, "Atlas.md");
+    const cedarPath = path.join(notes, "nested", "Cedar.md");
+    const atlasBody = `# Atlas\n\n🧠 ${aliasedLink}\n`;
+    await writeFile(atlasPath, atlasBody);
+    await writeFile(path.join(notes, "Borealis.md"), "# Borealis\n\n[[nested/Cedar]]\n");
+    await writeFile(cedarPath, "# Cedar\n\n## Overview\n");
+    const graph = new WorkspaceGraph(model(workspace, notes));
+    const context = await graph.contextForNote(atlasPath);
+    expect(context?.outgoing).toHaveLength(1);
+    expect(context?.outgoing[0]).toMatchObject({ target: "nested/Cedar", label: "Cedar alias", resolution: "resolved", note: { filePath: cedarPath } });
+    const range = context!.outgoing[0].sourceRange!;
+    expect(atlasBody.slice(range.from, range.to)).toBe(aliasedLink);
+    const snapshot = await graph.knowledgeSnapshot();
+    expect(snapshot.concepts.map((concept) => concept.label).sort()).toEqual(["Atlas", "Borealis", "Cedar"]);
+    expect(snapshot.relations).toHaveLength(2);
+    expect(snapshot.relations.every((relation) => relation.resolution === "resolved" && relation.target === context?.outgoing[0].note?.id)).toBe(true);
+    expect(snapshot.findings).toEqual([]);
+    const cedarContext = await graph.contextForNote(cedarPath);
+    expect(cedarContext?.backlinks).toHaveLength(2);
+  });
+
+  it("assigns unique stable relation IDs to differently labeled links from the same Note", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "exograph-workspace-graph-alias-occurrences-"));
+    roots.push(workspace);
+    const notes = path.join(workspace, "notes");
+    await mkdir(path.join(notes, "one"), { recursive: true });
+    const sourcePath = path.join(notes, "Atlas.md");
+    const links = ["[[one/Cedar]]", "[[one/Cedar|alias]]", "[Another label](one/Cedar.md)"];
+    const body = `# Atlas\n\n🧠 ${links.join(" ")}\n`;
+    await writeFile(sourcePath, body);
+    await writeFile(path.join(notes, "one", "Cedar.md"), "# Cedar\n");
+    const graph = new WorkspaceGraph(model(workspace, notes));
+    const snapshot = await graph.knowledgeSnapshot();
+    const relations = snapshot.relations;
+    expect(relations).toHaveLength(3);
+    expect(new Set(relations.map((relation) => relation.id)).size).toBe(3);
+    expect(new Set(relations.map((relation) => relation.target)).size).toBe(1);
+    expect(relations.every((relation) => relation.resolution === "resolved")).toBe(true);
+    expect(relations.map((relation) => relation.label).sort()).toEqual(["Another label", "alias", "one/Cedar"]);
+    const spans = relations.flatMap((relation) => relation.evidence.flatMap((evidence) => evidence.kind === "source-span" && evidence.sourceRange ? [evidence.sourceRange] : []));
+    expect(spans).toHaveLength(3);
+    expect(new Set(spans.map((span) => span.from)).size).toBe(3);
+    expect(spans.map((span) => body.slice(span.from, span.to)).sort()).toEqual([...links].sort());
+    await graph.rebuild();
+    expect((await graph.knowledgeSnapshot()).relations).toEqual(relations);
+  });
+
   it("does not project Markdown beneath excluded repository paths", async () => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), "exograph-workspace-graph-policy-"));
     roots.push(workspace);

@@ -24,6 +24,15 @@ function stateWithFoldedParent(doc: string, lineNumber: number) {
 }
 
 describe("markdown live preview folded-list identity", () => {
+  it("keeps heading and tag fold anchors through edits to their children", () => {
+    for (const doc of ["# Parent\nchild", "#project\n  child"]) {
+      const { field, state } = stateWithFoldedParent(doc, 1);
+      const child = state.doc.line(2);
+      const edited = state.update({ changes: { from: child.to, insert: " updated" } }).state;
+      expect(edited.field(field)).toEqual(new Set([0]));
+    }
+  });
+
   it("keeps a nested parent folded when sibling lines are inserted and deleted before it", () => {
     const { field, state } = stateWithFoldedParent(["- outer", "  - nested parent", "    - child", "  - sibling", "- after"].join("\n"), 2);
     const parent = state.doc.line(2);

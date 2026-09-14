@@ -9,8 +9,13 @@ directories:
 files:
   - dist/**/*
   - package.json
+  - "!**/node_modules/**/prebuilds/!(darwin-${arch}){,/**}"
 
 extraResources:
+  - from: ../../skills/exograph-publishing
+    to: skills/exograph-publishing
+  - from: resources/publishing
+    to: publishing
   - from: ../../skills/find-and-connect-relevant-context
     to: skills/find-and-connect-relevant-context
 

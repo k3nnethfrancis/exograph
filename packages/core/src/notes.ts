@@ -58,17 +58,18 @@ export async function saveWorkspaceDocument(
   frontmatter: Record<string, unknown>,
   body: string,
 ): Promise<void> {
-  if (!isMarkdownPath(filePath)) {
-    await writeFile(filePath, body, "utf8");
-    return;
-  }
+  await writeFile(filePath, serializeWorkspaceDocument(filePath, frontmatter, body), "utf8");
+}
+
+export function serializeWorkspaceDocument(filePath: string, frontmatter: Record<string, unknown>, body: string): string {
+  if (!isMarkdownPath(filePath)) return body;
 
   const serializedFrontmatter =
     frontmatter.date instanceof Date && !Number.isNaN(frontmatter.date.getTime())
       ? { ...frontmatter, date: frontmatter.date.toISOString().slice(0, 10) }
       : frontmatter;
   const serialized = preserveTrailingNewline(body, matter.stringify(body, serializedFrontmatter));
-  await writeFile(filePath, serialized, "utf8");
+  return serialized;
 }
 
 /**
@@ -83,9 +84,12 @@ function preserveTrailingNewline(body: string, serialized: string): string {
 
 export function extractWikilinks(body: string): WikilinkReference[] {
   return Array.from(body.matchAll(WIKILINK_PATTERN)).map((match) => {
-    const target = match[1].trim();
+    const content = match[1];
+    const aliasSeparator = content.indexOf("|");
+    const target = (aliasSeparator < 0 ? content : content.slice(0, aliasSeparator)).trim();
+    const label = aliasSeparator < 0 ? target : content.slice(aliasSeparator + 1).trim();
     const from = match.index ?? 0;
-    return { label: target, target, sourceRange: { from, to: from + match[0].length } };
+    return { label, target, sourceRange: { from, to: from + match[0].length } };
   });
 }
 

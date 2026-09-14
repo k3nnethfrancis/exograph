@@ -1,9 +1,13 @@
-import { app, nativeTheme, powerMonitor } from "electron";
+import { prepareAppProfile } from "./runtime/app-profile";
+import { planWorkspaceSettingsApply } from "./runtime/workspace-settings-apply-plan";
+import { app, dialog, nativeTheme, powerMonitor } from "electron";
 import path from "node:path";
 import { appendFile, mkdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import {
+  exportPublication,
+  verifyPublicationSnapshot,
   createFolderWithIndex,
   DEFAULT_APPEARANCE_MODE,
   beginOnboardingProgress,
@@ -16,10 +20,9 @@ import {
   WORKSPACE_RUNTIME_DIRECTORY,
   markOnboardingComplete,
   readOnboardingStateStore,
-  readWorkspaceDocument,
+  DocumentPersistence,
   renameWorkspacePath,
   resolveWorkspaceModel,
-  saveWorkspaceDocument,
   workspaceModelFromSettings,
   writeOnboardingStateStore,
   type OnboardingStateStore,
@@ -31,6 +34,9 @@ import {
 
 import type { DesktopEventChannel, DesktopEventPayloads } from "../shared/desktop-ipc";
 import type { WorkspaceSettingsSaveOutcome } from "../shared/api";
+import { ManagedSiteSetup } from "./publishing/managed-site-setup";
+import { PublishingService } from "./publishing/publishing-service";
+import { registerPublishingIpc } from "./publishing/publishing-ipc";
 import { InvocationRunner } from "./invocation/invocation-runner";
 import { awaitInvocationAwareQuit } from "./invocation/invocation-quit";
 import { AppLifecycleController } from "./app-lifecycle";
@@ -44,7 +50,7 @@ import { TerminalManager } from "./terminal/terminal-manager";
 import { registerWorkspaceIpcHandlers } from "./workspace/workspace-ipc";
 import { configureProviderMcp } from "./provider-mcp-setup";
 import { findSourceProjectRoot, inspectCliInstallation, installPackagedCli } from "./cli-installation";
-import { resolvePreviewTarget } from "./preview-target";
+import { readPdfFile, resolvePreviewTarget } from "./preview-target";
 import { WorkspaceNotesService } from "./workspace/workspace-notes-service";
 import { WorkspaceWatcherService } from "./workspace/workspace-watchers";
 import { WorkspaceRuntimeCoordinator } from "./runtime/workspace-runtime-coordinator";
@@ -57,7 +63,7 @@ import {
   resolveOntologyMaintenanceSkill,
 } from "./workspace/ontology-maintenance-skill";
 import {
-  ensureOntologyDiscoverySkill,
+  createOntologyDesignPrompt,
   OntologyDiscoveryCoordinator,
   runOntologyDiscovery,
   stopActiveOntologyDiscoveries,
@@ -68,8 +74,15 @@ const sourceProjectRoot = resolveSourceProjectRoot();
 const gpuStartupPolicy = configureGpuStartup(app, process.env);
 const BOOTSTRAP_WORKSPACE_GENERATION = 0;
 
-if (process.env.EXOGRAPH_USER_DATA_PATH) {
-  app.setPath("userData", process.env.EXOGRAPH_USER_DATA_PATH);
+try {
+  app.setName("Exograph");
+  const profile = prepareAppProfile(app.getPath("appData"), process.env.EXOGRAPH_USER_DATA_PATH);
+  app.setPath("userData", profile);
+  app.setPath("sessionData", profile);
+} catch (error) {
+  dialog.showErrorBox("Exograph could not migrate app data", String(error));
+  app.exit(1);
+  throw error;
 }
 
 process.on("uncaughtException", (error) => {
@@ -83,6 +96,8 @@ process.on("unhandledRejection", (reason) => {
 let appLifecycle: AppLifecycleController;
 let commandServerLifecycle: CommandServerLifecycle;
 let workspaceModel: WorkspaceModel;
+let managedSiteSetup: ManagedSiteSetup | undefined;
+let publishingService: PublishingService | undefined;
 let workspaceSettings: WorkspaceSettings | null = null;
 let workspaceSettingsRevision: string | null = null;
 let workspaceConfig: WorkspaceConfigStore;
@@ -107,6 +122,7 @@ let flushingOsOpenFiles = false;
 
 const ontologyDiscoveryCoordinator = new OntologyDiscoveryCoordinator({
   getCommands: () => currentSettings().agentCommands ?? [],
+  getDefaultCommandId: () => currentSettings().defaultAgentCommandId,
   getWorkspace: () => ({
     workspaceRoot: workspaceModel.workspaceRoot,
     runtimeRoot: resolveRuntimeRoot(),
@@ -114,7 +130,7 @@ const ontologyDiscoveryCoordinator = new OntologyDiscoveryCoordinator({
   }),
   getCommandLaunchFacts: (commandId) => invocationRunner.getCommandLaunchFacts(commandId),
   getCommandTrust: (handle) => invocationRunner.getCommandTrust(handle),
-  ensureSkill: ensureOntologyDiscoverySkill,
+  getPrompt: () => createOntologyDesignPrompt(currentSettings().ontologyDiscoveryPrompt),
   invalidateDerivedState: () => workspaceNotesService.invalidateDerivedState(),
   previewOntology: (sourcePath) => workspaceNotesService.previewOntology(sourcePath),
   getGraphTopology: () => workspaceNotesService.getGraphTopology(),
@@ -135,17 +151,37 @@ function createCommandServer(runtimeRoot = resolveRuntimeRoot()) {
   return new CommandServer({
     runtimeRoot,
     onShowWindow: () => appLifecycle.showMainWindow(),
-    onOpenFile: async (filePath: string) => {
-      const authorizedPath = await workspaceNotesService.authorizeOpenFile(filePath);
-      sendToRenderer("command:open-file", authorizedPath);
+    onOpenPath: async (targetPath: string) => {
+      const target = await workspaceNotesService.authorizeOpenPath(targetPath);
+      appLifecycle.showMainWindow();
+      sendToRenderer(target.kind === "file" ? "command:open-file" : "command:open-folder", target.path);
     },
     onIndexSearch: (query, options) => indexingService.search(query, options),
+    onGraphTraverse: (request) => workspaceNotesService.traverseGraph(request),
     onIndexStatus: () => indexingService.getMeasuredStatus(),
     onIndexSync: () => indexingService.runSync("command"),
     onGetStatus: () => ({
       workspace: workspaceModel,
       terminals: terminalManager.list(),
     }),
+    onListTerminals: () => terminalManager.list(),
+    onCreateTerminal: () => terminalManager.create({ terminalKind: "shell" }),
+    onWriteTerminal: async ({ id, data }) => {
+      const terminal = terminalManager.getInfo(id);
+      if (!terminal) return { terminal: null };
+      const result = await terminalManager.write(id, data);
+      return result.ok ? { terminal, writeId: result.writeId } : { terminal: null };
+    },
+    onReadTerminal: async ({ id, cursor }) => {
+      const terminal = terminalManager.getInfo(id);
+      const tail = terminalManager.readTailSince(id, cursor);
+      return terminal && tail ? { terminal, ...tail } : null;
+    },
+    onStopTerminal: async (id) => {
+      if (!terminalManager.getInfo(id)) return false;
+      await terminalManager.kill(id);
+      return true;
+    },
     onSpawnAgentCommand: async (input) => {
       const prepared = await invocationRunner.prepare({
         context: "cli", handle: input.handle, task: input.task, message: input.task,
@@ -333,6 +369,28 @@ function isPathWithin(rootPath: string, candidatePath: string): boolean {
 }
 
 function registerIpcHandlers() {
+  publishingService = new PublishingService({
+    context: () => ({ ...currentSnapshot(), model: workspaceModel }),
+    stagingParent: path.join(app.getPath("userData"), "publishing"),
+    capture: async (model, publicationDirectory, stagingParent, generatedRoutes, assertCurrent) => {
+      await appLifecycle.withDocumentsFlushed(async () => {});
+      assertCurrent();
+      return exportPublication({ model, publicationDirectory, stagingParent, generatedRoutes });
+    },
+    verify: verifyPublicationSnapshot,
+    publishStatus: (status) => sendToRenderer("publishing:status", status),
+  });
+  managedSiteSetup = new ManagedSiteSetup({
+    context: () => ({ ...currentSnapshot(), model: workspaceModel }),
+    sitesParent: path.join(app.getPath("userData"), "published-sites"),
+    capture: async (model, publicationDirectory, stagingParent, generatedRoutes, assertCurrent) => {
+      await appLifecycle.withDocumentsFlushed(async () => {});
+      assertCurrent();
+      return exportPublication({ model, publicationDirectory, stagingParent, generatedRoutes });
+    },
+    verify: verifyPublicationSnapshot,
+  });
+  registerPublishingIpc(publishingService, managedSiteSetup);
   registerWorkspaceIpcHandlers({
     activateWorkspace: async (input) => {
       return switchWorkspace(input.workspaceId, input.expectedRevision);
@@ -436,17 +494,24 @@ function registerIpcHandlers() {
     markOnboardingComplete: () => completeWorkspaceOnboarding(),
     listTree: listRootTree,
     listWorkspaces: () => workspaceConfig.listWorkspaces(),
-    readNote: readWorkspaceDocument,
+    readNote: (filePath) => documentPersistence.read(filePath),
     renamePath: renameWorkspacePath,
     resolvePreviewTarget: async (target) => {
       const result = await resolvePreviewTarget(target, currentSettings());
-      return { url: result.url, source: result.source };
+      return result;
     },
+    readPdfFile: (filePath) => readPdfFile(filePath, currentSettings()),
     resolveTarget: (sourceFilePath, target) => workspaceNotesService.resolveTarget(sourceFilePath, target),
     resolveMarkdownImage: (sourceFilePath, target, lookupByFilename) => workspaceNotesService.resolveMarkdownImage(sourceFilePath, target, lookupByFilename),
-    saveNote: async (filePath, frontmatter, body) => {
-      await saveWorkspaceDocument(filePath, frontmatter, body);
+    saveNote: async (filePath, frontmatter, body, expectedRevision) => {
+      const result = await documentPersistence.save(filePath, frontmatter, body, expectedRevision);
+      if (result.status === "saved") indexingService.scheduleForFile(filePath, "note-save");
+      return result;
+    },
+    saveNoteCopy: async (filePath, frontmatter, body) => {
+      const document = await documentPersistence.saveCopy(filePath, frontmatter, body);
       indexingService.scheduleForFile(filePath, "note-save");
+      return document;
     },
     saveSettings,
     searchIndex: (query, options) => indexingService.search(query, options),
@@ -562,7 +627,17 @@ function currentSnapshot() {
   return { settings: currentSettings(), revision: workspaceSettingsRevision };
 }
 
+const documentPersistence = new DocumentPersistence();
+
 async function saveSettings(request: WorkspaceSettingsSaveRequest): Promise<WorkspaceSettingsSaveOutcome> {
+  const previous = currentSettings();
+  const apply = () => commitSettings(request);
+  return planWorkspaceSettingsApply(previous, { ...previous, ...request.settings }).reactivateWorkspace
+    ? appLifecycle.withDocumentsFlushed(apply)
+    : apply();
+}
+
+async function commitSettings(request: WorkspaceSettingsSaveRequest): Promise<WorkspaceSettingsSaveOutcome> {
   const previous = currentSettings();
   const saved = await workspaceConfig.patch(request.expectedRevision, { ...previous, ...request.settings });
   if (workspaceRuntimeCoordinator.applySettings({
@@ -597,6 +672,10 @@ async function saveSettings(request: WorkspaceSettingsSaveRequest): Promise<Work
 }
 
 async function switchWorkspace(workspaceId: string, expectedRevision: string | null): Promise<WorkspaceSettingsSaveOutcome> {
+  return appLifecycle.withDocumentsFlushed(() => commitWorkspaceSwitch(workspaceId, expectedRevision));
+}
+
+async function commitWorkspaceSwitch(workspaceId: string, expectedRevision: string | null): Promise<WorkspaceSettingsSaveOutcome> {
   const saved = await workspaceConfig.switchWorkspace(workspaceId, expectedRevision);
   const activation = await workspaceRuntimeCoordinator.activate({
     previousSettings: currentSettings(),
@@ -806,6 +885,8 @@ app.whenReady().then(async () => {
       workspaceSettings = active.settings;
       workspaceSettingsRevision = active.revision;
       workspaceModel = active.model;
+      publishingService?.updateContext();
+      managedSiteSetup?.updateContext();
       workspaceSetupComplete = true;
       try {
         applyWorkspaceSettings(active.settings);
@@ -933,19 +1014,18 @@ function resolveRuntimeRoot(): string {
 }
 
 app.on("before-quit", (event) => {
-  const mainWindow = appLifecycle?.getMainWindow();
   if (!quitFlushComplete) {
     event.preventDefault();
     if (quitFlushStarted) return;
     quitFlushStarted = true;
     void awaitInvocationAwareQuit({
-      flushDirtyDocuments: () => mainWindow && !mainWindow.isDestroyed() && appLifecycle.isRendererReady()
-        ? mainWindow.webContents.executeJavaScript("globalThis.__exographFlushDirtyDocuments?.()", true)
-        : Promise.resolve(),
+      flushDirtyDocuments: () => appLifecycle?.prepareDocumentTransition() ?? Promise.resolve(),
       stopInvocations: async () => {
         await Promise.all([
           typeof invocationRunner === "undefined" ? Promise.resolve() : invocationRunner.stopAll(),
           stopActiveOntologyDiscoveries(),
+          publishingService?.stop() ?? Promise.resolve(),
+          managedSiteSetup?.cancelSetup() ?? Promise.resolve(),
         ]);
       },
       onError: (phase, error) => {
@@ -957,6 +1037,8 @@ app.on("before-quit", (event) => {
       app.quit();
     }).catch((error) => {
       quitFlushStarted = false;
+      void appLifecycle?.finishDocumentTransition();
+      appLifecycle?.showMainWindow();
       logMain("quit remains blocked because durable shutdown did not settle", serializeError(error));
     });
     return;

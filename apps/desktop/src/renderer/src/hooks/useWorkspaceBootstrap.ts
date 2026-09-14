@@ -12,6 +12,7 @@ import type {
   WorkspaceSettingsRevision,
 } from "@exograph/core";
 import { createDefaultClaudeAgentCommand, createDefaultCodexAgentCommand } from "@exograph/core/default-agent-command";
+import { normalizeDefaultAgentCommandId } from "@exograph/core/agent-command-configuration";
 import { DEFAULT_AGENT_INVOCATION_PROMPT } from "@exograph/core/agent-invocation-prompt";
 import { defaultWorkspaceContentPolicy } from "@exograph/core/workspace-content-policy";
 
@@ -39,6 +40,7 @@ export interface OnboardingState {
   exploreIndexSearchOnEnter: boolean;
   indexUpdateStrategy: WorkspaceSettings["indexUpdateStrategy"];
   agentCommands: AgentCommand[];
+  defaultAgentCommandId: string | null;
   agentInvocationPrompt: string;
   selectedMcpProviders: OnboardingMcpProvider[];
   status: "idle" | "saving" | "error";
@@ -303,6 +305,9 @@ export function useWorkspaceBootstrap(options: UseWorkspaceBootstrapOptions) {
       exploreIndexSearchOnEnter: current?.exploreIndexSearchOnEnter ?? false,
       indexUpdateStrategy: current?.indexUpdateStrategy ?? "on-save",
       agentCommands: current?.agentCommands ?? defaultOnboardingAgentCommands(),
+      defaultAgentCommandId: current?.defaultAgentCommandId
+        ?? normalizeDefaultAgentCommandId(undefined, current?.agentCommands ?? defaultOnboardingAgentCommands())
+        ?? null,
       agentInvocationPrompt: current?.agentInvocationPrompt ?? DEFAULT_AGENT_INVOCATION_PROMPT,
       selectedMcpProviders: ["claude", "codex"],
       status: "idle",
@@ -325,6 +330,7 @@ export function useWorkspaceBootstrap(options: UseWorkspaceBootstrapOptions) {
       exploreIndexSearchOnEnter: true,
       indexUpdateStrategy: "on-save",
       agentCommands: defaultOnboardingAgentCommands(),
+      defaultAgentCommandId: "claude",
       agentInvocationPrompt: DEFAULT_AGENT_INVOCATION_PROMPT,
       selectedMcpProviders: ["claude", "codex"],
     }));
@@ -426,6 +432,7 @@ export function useWorkspaceBootstrap(options: UseWorkspaceBootstrapOptions) {
         exploreIndexSearchOnEnter: current.searchEngine === "qmd" && current.exploreIndexSearchOnEnter,
         indexUpdateStrategy: current.indexUpdateStrategy,
         agentCommands: current.agentCommands,
+        ...(current.defaultAgentCommandId ? { defaultAgentCommandId: current.defaultAgentCommandId } : {}),
         agentInvocationPrompt: current.agentInvocationPrompt,
         contentPolicy: current.contentPolicy,
       };
@@ -515,6 +522,9 @@ export function defaultFirstRunOnboardingState(
   settings: WorkspaceSettings,
   workspaces: WorkspaceRegistryEntry[],
 ): OnboardingState {
+  const agentCommands = settings.agentCommands && settings.agentCommands.length > 0
+    ? settings.agentCommands
+    : defaultOnboardingAgentCommands();
   return {
     mode: "first-run",
     step: workspaces.length > 0 ? "select" : "configure",
@@ -529,9 +539,10 @@ export function defaultFirstRunOnboardingState(
     searchEngine: "qmd",
     exploreIndexSearchOnEnter: false,
     indexUpdateStrategy: settings.indexUpdateStrategy,
-    agentCommands: settings.agentCommands && settings.agentCommands.length > 0
-      ? settings.agentCommands
-      : defaultOnboardingAgentCommands(),
+    agentCommands,
+    defaultAgentCommandId: settings.defaultAgentCommandId
+      ?? normalizeDefaultAgentCommandId(undefined, agentCommands)
+      ?? null,
     agentInvocationPrompt: settings.agentInvocationPrompt ?? DEFAULT_AGENT_INVOCATION_PROMPT,
     selectedMcpProviders: ["claude", "codex"],
     status: "idle",
@@ -559,6 +570,7 @@ export function onboardingStateFromDraft(
     exploreIndexSearchOnEnter: draft.search.exploreIndexSearchOnEnter,
     indexUpdateStrategy: draft.search.indexUpdateStrategy,
     agentCommands: draft.agentCommands,
+    defaultAgentCommandId: draft.defaultAgentCommandId,
     agentInvocationPrompt: draft.agentInvocationPrompt,
     selectedMcpProviders: draft.selectedMcpProviders,
     status: "idle",
@@ -585,6 +597,7 @@ export function onboardingDraftFromState(state: OnboardingState): OnboardingProg
       indexUpdateStrategy: state.indexUpdateStrategy,
     },
     agentCommands: state.agentCommands,
+    defaultAgentCommandId: state.defaultAgentCommandId,
     agentInvocationPrompt: state.agentInvocationPrompt,
     selectedMcpProviders: state.selectedMcpProviders,
   };

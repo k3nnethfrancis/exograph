@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { EditorState } from "@codemirror/state";
-import type { NoteDocument, TreeNode, WorkspaceGraphContext, WorkspaceModel } from "@exograph/core";
+import type { NoteDocument, WorkspaceGraphContext } from "@exograph/core";
 
 import {
   buildNoteGraphContext,
   getWikilinkCompletionContext,
   graphReferencesForMarkdownMode,
   markdownPreviewExcerpt,
-  suggestWikilinkTargetsFromTrees,
   wikilinkSuggestionEdit,
 } from "./graphAffordances";
 
@@ -35,25 +34,6 @@ describe("markdown editor wikilink behavior", () => {
     expect(getWikilinkCompletionContext(state, 1)).toBeNull();
     expect(getWikilinkCompletionContext(state, 2)).toEqual({ from: 0, to: "[[goals]]".length, query: "goals" });
     expect(getWikilinkCompletionContext(state, "[[goals]]".length)).toBeNull();
-  });
-
-  it("filters wikilink popup candidates from the in-memory note tree", () => {
-    const model = workspaceModel("/vault");
-    const noteTrees: Record<string, TreeNode[]> = {
-      "/vault": [
-        { id: "goals", name: "goals.md", path: "/vault/goals.md", kind: "file" },
-        { id: "garden", name: "garden.md", path: "/vault/garden.md", kind: "file" },
-        { id: "daily", name: "daily.md", path: "/vault/logs/daily.md", kind: "file" },
-        { id: "guide", name: "guide.md", path: "/vault/projects/guide.md", kind: "file" },
-      ],
-    };
-
-    expect(suggestWikilinkTargetsFromTrees(model, noteTrees, "g").map((item) => item.target)).toEqual([
-      "garden",
-      "goals",
-      "projects/guide",
-    ]);
-    expect(suggestWikilinkTargetsFromTrees(model, noteTrees, "missing")).toEqual([]);
   });
 
   it("hides generated graph references in raw markdown mode", () => {
@@ -131,16 +111,6 @@ describe("markdown editor wikilink behavior", () => {
     );
   });
 });
-
-function workspaceModel(noteRoot: string): WorkspaceModel {
-  return {
-    workspaceRoot: noteRoot,
-    defaultTerminalCwd: noteRoot,
-    noteRoots: [{ id: "notes", label: "Notes", path: noteRoot }],
-    indexedRoots: [],
-    indexing: { enabled: false, mode: "off", backend: "qmd" },
-  };
-}
 
 function noteDocument(overrides: Partial<NoteDocument> = {}): NoteDocument {
   return {

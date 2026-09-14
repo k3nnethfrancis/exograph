@@ -1,4 +1,4 @@
-export type UtilityDestination = "terminal" | "preview" | "connections";
+export type UtilityDestination = "terminal" | "preview" | "graph" | "context";
 
 export interface UtilitySurfaceState {
   open: boolean;

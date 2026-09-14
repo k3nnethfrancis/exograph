@@ -1,72 +1,58 @@
-import { Link2, RefreshCw, Scan } from "lucide-react";
+import { RefreshCw, Scan } from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import type {
   BoundedGraphConceptDetail,
   GraphConceptLookupReference,
-  GraphConceptSummary,
   GraphTopology,
 } from "@exograph/core";
 
 import {
-  graphEscapeDecision,
-  graphNodeClickDecision,
   graphNodeDoubleClickDecision,
 } from "../graphInteraction";
 import {
   createGraphLayoutInput,
-  graphKeyboardIntent,
-  panGraphCamera,
   pickGraphSceneNode,
-  zoomGraphCameraAt,
 } from "../graphSceneFoundation";
 import { resolveGraphPalette } from "../graphPalette";
+import { GraphMetadataStore } from "../graphMetadataStore";
 import { browserGraphFrameDriver } from "../graphRenderScheduler";
 import {
   GraphSnapshotRefreshCoordinator,
   SpatialGraphRuntime,
-  SpatialGraphPointerSession,
   initialGraphSummaryIndexes,
-  pruneGraphSnapshotCache,
   shouldRefreshGraphForWorkspaceChange,
-  spatialGraphDollyDragScale,
-  spatialGraphPointerAction,
-  spatialGraphWheelIntent,
+  shouldRevealGraphScene,
   type SpatialGraphRuntimeCounters,
 } from "../spatialGraphRuntime";
 import type { GraphCanvasSurface } from "../graphCanvasRenderer";
 import type { GraphWebGpuSurface } from "../graphWebGpuRenderer";
 import type { GraphLayoutWorkerRequest, GraphLayoutWorkerResponse } from "../graphLayoutWorkerProtocol";
 import type { GraphFocusRequest, InspectedConcept } from "../hooks/useInspectedConcept";
+import { useSpatialGraphInput } from "../hooks/useSpatialGraphInput";
+import { ExographMark } from "./ExographMark";
+import { GraphConceptDetailPanel } from "./GraphConceptDetailPanel";
 import { OntologyReviewRow } from "./OntologyReviewRow";
 
 interface SpatialGraphViewProps {
+  inverseNavigation: boolean;
+  showOverflowLabels: boolean;
   refreshKey?: string;
   inspectedConcept: InspectedConcept | null;
   focusRequest: GraphFocusRequest | null;
   /** Historical editor context for Escape; Graph focus has no active document. */
   graphReturnPath?: string | null;
   isTargetOpen: (target: string) => boolean;
-  onInspectConcept: (concept: InspectedConcept) => void;
-  onFocusConcept: (concept: InspectedConcept) => void;
   onRestoreEditorConcept: (filePath: string) => void;
   onActivateOpenTarget: (filePath: string) => void;
   onOpenTarget: (target: string) => void;
   onStartMaintenance: (filePath: string) => void;
   onFocus: () => void;
-}
-
-interface RecentGraphPick {
-  index: number;
-  clientX: number;
-  clientY: number;
-  at: number;
 }
 
 type DebugCanvas = HTMLCanvasElement & {
@@ -78,27 +64,39 @@ type DebugCanvas = HTMLCanvasElement & {
     pathNodeCount: number;
     graphReturnPath: string | null;
     inspectedFilePath: string | null;
+    camera: { yaw: number; pitch: number; distance: number; target: [number, number, number] };
   }) | null;
   __exographGraphPointForIndex?: (index: number) => { x: number; y: number; visible: boolean } | null;
   __exographGraphPickAt?: (x: number, y: number) => number;
   __exographGraphForceCanvasFallback?: () => Promise<void>;
 };
 
+export function GraphBuildingIndicator() {
+  return (
+    <div className="spatial-graph__building" role="status">
+      <ExographMark animated className="spatial-graph__building-mark" />
+      <span>Building graph</span>
+    </div>
+  );
+}
+
 export function SpatialGraphView({
+  inverseNavigation,
+  showOverflowLabels,
   refreshKey,
   inspectedConcept,
   focusRequest,
   graphReturnPath,
   isTargetOpen,
-  onInspectConcept,
-  onFocusConcept,
   onRestoreEditorConcept,
   onActivateOpenTarget,
   onOpenTarget,
   onStartMaintenance,
   onFocus,
 }: SpatialGraphViewProps) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const keyboardHelpId = useId();
   const webGpuCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const runtimeRef = useRef<SpatialGraphRuntime | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -108,18 +106,14 @@ export function SpatialGraphView({
   const inspectedConceptRef = useRef(inspectedConcept);
   graphReturnPathRef.current = graphReturnPath ?? null;
   inspectedConceptRef.current = inspectedConcept;
-  const summaryCacheRef = useRef(new Map<string, GraphConceptSummary>());
-  const detailCacheRef = useRef(new Map<string, BoundedGraphConceptDetail>());
-  const lookupCacheRef = useRef(new Map<string, GraphConceptSummary>());
-  const pointerSessionRef = useRef(new SpatialGraphPointerSession());
-  const recentPickRef = useRef<RecentGraphPick | null>(null);
+  const metadataStoreRef = useRef<GraphMetadataStore | null>(null);
   const loadSequenceRef = useRef(0);
   const inspectionSequenceRef = useRef(0);
   const generationRef = useRef(0);
   const activeGenerationRef = useRef(0);
   const topologyPendingRef = useRef(false);
-  const metadataPendingRef = useRef(0);
   const layoutPendingRef = useRef(false);
+  const initialFramePendingRef = useRef(true);
   const [runtimeVersion, setRuntimeVersion] = useState(0);
   const [topology, setTopology] = useState<GraphTopology | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<BoundedGraphConceptDetail | null>(null);
@@ -129,11 +123,12 @@ export function SpatialGraphView({
   const [reloadNonce, setReloadNonce] = useState(0);
   const [rendererNonce, setRendererNonce] = useState(0);
   const [routeNodeCount, setRouteNodeCount] = useState(0);
+  const [sceneReady, setSceneReady] = useState(false);
 
   const updatePendingWork = useCallback(() => {
     runtimeRef.current?.setExternalPendingWork(
       Number(topologyPendingRef.current)
-        + metadataPendingRef.current
+        + (metadataStoreRef.current?.pendingCount ?? 0)
         + Number(layoutPendingRef.current)
         + Number(Boolean(
           refreshCoordinatorRef.current?.snapshot().pending
@@ -147,129 +142,70 @@ export function SpatialGraphView({
     setReloadNonce((value) => value + 1);
   }, []);
 
-  const readSummaries = useCallback(async (indexes: readonly number[], sourceSnapshotId: string) => {
-    const unique = [...new Set(indexes)]
-      .filter((index) => Number.isSafeInteger(index) && index >= 0 && index < (topologyRef.current?.nodeCount ?? 0))
-      .filter((index) => !summaryCacheRef.current.has(cacheKey(sourceSnapshotId, index)))
-      .slice(0, 64);
-    if (!unique.length) return;
-    metadataPendingRef.current += 1;
-    updatePendingWork();
-    try {
-      const result = await window.exograph.notes.getGraphConceptSummaries(unique, sourceSnapshotId);
-      if (result.status === "stale") {
-        refreshForStaleRead(sourceSnapshotId);
-        return;
-      }
-      if (result.status === "too-large") {
-        setDetailStatus("Graph labels exceeded the bounded read limit.");
-        return;
-      }
-      if (result.status !== "ok" || topologyRef.current?.sourceSnapshotId !== sourceSnapshotId) return;
-      for (const summary of result.summaries) summaryCacheRef.current.set(cacheKey(sourceSnapshotId, summary.index), summary);
-      runtimeRef.current?.setSummaries(result.summaries);
-    } catch (reason) {
-      if (topologyRef.current?.sourceSnapshotId === sourceSnapshotId) {
-        setDetailStatus(reason instanceof Error ? reason.message : String(reason));
-      }
-    } finally {
-      metadataPendingRef.current = Math.max(0, metadataPendingRef.current - 1);
-      updatePendingWork();
-    }
-  }, [refreshForStaleRead, updatePendingWork]);
+  if (!metadataStoreRef.current) {
+    metadataStoreRef.current = new GraphMetadataStore({
+      port: {
+        getGraphConceptSummaries: (indexes, sourceSnapshotId) => window.exograph.notes.getGraphConceptSummaries([...indexes], sourceSnapshotId),
+        getGraphConceptDetailByIndex: (index, sourceSnapshotId) => window.exograph.notes.getGraphConceptDetailByIndex(index, sourceSnapshotId),
+        graphConceptLookup: (reference, sourceSnapshotId) => window.exograph.notes.graphConceptLookup(reference, sourceSnapshotId),
+      },
+      currentSnapshot: () => topologyRef.current,
+      onPendingChange: updatePendingWork,
+      onStale: refreshForStaleRead,
+      onStatus: setDetailStatus,
+      onSummaries: (summaries) => runtimeRef.current?.setSummaries(summaries),
+    });
+  }
 
-  const readDetail = useCallback(async (index: number, sourceSnapshotId: string): Promise<BoundedGraphConceptDetail | null> => {
-    const key = cacheKey(sourceSnapshotId, index);
-    const cached = detailCacheRef.current.get(key);
-    if (cached) return cached;
-    metadataPendingRef.current += 1;
-    updatePendingWork();
-    try {
-      const result = await window.exograph.notes.getGraphConceptDetailByIndex(index, sourceSnapshotId);
-      if (result.status === "stale") {
-        refreshForStaleRead(sourceSnapshotId);
-        return null;
-      }
-      if (result.status === "too-large") {
-        setDetailStatus("Concept detail exceeded the bounded read limit.");
-        return null;
-      }
-      if (result.status === "missing") {
-        setDetailStatus("Concept is no longer present in this graph.");
-        return null;
-      }
-      if (!result.detail || topologyRef.current?.sourceSnapshotId !== sourceSnapshotId) return null;
-      detailCacheRef.current.set(key, result.detail);
-      return result.detail;
-    } catch (reason) {
-      if (topologyRef.current?.sourceSnapshotId === sourceSnapshotId) {
-        setDetailStatus(reason instanceof Error ? reason.message : String(reason));
-      }
-      return null;
-    } finally {
-      metadataPendingRef.current = Math.max(0, metadataPendingRef.current - 1);
-      updatePendingWork();
-    }
-  }, [refreshForStaleRead, updatePendingWork]);
+  const readSummaries = useCallback((indexes: readonly number[], sourceSnapshotId: string) => (
+    metadataStoreRef.current?.readSummaries(indexes, sourceSnapshotId) ?? Promise.resolve()
+  ), []);
+
+  const readDetail = useCallback((index: number, sourceSnapshotId: string) => (
+    metadataStoreRef.current?.readDetail(index, sourceSnapshotId) ?? Promise.resolve(null)
+  ), []);
 
   const resolveConcept = useCallback(async (concept: InspectedConcept, sourceSnapshotId: string) => {
     const reference = lookupReference(concept);
     if (!reference) return null;
-    const key = lookupKey(sourceSnapshotId, reference);
-    const cached = lookupCacheRef.current.get(key);
-    if (cached) return cached;
-    metadataPendingRef.current += 1;
-    updatePendingWork();
-    try {
-      const result = await window.exograph.notes.graphConceptLookup(reference, sourceSnapshotId);
-      if (result.status === "stale") {
-        refreshForStaleRead(sourceSnapshotId);
-        return null;
-      }
-      if (result.status === "missing") {
-        setDetailStatus("Concept is no longer present in this graph.");
-        return null;
-      }
-      if (result.status !== "ok" || !result.summary || topologyRef.current?.sourceSnapshotId !== sourceSnapshotId) return null;
-      lookupCacheRef.current.set(key, result.summary);
-      summaryCacheRef.current.set(cacheKey(sourceSnapshotId, result.summary.index), result.summary);
-      runtimeRef.current?.setSummaries([result.summary]);
-      return result.summary;
-    } catch (reason) {
-      if (topologyRef.current?.sourceSnapshotId === sourceSnapshotId) {
-        setDetailStatus(reason instanceof Error ? reason.message : String(reason));
-      }
-      return null;
-    } finally {
-      metadataPendingRef.current = Math.max(0, metadataPendingRef.current - 1);
-      updatePendingWork();
-    }
-  }, [refreshForStaleRead, updatePendingWork]);
+    return metadataStoreRef.current?.resolve(reference, sourceSnapshotId) ?? null;
+  }, []);
 
-  const inspectIndex = useCallback(async (index: number, announce: boolean) => {
+  const inspectIndex = useCallback(async (index: number) => {
     const currentTopology = topologyRef.current;
     if (!currentTopology || index < 0 || index >= currentTopology.nodeCount) return;
+    const sequence = ++inspectionSequenceRef.current;
     runtimeRef.current?.setSelection(index);
     setRouteNodeCount(0);
-    const summaryKey = cacheKey(currentTopology.sourceSnapshotId, index);
-    if (!summaryCacheRef.current.has(summaryKey)) void readSummaries([index], currentTopology.sourceSnapshotId);
-    const detail = await readDetail(index, currentTopology.sourceSnapshotId);
-    if (!detail || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
-    if (announce) {
-      onInspectConcept({ conceptId: detail.concept.id, filePath: detail.concept.filePath });
-      return;
+    if (!metadataStoreRef.current?.hasSummary(index, currentTopology.sourceSnapshotId)) {
+      void readSummaries([index], currentTopology.sourceSnapshotId);
     }
+    const detail = await readDetail(index, currentTopology.sourceSnapshotId);
+    if (!detail || sequence !== inspectionSequenceRef.current
+      || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
     setSelectedDetail(detail);
     setDetailStatus(null);
-  }, [onInspectConcept, readDetail, readSummaries]);
+  }, [readDetail, readSummaries]);
+
+  const restoreGraphSelection = useCallback(async (filePath: string) => {
+    const currentTopology = topologyRef.current;
+    if (!currentTopology) return;
+    const summary = await resolveConcept({ filePath }, currentTopology.sourceSnapshotId);
+    if (!summary || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
+    await inspectIndex(summary.index);
+    onRestoreEditorConcept(filePath);
+  }, [inspectIndex, onRestoreEditorConcept, resolveConcept]);
 
   useEffect(() => {
     const canvas = canvasRef.current as DebugCanvas | null;
     const webGpuCanvas = webGpuCanvasRef.current;
-    if (!canvas || !webGpuCanvas) return;
+    const viewportElement = viewportRef.current;
+    if (!canvas || !webGpuCanvas || !viewportElement) return;
     setError(null);
     let runtime: SpatialGraphRuntime;
     try {
+      initialFramePendingRef.current = true;
+      setSceneReady(false);
       runtime = new SpatialGraphRuntime(canvas as unknown as GraphCanvasSurface, {
         frameDriver: browserGraphFrameDriver(),
         palette: resolveGraphPalette(canvas),
@@ -287,13 +223,19 @@ export function SpatialGraphView({
       if (!snapshot) return null;
       return {
         ...snapshot,
-        metadataCacheEntries: summaryCacheRef.current.size + detailCacheRef.current.size + lookupCacheRef.current.size,
+        metadataCacheEntries: metadataStoreRef.current?.cacheEntryCount ?? 0,
         sourceSnapshotId: topologyRef.current?.sourceSnapshotId ?? null,
         selected: runtimeRef.current?.getScene()?.interaction.selected ?? -1,
         pathTarget: runtimeRef.current?.getScene()?.interaction.pathTarget ?? -1,
         pathNodeCount: runtimeRef.current?.getScene()?.interaction.pathNodes.reduce((count, value) => count + Number(value > 0), 0) ?? 0,
         graphReturnPath: graphReturnPathRef.current,
         inspectedFilePath: inspectedConceptRef.current?.filePath ?? null,
+        camera: {
+          yaw: runtimeRef.current?.getScene()?.camera.yaw ?? 0,
+          pitch: runtimeRef.current?.getScene()?.camera.pitch ?? 0,
+          distance: runtimeRef.current?.getScene()?.camera.distance ?? 0,
+          target: [...(runtimeRef.current?.getScene()?.camera.target ?? [0, 0, 0])],
+        },
       };
     };
     if (window.exograph.test?.graphHooks) canvas.__exographGraphPointForIndex = (index) => {
@@ -327,6 +269,13 @@ export function SpatialGraphView({
       if (shouldRefreshGraphForWorkspaceChange(event)) refreshCoordinator.workspaceChanged();
     });
     const unsubscribeGraph = window.exograph.workspace.onGraphChanged(() => refreshCoordinator.workspaceChanged());
+    const revealInitialScene = () => {
+      if (!initialFramePendingRef.current) return;
+      runtime.frameAll();
+      initialFramePendingRef.current = false;
+      setSceneReady(true);
+      setLoading(false);
+    };
     let worker: Worker | null = null;
     try {
       worker = new Worker(new URL("../workers/graphLayout.worker.ts", import.meta.url), { type: "module" });
@@ -339,31 +288,37 @@ export function SpatialGraphView({
         if (data.type === "error") {
           layoutPendingRef.current = false;
           updatePendingWork();
+          revealInitialScene();
           setError(data.message);
           return;
         }
         const accepted = runtime.applyLayoutFrame(data.frame);
+        if (accepted && data.frame.settled) revealInitialScene();
         layoutPendingRef.current = accepted && !data.frame.settled;
         updatePendingWork();
-        if (!accepted) setError("Graph layout returned an invalid frame.");
+        if (!accepted) {
+          revealInitialScene();
+          setError("Graph layout returned an invalid frame.");
+        }
       };
       worker.onerror = (event) => {
         layoutPendingRef.current = false;
         updatePendingWork();
+        revealInitialScene();
         setError(event.message || "Graph layout worker failed.");
       };
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Graph layout worker could not start.");
     }
     const resize = () => {
-      const rect = canvas.getBoundingClientRect();
+      const rect = viewportElement.getBoundingClientRect();
       runtime.resize(
         { width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)) },
         window.devicePixelRatio || 1,
       );
     };
     const resizeObserver = new ResizeObserver(resize);
-    resizeObserver.observe(canvas);
+    resizeObserver.observe(viewportElement);
     const themeObserver = new MutationObserver(() => runtime.setPalette(resolveGraphPalette(canvas)));
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-appearance-mode"] });
     setRuntimeVersion((value) => value + 1);
@@ -388,6 +343,10 @@ export function SpatialGraphView({
   }, [rendererNonce, updatePendingWork]);
 
   useEffect(() => {
+    runtimeRef.current?.setShowOverflowLabels(showOverflowLabels);
+  }, [showOverflowLabels, rendererNonce]);
+
+  useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
     const request = ++loadSequenceRef.current;
@@ -402,23 +361,21 @@ export function SpatialGraphView({
         setSelectedDetail(null);
         setDetailStatus(null);
       }
-      pruneGraphSnapshotCache(summaryCacheRef.current, next.sourceSnapshotId);
-      pruneGraphSnapshotCache(detailCacheRef.current, next.sourceSnapshotId);
-      pruneGraphSnapshotCache(lookupCacheRef.current, next.sourceSnapshotId);
+      metadataStoreRef.current?.prune(next.sourceSnapshotId);
       topologyRef.current = next;
       setTopology(next);
       refreshCoordinatorRef.current?.observeSnapshot(next.sourceSnapshotId);
-      const rect = canvasRef.current?.getBoundingClientRect();
+      const rect = viewportRef.current?.getBoundingClientRect();
       const viewport = { width: Math.max(1, Math.round(rect?.width ?? 1)), height: Math.max(1, Math.round(rect?.height ?? 1)) };
       const scene = runtime.setTopology(next, viewport);
       setRouteNodeCount(scene.interaction.pathNodes.reduce((count, value) => count + Number(value > 0), 0));
-      const cachedSummaries = [...summaryCacheRef.current.entries()]
-        .filter(([key]) => key.startsWith(`${next.sourceSnapshotId}:`))
-        .map(([, summary]) => summary);
+      const cachedSummaries = metadataStoreRef.current?.cachedSummaries(next.sourceSnapshotId) ?? [];
       runtime.replaceSummaries(new Map(cachedSummaries.map((summary) => [summary.index, summary])));
       void readSummaries(initialGraphSummaryIndexes(next, scene.interaction.selected), next.sourceSnapshotId);
       const sameLayoutEpoch = previous?.topologyHash === next.topologyHash && previous.layoutEpochId === next.layoutEpochId;
-      if ((!sameLayoutEpoch || !scene.layout.settled) && workerRef.current) {
+      const needsLayout = !sameLayoutEpoch || !scene.layout.settled;
+      const workerAvailable = workerRef.current !== null;
+      if (needsLayout && workerRef.current) {
         const generation = ++generationRef.current;
         activeGenerationRef.current = generation;
         layoutPendingRef.current = true;
@@ -428,7 +385,20 @@ export function SpatialGraphView({
           input: createGraphLayoutInput(next, scene.layout),
         } satisfies GraphLayoutWorkerRequest);
       }
-      setLoading(false);
+      if (shouldRevealGraphScene({
+        initialFramePending: initialFramePendingRef.current,
+        layoutSettled: scene.layout.settled,
+        workerAvailable,
+      })) {
+        if (initialFramePendingRef.current) {
+          runtime.frameAll();
+          initialFramePendingRef.current = false;
+        }
+        setSceneReady(true);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
     }).catch((reason) => {
       if (request !== loadSequenceRef.current) return;
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -476,124 +446,43 @@ export function SpatialGraphView({
     return () => { cancelled = true; };
   }, [focusRequest?.sequence, resolveConcept, topology?.sourceSnapshotId]);
 
-  const pickAt = useCallback((clientX: number, clientY: number, pointerType = "mouse") => {
-    const canvas = canvasRef.current;
-    const scene = runtimeRef.current?.getScene();
-    if (!canvas || !scene) return -1;
-    const rect = canvas.getBoundingClientRect();
-    return pickGraphSceneNode(
-      scene.topology,
-      scene.projection,
-      scene.camera,
-      clientX - rect.left,
-      clientY - rect.top,
-      { pointer: pointerType === "touch" || pointerType === "pen" ? "coarse" : "fine" },
-    );
-  }, []);
-
-  function onPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
-    event.preventDefault();
-    if (pointerSessionRef.current.activePointers === 0) runtimeRef.current?.cancelMotion();
-    pointerSessionRef.current.begin(pointerSample(event), spatialGraphPointerAction({
-      button: event.button,
-      pointerType: event.pointerType,
-      ctrlKey: event.ctrlKey,
-      metaKey: event.metaKey,
-      shiftKey: event.shiftKey,
-    }));
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function onPointerMove(event: ReactPointerEvent<HTMLCanvasElement>) {
-    const move = pointerSessionRef.current.move(pointerSample(event));
-    if (move.kind === "hover") runtimeRef.current?.setHovered(pickAt(move.sample.x, move.sample.y, move.sample.pointerType));
-    if (move.kind === "orbit") runtimeRef.current?.orbit(move.deltaX, move.deltaY);
-    if (move.kind === "pan") runtimeRef.current?.pan(move.deltaX, move.deltaY);
-    if (move.kind === "dolly") {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (rect) runtimeRef.current?.zoomAt(
-        move.x - rect.left,
-        move.y - rect.top,
-        spatialGraphDollyDragScale(move.deltaY),
-      );
-    }
-    if (move.kind !== "pinch-pan") return;
-    const canvas = canvasRef.current;
-    const rect = canvas?.getBoundingClientRect();
-    const runtime = runtimeRef.current;
-    const scene = runtime?.getScene();
-    if (!runtime || !scene || !rect) return;
-    const zoomed = zoomGraphCameraAt(scene.camera, scene.projection.viewport, move.centerX - rect.left, move.centerY - rect.top, move.scale);
-    runtime.setCamera(panGraphCamera(zoomed, move.panX, move.panY, scene.projection.viewport), "pinch-pan");
-  }
-
-  function onPointerUp(event: ReactPointerEvent<HTMLCanvasElement>) {
-    const ended = pointerSessionRef.current.end(event.pointerId);
-    releasePointer(event);
-    if (!ended.click || !ended.sample) return;
-    const picked = pickAt(event.clientX, event.clientY, ended.sample.pointerType);
-    if (picked >= 0) recentPickRef.current = { index: picked, clientX: event.clientX, clientY: event.clientY, at: performance.now() };
-    const scene = runtimeRef.current?.getScene();
-    const decision = graphNodeClickDecision(picked, scene?.interaction.selected ?? -1, event.shiftKey);
-    if (decision.kind === "clear-route") {
-      runtimeRef.current?.clearRoute();
-      setRouteNodeCount(0);
-    }
-    if (decision.kind === "route") {
-      runtimeRef.current?.setSelection(scene?.interaction.selected ?? -1, decision.index);
-      setRouteNodeCount(runtimeRef.current?.getScene()?.interaction.pathNodes.reduce((count, value) => count + Number(value > 0), 0) ?? 0);
-      void readSummaries([decision.index], topologyRef.current?.sourceSnapshotId ?? "");
-    }
-    if (decision.kind === "inspect") void inspectIndex(decision.index, true);
-  }
-
-  function onPointerCancel(event: ReactPointerEvent<HTMLCanvasElement>) {
-    pointerSessionRef.current.cancel(event.pointerId);
-    releasePointer(event);
-  }
-
-  function onDoubleClick(event: ReactPointerEvent<HTMLCanvasElement>) {
-    let picked = pickAt(event.clientX, event.clientY, event.pointerType);
-    const recent = recentPickRef.current;
-    if (picked < 0 && recent && performance.now() - recent.at <= 650
-      && Math.hypot(event.clientX - recent.clientX, event.clientY - recent.clientY) <= 7) picked = recent.index;
-    recentPickRef.current = null;
-    if (picked < 0) return;
-    void openIndex(picked);
-  }
-
   async function openIndex(index: number) {
     const currentTopology = topologyRef.current;
     if (!currentTopology) return;
+    const sequence = ++inspectionSequenceRef.current;
     const detail = await readDetail(index, currentTopology.sourceSnapshotId);
-    if (!detail || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
-    const concept = { conceptId: detail.concept.id, filePath: detail.concept.filePath };
-    onInspectConcept(concept);
+    if (!detail || sequence !== inspectionSequenceRef.current
+      || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
+    runtimeRef.current?.setSelection(index);
+    setRouteNodeCount(0);
+    setSelectedDetail(detail);
+    setDetailStatus(null);
     const target = detail.concept.filePath ?? null;
     const decision = graphNodeDoubleClickDecision(target, Boolean(target && isTargetOpen(target)));
+    if (decision === "focus-node") {
+      runtimeRef.current?.focus(index, prefersReducedMotion());
+      return;
+    }
     if (decision === "focus" && target) {
       runtimeRef.current?.focus(index, prefersReducedMotion());
-      onFocusConcept(concept);
       onActivateOpenTarget(target);
     }
     if (decision === "open" && target) onOpenTarget(target);
   }
 
-  function onWheel(event: ReactWheelEvent<HTMLCanvasElement>) {
-    event.preventDefault();
-    const canvas = canvasRef.current;
-    const scene = runtimeRef.current?.getScene();
-    if (!canvas || !scene) return;
-    const rect = canvas.getBoundingClientRect();
-    const intent = spatialGraphWheelIntent({
-      ctrlKey: event.ctrlKey,
-      deltaMode: event.deltaMode,
-      deltaX: event.deltaX,
-      deltaY: event.deltaY,
-      viewportHeight: scene.projection.viewport.height,
-    });
-    runtimeRef.current?.zoomAt(event.clientX - rect.left, event.clientY - rect.top, intent.scale);
-  }
+  const graphInput = useSpatialGraphInput({
+    canvasRef,
+    runtimeRef,
+    topologyRef,
+    inverseNavigation,
+    graphReturnPath,
+    selectedFilePath: selectedDetail?.concept.filePath,
+    inspectIndex,
+    openIndex,
+    restoreSelection: restoreGraphSelection,
+    readSummaries,
+    setRouteNodeCount,
+  });
 
   return (
     <div className="spatial-graph" data-testid="spatial-graph">
@@ -604,7 +493,7 @@ export function SpatialGraphView({
         <button aria-label="Frame graph" onClick={() => runtimeRef.current?.frameAll()} title="Frame graph" type="button"><Scan size={14} /></button>
         <button aria-label="Refresh graph" onClick={() => setReloadNonce((value) => value + 1)} title="Refresh graph" type="button"><RefreshCw size={14} /></button>
       </div>
-      <div className="spatial-graph__viewport">
+      <div ref={viewportRef} className="spatial-graph__viewport" data-scene-ready={sceneReady ? "true" : "false"}>
         <canvas
           ref={webGpuCanvasRef}
           aria-hidden="true"
@@ -612,53 +501,26 @@ export function SpatialGraphView({
         />
         <canvas
           ref={canvasRef}
+          aria-describedby={keyboardHelpId}
+          aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight + - [ ] Space Enter Escape"
           aria-label="Interactive knowledge graph"
+          aria-roledescription="spatial knowledge graph"
           className="spatial-graph__interaction"
           onContextMenu={(event) => event.preventDefault()}
-          onDoubleClick={onDoubleClick}
-          onKeyDown={(event) => {
-            const runtime = runtimeRef.current;
-            const scene = runtime?.getScene();
-            if (!runtime || !scene) return;
-            if (event.key === "Escape") {
-              event.preventDefault();
-              if (runtime.snapshot().moving) {
-                runtime.cancelMotion();
-                return;
-              }
-              const decision = graphEscapeDecision(scene.interaction.pathTarget >= 0, graphReturnPath, inspectedConcept?.filePath);
-              if (decision === "clear-route") {
-                runtime.clearRoute();
-                setRouteNodeCount(0);
-              }
-              else if (decision === "restore-editor" && graphReturnPath) onRestoreEditorConcept(graphReturnPath);
-              else {
-                runtime.setSelection(-1);
-                setRouteNodeCount(0);
-              }
-              return;
-            }
-            if (event.key === " ") {
-              event.preventDefault();
-              return;
-            }
-            const intent = graphKeyboardIntent(scene.camera, event.key, scene.projection.viewport, event.shiftKey);
-            if (intent.kind !== "none") event.preventDefault();
-            if (intent.kind === "camera") runtime.setCamera(intent.camera, "keyboard");
-            if (intent.kind === "frame") runtime.frameAll();
-            if (intent.kind === "focus" && scene.interaction.selected >= 0) runtime.focus(scene.interaction.selected, prefersReducedMotion());
-          }}
-          onLostPointerCapture={onPointerCancel}
-          onPointerCancel={onPointerCancel}
-          onPointerDown={onPointerDown}
+          onDoubleClick={graphInput.onDoubleClick}
+          onKeyDown={graphInput.onKeyDown}
+          onLostPointerCapture={graphInput.onPointerCancel}
+          onPointerCancel={graphInput.onPointerCancel}
+          onPointerDown={graphInput.onPointerDown}
           onFocus={onFocus}
-          onPointerLeave={() => pointerSessionRef.current.activePointers === 0 && runtimeRef.current?.setHovered(-1)}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onWheel={onWheel}
+          onPointerLeave={graphInput.onPointerLeave}
+          onPointerMove={graphInput.onPointerMove}
+          onPointerUp={graphInput.onPointerUp}
+          onWheel={graphInput.onWheel}
           tabIndex={0}
         />
-        {loading ? <div className="spatial-graph__state">Building graph…</div> : null}
+        <p className="sr-only" id={keyboardHelpId}>Left and right brackets select the previous or next Note. Arrow keys orbit. Plus and minus zoom. Space or F focuses the selected Note. O frames the graph. Enter opens the selected Note. Escape returns to editor context.</p>
+        {loading ? <div className="spatial-graph__state spatial-graph__state--building"><GraphBuildingIndicator /></div> : null}
         {error ? (
           <button
             className="spatial-graph__state spatial-graph__state--error"
@@ -679,83 +541,12 @@ export function SpatialGraphView({
   );
 }
 
-function GraphConceptDetailPanel({
-  detail,
-  detailStatus,
-  degree,
-  topology,
-  onOpenTarget,
-  onStartMaintenance,
-}: {
-  detail: BoundedGraphConceptDetail | null;
-  detailStatus: string | null;
-  degree: number;
-  topology: GraphTopology | null;
-  onOpenTarget: (target: string) => void;
-  onStartMaintenance: (filePath: string) => void;
-}) {
-  if (!detail) {
-    return <div className="spatial-graph__hint">{detailStatus ?? "Drag to orbit · right-drag to pan · scroll to zoom"}</div>;
-  }
-  const concept = detail.concept;
-  const properties = detail.properties.filter(({ key }) => !["title", "tags", "type"].includes(key)).slice(0, 4);
-  return (
-    <div className="spatial-graph__detail">
-      <div className="spatial-graph__detail-heading">
-        <button className="spatial-graph__detail-title" disabled={!concept.filePath} onClick={() => concept.filePath && onOpenTarget(concept.filePath)} type="button">{concept.label}</button>
-        {concept.filePath ? (
-          <button
-            aria-label="Find relevant connections"
-            className="spatial-graph__maintenance"
-            onClick={() => onStartMaintenance(concept.filePath!)}
-            title="Find relevant connections"
-            type="button"
-          >
-            <Link2 aria-hidden="true" size={14} />
-          </button>
-        ) : null}
-      </div>
-      <div className="spatial-graph__detail-meta">
-        <span>{concept.conceptTypes.join(" · ") || "Note"}</span>
-        <span>{degree >= 0 ? topology?.nodes.degrees[degree] ?? 0 : 0} links</span>
-      </div>
-      {concept.relativePath ? <div className="spatial-graph__path">{concept.relativePath}</div> : null}
-      {properties.length ? <div className="spatial-graph__detail-properties">{properties.map(({ key, value }) => <span key={key}><b>{key}</b>{compactValue(value)}</span>)}</div> : null}
-      {detail.findings.length ? <div className="spatial-graph__finding">{detail.findings[0]?.message}</div> : null}
-      {detailStatus ? <div className="spatial-graph__finding">{detailStatus}</div> : null}
-    </div>
-  );
-}
-
-function cacheKey(sourceSnapshotId: string, index: number): string {
-  return `${sourceSnapshotId}:${index}`;
-}
-
 function lookupReference(concept: InspectedConcept): GraphConceptLookupReference | null {
   if (concept.conceptId) return { conceptId: concept.conceptId };
   if (concept.filePath) return { filePath: concept.filePath };
   return null;
 }
 
-function lookupKey(sourceSnapshotId: string, reference: GraphConceptLookupReference): string {
-  return "conceptId" in reference
-    ? `${sourceSnapshotId}:id:${reference.conceptId}`
-    : `${sourceSnapshotId}:path:${reference.filePath}`;
-}
-
-function releasePointer(event: ReactPointerEvent<HTMLCanvasElement>): void {
-  if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-}
-
-function pointerSample(event: ReactPointerEvent<HTMLCanvasElement>) {
-  return { pointerId: event.pointerId, x: event.clientX, y: event.clientY, pointerType: event.pointerType };
-}
-
 function prefersReducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-}
-
-function compactValue(value: unknown): string {
-  const rendered = typeof value === "string" ? value : JSON.stringify(value);
-  return rendered.length > 42 ? `${rendered.slice(0, 39)}…` : rendered;
 }

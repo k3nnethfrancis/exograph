@@ -1,12 +1,11 @@
-import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, Tray, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, shell, Tray, type ContextMenuParams, type MenuItemConstructorOptions } from "electron";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { TerminalSessionInfo } from "../shared/api";
-
-const TRAY_ICON_DATA_URL =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAAAkklEQVR42mNgGMrAAIjPA/F9IE4gRXE/FO+H8v+jYQF8Bp3HogEXVsBn0H0cmu5DXQbjnyfktQQ0AwzQ5GHi+4kJ1Pl4DDpPrItAIADJoAY0OWTvEQQCeMJiPikGoduMnGYakMQdiDEIPRmA+OvRLCggxqD7RKYlAVKSwXk8BisQG+joCguQDJlPaeYVINYlAwsA/kdblK7gwrkAAAAASUVORK5CYII=";
+import { exographTrayIconDataUrl } from "../shared/exograph-mark";
+import { trustDesktopRenderer } from "./renderer-authority";
 
 export interface AppLifecycleControllerOptions {
   currentDirectory: string;
@@ -35,6 +34,24 @@ export class AppLifecycleController {
     return this.rendererReady;
   }
 
+  async prepareDocumentTransition(): Promise<void> {
+    const window = this.mainWindow;
+    if (!window || window.isDestroyed() || !this.rendererReady) return;
+    await window.webContents.executeJavaScript("globalThis.__exographPrepareDocumentTransition?.()", true);
+  }
+
+  async finishDocumentTransition(): Promise<void> {
+    const window = this.mainWindow;
+    if (!window || window.isDestroyed() || !this.rendererReady) return;
+    await window.webContents.executeJavaScript("globalThis.__exographFinishDocumentTransition?.()", true);
+  }
+
+  async withDocumentsFlushed<T>(operation: () => Promise<T>): Promise<T> {
+    await this.prepareDocumentTransition();
+    try { return await operation(); }
+    finally { await this.finishDocumentTransition(); }
+  }
+
   createWindow(): BrowserWindow {
     const preloadPath = this.resolvePreloadPath();
     const isTestWindow = process.env.EXOGRAPH_TEST === "1";
@@ -53,8 +70,24 @@ export class AppLifecycleController {
         y: 14,
       },
       webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
         preload: preloadPath,
+        sandbox: true,
       },
+    });
+
+    const revokeRendererTrust = trustDesktopRenderer(window.webContents);
+    window.webContents.on("will-navigate", (event, targetUrl) => {
+      if (!this.isTrustedRendererUrl(targetUrl)) {
+        event.preventDefault();
+      }
+    });
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      if (isSafeExternalUrl(url)) {
+        void shell.openExternal(url);
+      }
+      return { action: "deny" };
     });
 
     this.loadRenderer(window);
@@ -70,7 +103,17 @@ export class AppLifecycleController {
         return;
       }
       event.preventDefault();
-      this.loadRenderer(window);
+      void this.withDocumentsFlushed(async () => { this.loadRenderer(window); }).catch((error) => {
+        this.showMainWindow();
+        this.options.logMain("reload blocked by document save", error);
+      });
+    });
+
+    window.webContents.on("context-menu", (event, params) => {
+      const template = editableContextMenuTemplate(window, params);
+      if (!template) return;
+      event.preventDefault();
+      Menu.buildFromTemplate(template).popup({ window });
     });
 
     window.webContents.on("did-start-loading", () => {
@@ -152,6 +195,7 @@ export class AppLifecycleController {
     });
 
     window.on("closed", () => {
+      revokeRendererTrust();
       if (this.mainWindow === window) {
         this.mainWindow = null;
         this.rendererReady = false;
@@ -171,7 +215,10 @@ export class AppLifecycleController {
       return;
     }
 
-    const icon = nativeImage.createFromDataURL(TRAY_ICON_DATA_URL);
+    const icon = nativeImage.createFromDataURL(exographTrayIconDataUrl());
+    if (icon.isEmpty()) {
+      throw new Error("Failed to decode Exograph's macOS menu-bar icon.");
+    }
     icon.setTemplateImage(true);
 
     this.tray = new Tray(icon);
@@ -298,6 +345,18 @@ export class AppLifecycleController {
     return url === pathToFileURL(rendererPath).toString();
   }
 
+  private isTrustedRendererUrl(url: string): boolean {
+    const devServerUrl = process.env.ELECTRON_RENDERER_URL ?? process.env.VITE_DEV_SERVER_URL;
+    if (!devServerUrl) {
+      return this.isRendererEntryUrl(url);
+    }
+    try {
+      return new URL(url).origin === new URL(devServerUrl).origin;
+    } catch {
+      return false;
+    }
+  }
+
   private scheduleRendererRecovery(window: BrowserWindow, reason: string) {
     if (process.env.EXOGRAPH_AUTO_RECOVER_RENDERER === "0") {
       return;
@@ -372,6 +431,67 @@ export class AppLifecycleController {
   }
 }
 
+/**
+ * Build the platform menu for editable web contents. The renderer deliberately
+ * does not imitate a text menu: Chromium already reports spelling, selection,
+ * and edit capability state to Electron, which can keep this interaction native.
+ */
+export function editableContextMenuTemplate(
+  window: Pick<BrowserWindow, "webContents">,
+  params: ContextMenuParams,
+): MenuItemConstructorOptions[] | null {
+  if (!params.isEditable) return null;
+
+  const { editFlags, misspelledWord, dictionarySuggestions, selectionText } = params;
+  const template: MenuItemConstructorOptions[] = [];
+
+  if (misspelledWord) {
+    for (const suggestion of dictionarySuggestions) {
+      template.push({
+        label: suggestion,
+        click: () => window.webContents.replaceMisspelling(suggestion),
+      });
+    }
+    if (dictionarySuggestions.length > 0) template.push({ type: "separator" });
+    template.push({
+      label: "Add to Dictionary",
+      click: () => window.webContents.session.addWordToSpellCheckerDictionary(misspelledWord),
+    });
+    template.push({ type: "separator" });
+  }
+
+  template.push(
+    { role: "undo", enabled: editFlags.canUndo },
+    { role: "redo", enabled: editFlags.canRedo },
+    { type: "separator" },
+    { role: "cut", enabled: editFlags.canCut },
+    { role: "copy", enabled: editFlags.canCopy },
+    { role: "paste", enabled: editFlags.canPaste },
+    { role: "pasteAndMatchStyle", enabled: editFlags.canPaste },
+    { role: "delete", enabled: editFlags.canDelete },
+    { role: "selectAll", enabled: editFlags.canSelectAll },
+  );
+
+  if (process.platform === "darwin" && selectionText.trim()) {
+    template.push(
+      { type: "separator" },
+      { label: "Look Up", click: () => window.webContents.showDefinitionForSelection() },
+      { role: "services" },
+    );
+  }
+
+  return template;
+}
+
 function shouldRecoverRenderer(reason: string): boolean {
   return reason === "crashed" || reason === "oom" || reason === "killed" || reason === "abnormal-exit" || reason === "launch-failed" || reason === "load-failed";
+}
+
+export function isSafeExternalUrl(target: string): boolean {
+  try {
+    const protocol = new URL(target).protocol;
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
 }

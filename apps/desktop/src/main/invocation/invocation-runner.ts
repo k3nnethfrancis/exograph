@@ -31,7 +31,10 @@ import {
   type InvocationWorkspaceManifest,
   WORKSPACE_RUNTIME_DIRECTORY,
 } from "@exograph/core";
-import { commandForClaudeResume as buildClaudeResumeCommand } from "@exograph/core/provider-session";
+import {
+  commandForClaudeResume as buildClaudeResumeCommand,
+  commandForCodexResume as buildCodexResumeCommand,
+} from "@exograph/core/provider-session";
 
 import type { TerminalSessionInfo } from "../../shared/api";
 import type { AgentCommandContinuityStatus, AgentCommandLaunchFacts, AgentInvocationAuthorizationFacts } from "../../shared/api";
@@ -50,7 +53,7 @@ import {
 } from "./invocation-adapter";
 import type { AgentTerminalWorkspaceContext, TerminalManager } from "../terminal/terminal-manager";
 import type { WorkspaceChangeEvent, WorkspaceWatcherService } from "../workspace/workspace-watchers";
-import { InvocationActivityAdapter, type ParsedInvocationActivity } from "./invocation-activity-adapter";
+import { InvocationActivityAdapter } from "./invocation-activity-adapter";
 import {
   InvocationReviewError,
   InvocationReviewService,
@@ -109,7 +112,7 @@ export interface InvocationReviewListItem {
   invocationId: string;
   createdAt: string;
   endedAt?: string;
-  command: Pick<InvocationRecord["command"], "handle" | "label">;
+  command: Pick<InvocationRecord["command"], "handle" | "label" | "appearance">;
   changedFileCount: number;
   pendingFileCount: number;
   pendingChangeIds: string[];
@@ -120,7 +123,7 @@ export interface InvocationHistoryItem {
   invocationId: string;
   createdAt: string;
   endedAt?: string;
-  command: Pick<InvocationRecord["command"], "handle" | "label">;
+  command: Pick<InvocationRecord["command"], "handle" | "label" | "appearance">;
   outcome: "kept" | "rejected" | "pending" | "failed";
   changedFileCount: number;
   changeIds: string[];
@@ -146,8 +149,11 @@ interface ActiveObservation {
   observedPaths: Set<string>;
   process?: InvocationProcess;
   requestedStatus?: "user-ended" | "failed";
+  terminalActivityEmitted: boolean;
   lastWorkspaceChangeAtMs: number;
   settlementPromise?: Promise<InvocationRecord | null>;
+  proposalTimer?: NodeJS.Timeout;
+  proposalPromise?: Promise<void>;
 }
 
 interface FileSnapshot {
@@ -173,7 +179,7 @@ export class InvocationRunner extends EventEmitter {
   private readonly activityState = new Map<string, {
     lastKey: string;
     emittedAtMs: number;
-    pending?: ParsedInvocationActivity;
+    pending?: { kind: InvocationActivityKind; label?: string };
     timer?: NodeJS.Timeout;
   }>();
 
@@ -320,7 +326,14 @@ export class InvocationRunner extends EventEmitter {
     const settleHeadlessProcess = (exitCode: number | null, failureReason: string | null) => {
       const status = exitCode !== 0 || failureReason ? "failed" : "process-exited";
       const requested = this.active.get(prepared.id)?.requestedStatus;
-      this.settleFromEvent(prepared.id, requested ?? status, exitCode ?? undefined, failureReason ?? undefined);
+      const settledStatus = requested ?? status;
+      const activity = settledStatus === "failed"
+        ? "failed"
+        : settledStatus === "user-ended"
+          ? "stopped"
+          : "done";
+      this.emitTerminalActivity(prepared.id, activity);
+      this.settleFromEvent(prepared.id, settledStatus, exitCode ?? undefined, failureReason ?? undefined);
     };
     const handleHeadlessControlError = async (error: unknown, exitCode: number | null): Promise<void> => {
       if (!(error instanceof InvocationProcessStopError)) {
@@ -337,6 +350,7 @@ export class InvocationRunner extends EventEmitter {
         };
         await store.writeRecord(recoverable);
         observation.record = recoverable;
+        this.emitTerminalActivity(prepared.id, "failed");
         this.emit("updated", recoverable);
       }
       this.emit("settlement-error", { invocationId: prepared.id, error });
@@ -439,10 +453,15 @@ export class InvocationRunner extends EventEmitter {
           for (const activity of activityAdapter.push(output.channel, output.chunk)) {
             this.emitActivity(prepared.id, activity);
           }
+          const providerSessionId = activityAdapter.providerSessionId();
+          if (providerSessionId) {
+            void this.recordProviderSession(prepared.id, providerSessionId).catch((error) => {
+              this.emit("settlement-error", { invocationId: prepared.id, error });
+            });
+          }
         });
         invocationProcess.onExit((event) => {
           for (const activity of activityAdapter.finish()) this.emitActivity(prepared.id, activity, true);
-          this.emitActivity(prepared.id, { kind: "finishing" }, true);
           if (!startCommitted) {
             queuedExitRef.current = { event, attemptedHead: head, fallback };
             return;
@@ -487,7 +506,7 @@ export class InvocationRunner extends EventEmitter {
       }
       const startedAt = new Date().toISOString();
       const running = {
-        ...prepared.pending,
+        ...(this.active.get(prepared.id)?.record ?? prepared.pending),
         status: "running" as const,
         startedAt,
         ...(terminal ? { terminalSessionId: terminal.id } : {}),
@@ -650,6 +669,7 @@ export class InvocationRunner extends EventEmitter {
     if (!observation) return null;
     observation.requestedStatus = "user-ended";
     await observation.process?.stop();
+    this.emitTerminalActivity(id, "stopped");
     return this.settle(id, "user-ended");
   }
 
@@ -666,7 +686,10 @@ export class InvocationRunner extends EventEmitter {
         failures.push(error);
       }
     }));
-    await Promise.all(stopped.map((observation) => this.settle(observation.record.id, "user-ended")));
+    await Promise.all(stopped.map((observation) => {
+      this.emitTerminalActivity(observation.record.id, "stopped");
+      return this.settle(observation.record.id, "user-ended");
+    }));
     if (failures.length > 0) {
       throw new AggregateError(failures, `Failed to stop ${failures.length} invocation process${failures.length === 1 ? "" : "es"}.`);
     }
@@ -716,9 +739,10 @@ export class InvocationRunner extends EventEmitter {
       .sort(newestRecordFirst)
       .map((record) => ({
         invocationId: record.id,
+        ...(record.protocolInvocationId ? { protocolInvocationId: record.protocolInvocationId } : {}),
         createdAt: record.createdAt,
         ...(record.endedAt ? { endedAt: record.endedAt } : {}),
-        command: { handle: record.command.handle, label: record.command.label },
+        command: { handle: record.command.handle, label: record.command.label, ...(record.command.appearance ? { appearance: record.command.appearance } : {}) },
         outcome: invocationHistoryOutcome(record),
         changedFileCount: record.changeset?.files.length ?? 0,
         changeIds: record.changeset?.files.map((change) => change.id) ?? [],
@@ -728,14 +752,19 @@ export class InvocationRunner extends EventEmitter {
 
   async resumeInTerminal(id: string): Promise<TerminalSessionInfo> {
     const record = await this.get(id);
-    if (!record?.providerSessionId || record.command.adapter !== "claude-code") {
-      throw new InvocationRunnerError("resume-unavailable", "This invocation does not have resumable Claude session provenance.");
+    if (!record?.providerSessionId || (record.command.adapter !== "claude-code" && record.command.adapter !== "codex-cli")) {
+      throw new InvocationRunnerError("resume-unavailable", "This invocation does not have resumable session provenance.");
     }
     const fallbackSettings = this.options.getWorkspaceSettings();
     const workspaceRoot = record.workspaceRoot ?? fallbackSettings.workspaceRoot;
     const noteRoots = record.noteRoots ?? fallbackSettings.noteRoots;
     return this.options.terminalManager.createAgentCommand(
-      { ...record.command, command: commandForClaudeResume(record.command, record.providerSessionId) },
+      {
+        ...record.command,
+        command: record.command.adapter === "claude-code"
+          ? commandForClaudeResume(record.command, record.providerSessionId)
+          : buildCodexResumeCommand(record.command, record.providerSessionId),
+      },
       record.cwd,
       {
         workspaceRoot,
@@ -829,7 +858,7 @@ export class InvocationRunner extends EventEmitter {
         }
         if (!launch) throw new Error("Invocation launch manifest is missing; exact recovery cannot continue.");
         existingSettled ??= await recordStore.readManifest(record.id, "settled");
-        const settled = existingSettled ?? await recordStore.captureManifest(record.id, "settled", noteRoots);
+        const settled = existingSettled ?? await recordStore.captureSettledManifest(record.id, noteRoots, launch);
         const changeset = buildInvocationChangeset(launch, settled);
         const next: InvocationRecord = {
           ...recovered,
@@ -900,6 +929,7 @@ export class InvocationRunner extends EventEmitter {
       noteRoots,
       ...(continuityLockKey ? { continuityLockKey } : {}),
       observedPaths: new Set(),
+      terminalActivityEmitted: false,
       lastWorkspaceChangeAtMs: Date.now(),
     });
   }
@@ -911,7 +941,64 @@ export class InvocationRunner extends EventEmitter {
       if (!observation.noteRoots.some((root) => isWithinPath(root, changedPath))) continue;
       observation.observedPaths.add(changedPath);
       observation.lastWorkspaceChangeAtMs = Date.now();
+      // The linked response proves that a proposal exists; the quiet window
+      // must include every authorized Note Root change, not just the response
+      // document. Commands commonly write the receipt before finishing edits
+      // in other notes.
+      this.scheduleProposalCheckpoint(observation);
     }
+  }
+
+  private scheduleProposalCheckpoint(observation: ActiveObservation): void {
+    if (observation.record.changeset || observation.settlementPromise) return;
+    if (observation.proposalTimer) clearTimeout(observation.proposalTimer);
+    const quietMs = this.options.settlementQuietMs ?? DEFAULT_SETTLEMENT_QUIET_MS;
+    observation.proposalTimer = setTimeout(() => {
+      observation.proposalTimer = undefined;
+      if (observation.record.changeset || observation.settlementPromise || observation.proposalPromise) return;
+      const checkpoint = this.captureProposalCheckpoint(observation).finally(() => {
+        if (observation.proposalPromise === checkpoint) observation.proposalPromise = undefined;
+      });
+      observation.proposalPromise = checkpoint;
+    }, quietMs);
+  }
+
+  private async recordProviderSession(id: string, providerSessionId: string): Promise<void> {
+    const observation = this.active.get(id);
+    if (!observation || observation.record.providerSessionId === providerSessionId) return;
+    const next = { ...observation.record, providerSessionId };
+    // Claim the identity synchronously so repeated JSONL chunks cannot enqueue
+    // duplicate writes before the first durable write completes.
+    observation.record = next;
+    await new InvocationStore(observation.workspaceRoot).writeRecord(next);
+    this.emit("updated", next);
+  }
+
+  /**
+   * The linked response envelope is the provider-neutral proposal boundary.
+   * Once it is durably present and the filesystem is quiet, review can begin
+   * even while the harness finishes its own terminal response.
+   */
+  private async captureProposalCheckpoint(observation: ActiveObservation): Promise<void> {
+    const id = observation.record.id;
+    const protocolId = observation.record.protocolInvocationId;
+    if (!isDocumentAgentProtocolId(protocolId)) return;
+    const current = await readWorkspaceDocument(observation.record.taggedDocumentPath!);
+    const hasResponse = findDocumentAgentEnvelopes(current.body).some((envelope) =>
+      envelope.kind === "response" &&
+      envelope.invocationId === protocolId &&
+      envelope.agent === observation.record.command.handle,
+    );
+    if (!hasResponse) return;
+    const store = new InvocationStore(observation.workspaceRoot);
+    const launch = await store.readManifest(id, "launch");
+    if (!launch) return;
+    const settled = await store.captureSettledManifest(id, observation.noteRoots, launch);
+    const changeset = buildInvocationChangeset(launch, settled);
+    const next = { ...observation.record, changeset };
+    await store.writeRecord(next);
+    observation.record = next;
+    this.emit("updated", next);
   }
 
   private settle(id: string, status: "process-exited" | "user-ended" | "failed", exitCode?: number, failureReason?: string): Promise<InvocationRecord | null> {
@@ -935,8 +1022,8 @@ export class InvocationRunner extends EventEmitter {
       await this.waitForSettlementQuiet(observation);
       const launch = await store.readManifest(id, "launch");
       if (!launch) throw new InvocationRunnerError("review-unavailable", "The invocation launch manifest is unavailable.");
-      const settled = await store.captureManifest(id, "settled", observation.noteRoots);
-      const changeset = buildInvocationChangeset(launch, settled);
+      const settled = await store.captureSettledManifest(id, observation.noteRoots, launch);
+      const changeset = observation.record.changeset ?? buildInvocationChangeset(launch, settled);
       const missingDurableResponse = status === "process-exited" &&
         isDocumentAgentProtocolId(observation.record.protocolInvocationId) &&
         !await hasDurableResponse(
@@ -960,8 +1047,11 @@ export class InvocationRunner extends EventEmitter {
         changeset,
       };
       await store.writeRecord(next);
-      await this.compactArtifacts(store, id, changeset);
       await store.clearProcessOwnership(id);
+      // Retire redundant snapshots before releasing the invocation scope. The
+      // compactor is bounded and concurrent; process completion was already
+      // reported independently through the activity channel.
+      await this.compactArtifacts(store, id, changeset);
       this.emit("updated", next);
       this.releaseObservation(observation);
       return next;
@@ -1003,6 +1093,7 @@ export class InvocationRunner extends EventEmitter {
 
   private releaseObservation(observation: ActiveObservation): void {
     const id = observation.record.id;
+    if (observation.proposalTimer) clearTimeout(observation.proposalTimer);
     this.clearActivity(id);
     this.active.delete(id);
     if (observation.record.terminalSessionId) this.byTerminal.delete(observation.record.terminalSessionId);
@@ -1100,6 +1191,8 @@ export class InvocationRunner extends EventEmitter {
 
       try {
         const next = await this.reviewService(scope.workspaceRoot).resolve(record, pending);
+        const observation = this.active.get(id);
+        if (observation) observation.record = next;
         if (next.changeset) await this.compactArtifacts(store, next.id, next.changeset);
         this.emit("updated", next);
         return next;
@@ -1140,7 +1233,7 @@ export class InvocationRunner extends EventEmitter {
     }
   }
 
-  private emitActivity(id: string, activity: ParsedInvocationActivity, immediate = false): void {
+  private emitActivity(id: string, activity: { kind: InvocationActivityKind; label?: string }, immediate = false): void {
     const key = `${activity.kind}:${activity.label ?? ""}`;
     const now = Date.now();
     const state = this.activityState.get(id) ?? { lastKey: "", emittedAtMs: 0 };
@@ -1171,7 +1264,7 @@ export class InvocationRunner extends EventEmitter {
   private publishActivity(
     id: string,
     activity: { kind: InvocationActivityKind; label?: string },
-    state: { lastKey: string; emittedAtMs: number; pending?: ParsedInvocationActivity; timer?: NodeJS.Timeout },
+    state: { lastKey: string; emittedAtMs: number; pending?: { kind: InvocationActivityKind; label?: string }; timer?: NodeJS.Timeout },
   ): void {
     state.lastKey = `${activity.kind}:${activity.label ?? ""}`;
     state.emittedAtMs = Date.now();
@@ -1183,6 +1276,13 @@ export class InvocationRunner extends EventEmitter {
       ...(activity.label ? { label: activity.label } : {}),
     };
     this.emit("activity", event);
+  }
+
+  private emitTerminalActivity(id: string, kind: "done" | "stopped" | "failed"): void {
+    const observation = this.active.get(id);
+    if (!observation || observation.terminalActivityEmitted) return;
+    observation.terminalActivityEmitted = true;
+    this.emitActivity(id, { kind }, true);
   }
 
   private clearActivity(id: string): void {
@@ -1321,7 +1421,7 @@ function reviewListItem(record: InvocationRecord): InvocationReviewListItem {
     invocationId: record.id,
     createdAt: record.createdAt,
     ...(record.endedAt ? { endedAt: record.endedAt } : {}),
-    command: { handle: record.command.handle, label: record.command.label },
+    command: { handle: record.command.handle, label: record.command.label, ...(record.command.appearance ? { appearance: record.command.appearance } : {}) },
     changedFileCount: record.changeset?.files.length ?? 0,
     pendingFileCount: record.changeset?.files.filter((change) => isUnresolvedReviewDecision(change.decision.status)).length ?? 0,
     pendingChangeIds: record.changeset?.files

@@ -17,6 +17,10 @@ describe("invocation activity", () => {
 
   it("accepts only the intentionally small activity vocabulary", () => {
     expect(isInvocationActivityKind("reading")).toBe(true);
+    expect(isInvocationActivityKind("done")).toBe(true);
+    expect(isInvocationActivityKind("stopped")).toBe(true);
+    expect(isInvocationActivityKind("failed")).toBe(true);
+    expect(isInvocationActivityKind("finishing")).toBe(false);
     expect(isInvocationActivityKind("thinking")).toBe(false);
     expect(isInvocationActivityKind("reasoning")).toBe(false);
   });

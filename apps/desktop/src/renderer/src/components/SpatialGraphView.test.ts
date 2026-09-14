@@ -1,5 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphTopology } from "@exograph/core";
 
@@ -9,7 +11,8 @@ import type { GraphPresentationPlan } from "../graphPresentation";
 import type { GraphPixelRenderer, GraphPixelRendererMeasurement } from "../graphRendererHost";
 import type { GraphFrameDriver } from "../graphRenderScheduler";
 import type { GraphGpuRuntime, GraphWebGpuSurface } from "../graphWebGpuRenderer";
-import { pickGraphSceneNode } from "../graphSceneFoundation";
+import { cameraBasis, DEFAULT_SCENE_CAMERA, projectGraphScene, pickGraphSceneNode } from "../graphSceneFoundation";
+import { GraphBuildingIndicator } from "./SpatialGraphView";
 import {
   GraphSnapshotRefreshCoordinator,
   SpatialGraphPointerSession,
@@ -17,7 +20,9 @@ import {
   initialGraphSummaryIndexes,
   pruneGraphSnapshotCache,
   shouldRefreshGraphForWorkspaceChange,
+  shouldRevealGraphScene,
   spatialGraphDollyDragScale,
+  spatialGraphOrbitDelta,
   spatialGraphPointerAction,
   spatialGraphWheelIntent,
 } from "../spatialGraphRuntime";
@@ -185,12 +190,54 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("SpatialGraph runtime", () => {
+  it("presents graph construction as a concise accessible status", () => {
+    const markup = renderToStaticMarkup(createElement(GraphBuildingIndicator));
+    const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain("Building graph");
+    expect(markup).toContain('aria-hidden="true"');
+    expect(markup.match(/class="exograph-mark__arm"/g)).toHaveLength(6);
+    expect(markup.match(/class="exograph-mark__node"/g)).toHaveLength(6);
+    expect(markup).toContain("exograph-mark--animated");
+    expect(styles).toContain("animation-iteration-count: infinite");
+    expect(styles).toContain("@keyframes exograph-mark-build-arm");
+    expect(styles).toContain("@keyframes exograph-mark-build-reduced");
+  });
+
   it("keeps the product component on the typed topology API", () => {
     const source = readFileSync(new URL("./SpatialGraphView.tsx", import.meta.url), "utf8");
     expect(source).toContain("getGraphTopology");
     expect(source).toContain("getGraphConceptSummaries");
     expect(source).toContain("graphConceptLookup");
     expect(source).toContain("getGraphConceptDetailByIndex");
+  });
+
+  it("updates overflow labels without resetting camera or graph selection", () => {
+    const frames = new FakeFrameDriver();
+    const context = new MockContext();
+    const runtime = new SpatialGraphRuntime(surface(context), { frameDriver: frames, palette: palette() });
+    const graph = topology(30);
+    runtime.setTopology(graph, { width: 800, height: 600 });
+    runtime.applyLayoutFrame({ topologyHash: graph.topologyHash, layoutEpochId: graph.layoutEpochId, sequence: 1, settled: true, positions: new Float32Array(90) });
+    runtime.setSummaries(Array.from({ length: 30 }, (_, index) => ({ index, label: `Synthetic Note ${index}`, filePath: `/notes/${index}.md` })));
+    runtime.setSelection(0);
+    const scene = runtime.getScene()!;
+    frames.settle();
+    context.labels = 0;
+    runtime.setShowOverflowLabels(false);
+    frames.settle();
+    const anchoredCount = context.labels;
+    expect(anchoredCount).toBeGreaterThan(0);
+    const camera = structuredClone(scene.camera);
+    context.labels = 0;
+    runtime.setShowOverflowLabels(true);
+    frames.settle();
+    expect(context.labels).toBeGreaterThan(anchoredCount);
+    expect(scene.camera).toEqual(camera);
+    expect(scene.interaction.selected).toBe(0);
+    runtime.setShowOverflowLabels(true);
+    expect(frames.callbacks.size).toBe(0);
+    runtime.dispose();
   });
 
   it("draws a deterministic scene immediately, rejects late layout, and becomes quiescent", () => {
@@ -298,8 +345,14 @@ describe("SpatialGraph runtime", () => {
     expect(runtime.getScene()).toBe(scene);
 
     runtime.focus(2, true);
+    const distanceBeforeGpuZoom = runtime.getScene()!.camera.distance;
     runtime.zoomAt(610, 190, 1.35);
+    expect(runtime.getScene()!.camera.distance).toBeLessThan(distanceBeforeGpuZoom);
+    const pointBeforeGpuPan = runtime.getScene()!.projection.nodes.slice(2 * 4, 2 * 4 + 2);
     runtime.pan(24, 18);
+    const pointAfterGpuPan = runtime.getScene()!.projection.nodes.slice(2 * 4, 2 * 4 + 2);
+    expect(pointAfterGpuPan[0]).toBeCloseTo((pointBeforeGpuPan[0] ?? 0) + 24, 4);
+    expect(pointAfterGpuPan[1]).toBeCloseTo((pointBeforeGpuPan[1] ?? 0) + 18, 4);
     runtime.setSelection(2);
     frames.settle();
     const interactedScene = runtime.getScene()!;
@@ -345,6 +398,17 @@ describe("SpatialGraph runtime", () => {
     expect(runtime.getScene()).toBe(scene);
     expect(runtime.getScene()!.camera).toEqual(interactedCamera);
     expect(runtime.getScene()!.interaction.selected).toBe(2);
+
+    const distanceBeforeCanvasZoom = runtime.getScene()!.camera.distance;
+    runtime.zoomAt(400, 300, 1.2);
+    expect(runtime.getScene()!.camera.distance).toBeLessThan(distanceBeforeCanvasZoom);
+    const pointBeforeCanvasPan = runtime.getScene()!.projection.nodes.slice(2 * 4, 2 * 4 + 2);
+    runtime.pan(17, 13);
+    const pointAfterCanvasPan = runtime.getScene()!.projection.nodes.slice(2 * 4, 2 * 4 + 2);
+    expect(pointAfterCanvasPan[0]).toBeCloseTo((pointBeforeCanvasPan[0] ?? 0) + 17, 4);
+    expect(pointAfterCanvasPan[1]).toBeCloseTo((pointBeforeCanvasPan[1] ?? 0) + 13, 4);
+    frames.settle();
+    expect(context.arcs).toBeGreaterThan(bootstrapArcs);
     expect(pickGraphSceneNode(
       runtime.getScene()!.topology,
       runtime.getScene()!.projection,
@@ -352,8 +416,6 @@ describe("SpatialGraph runtime", () => {
       runtime.getScene()!.projection.nodes[2 * 4] ?? 0,
       runtime.getScene()!.projection.nodes[2 * 4 + 1] ?? 0,
     )).toBe(2);
-    expect(context.arcs).toBeGreaterThan(bootstrapArcs);
-    frames.settle();
     expect(runtime.snapshot()).toMatchObject({ pendingFrame: false, moving: false });
     runtime.dispose();
     expect(gpu.destroyCalls).toBe(1);
@@ -434,6 +496,11 @@ describe("SpatialGraph pointer session", () => {
     expect(spatialGraphPointerAction({ ...input, pointerType: "touch", button: 0 })).toBe("orbit");
   });
 
+  it("applies the saved inverse-navigation preference only to orbit deltas", () => {
+    expect(spatialGraphOrbitDelta(12, -8, true)).toEqual({ x: 12, y: -8 });
+    expect(spatialGraphOrbitDelta(12, -8, false)).toEqual({ x: -12, y: 8 });
+  });
+
   it("maps middle-button vertical drag to pointer-anchored dolly", () => {
     const session = new SpatialGraphPointerSession();
     session.begin({ pointerId: 1, x: 100, y: 100, pointerType: "mouse" }, "dolly");
@@ -487,6 +554,13 @@ describe("bounded graph labels", () => {
 });
 
 describe("graph refresh and wheel policy", () => {
+  it("reveals the initial graph only after its final layout is available", () => {
+    expect(shouldRevealGraphScene({ initialFramePending: true, layoutSettled: false, workerAvailable: true })).toBe(false);
+    expect(shouldRevealGraphScene({ initialFramePending: true, layoutSettled: true, workerAvailable: true })).toBe(true);
+    expect(shouldRevealGraphScene({ initialFramePending: true, layoutSettled: false, workerAvailable: false })).toBe(true);
+    expect(shouldRevealGraphScene({ initialFramePending: false, layoutSettled: false, workerAvailable: true })).toBe(true);
+  });
+
   it("coalesces changes, retries unchanged snapshots, then becomes idle", () => {
     const timer = new FakeRefreshTimer();
     const refresh = vi.fn();
@@ -526,5 +600,90 @@ describe("graph refresh and wheel policy", () => {
     expect(shouldRefreshGraphForWorkspaceChange({ filePath: null })).toBe(true);
     expect(shouldRefreshGraphForWorkspaceChange({ filePath: "/notes/Idea.MD" })).toBe(true);
     expect(shouldRefreshGraphForWorkspaceChange({ filePath: "/dist/app.js" })).toBe(false);
+  });
+});
+
+
+describe("graph viewport camera ownership", () => {
+  function fixture() {
+    const frames = new FakeFrameDriver();
+    const runtime = new SpatialGraphRuntime(surface(), { frameDriver: frames, palette: palette() });
+    const graph = topology(2);
+    runtime.setTopology(graph, { width: 540, height: 800 });
+    const { right } = cameraBasis(DEFAULT_SCENE_CAMERA);
+    runtime.applyLayoutFrame({ topologyHash: graph.topologyHash, layoutEpochId: graph.layoutEpochId, sequence: 1, settled: true,
+      positions: new Float32Array([...right.map(value => -1000 * value), ...right.map(value => 1000 * value)]) });
+    runtime.frameAll();
+    return { runtime, frames };
+  }
+  it("keeps framed nodes inside repeated width and detail-height changes", () => {
+    const { runtime } = fixture();
+    for (const viewport of [{ width: 230, height: 800 }, { width: 700, height: 500 }, { width: 230, height: 950 }, { width: 540, height: 800 }]) {
+      runtime.resize(viewport, 1.1);
+      const scene = runtime.getScene()!;
+      for (let index = 0; index < 2; index += 1) {
+        expect(scene.projection.nodes[index * 4]).toBeGreaterThan(12);
+        expect(scene.projection.nodes[index * 4]).toBeLessThan(viewport.width - 12);
+      }
+    }
+    runtime.dispose();
+  });
+  it("preserves manual context except enough distance to retain a previously visible selection", () => {
+    const { runtime } = fixture();
+    runtime.setSelection(1);
+    runtime.pan(0, 0);
+    const before = structuredClone(runtime.getScene()!.camera);
+    runtime.resize({ width: 230, height: 800 });
+    const scene = runtime.getScene()!;
+    expect(scene.camera.target).toEqual(before.target);
+    expect(scene.camera.yaw).toBe(before.yaw);
+    expect(scene.camera.pitch).toBe(before.pitch);
+    expect(scene.camera.distance).toBeGreaterThan(before.distance);
+    expect(scene.projection.nodes[4]).toBeLessThanOrEqual(230 - 12 + 0.001);
+    const after = structuredClone(scene.camera);
+    runtime.resize({ width: 230, height: 800 }, 2);
+    expect(scene.camera).toEqual(after);
+    runtime.resize({ width: 800, height: 800 });
+    expect(scene.camera).toEqual(after);
+    runtime.dispose();
+  });
+  it("preserves the camera on DPR-only changes and manual views that still fit", () => {
+    const { runtime } = fixture();
+    const framed = structuredClone(runtime.getScene()!.camera);
+    runtime.resize({ width: 540, height: 800 }, 2);
+    expect(runtime.getScene()!.camera).toEqual(framed);
+    runtime.pan(0, 0);
+    runtime.setSelection(1);
+    runtime.resize({ width: 700, height: 800 });
+    expect(runtime.getScene()!.camera).toEqual(framed);
+    runtime.setSelection(-1);
+    runtime.resize({ width: 230, height: 800 });
+    expect(runtime.getScene()!.camera).toEqual(framed);
+    runtime.dispose();
+  });
+  it("does not retrieve an intentionally offscreen selection or reframe on cold refresh", () => {
+    const { runtime } = fixture();
+    runtime.setSelection(1);
+    runtime.pan(2000, 0);
+    const before = structuredClone(runtime.getScene()!.camera);
+    runtime.resize({ width: 230, height: 800 });
+    expect(runtime.getScene()!.camera).toEqual(before);
+    runtime.setTopology(topology(2, "cold-refresh"), { width: 230, height: 800 });
+    expect(runtime.getScene()!.camera).toEqual(before);
+    runtime.dispose();
+  });
+  it("retains the focused target through a resize during focus animation", () => {
+    const { runtime, frames } = fixture();
+    runtime.setSelection(1);
+    runtime.focus(1, false);
+    frames.flush(16);
+    runtime.resize({ width: 230, height: 800 });
+    frames.settle();
+    const scene = runtime.getScene()!;
+    expect(scene.camera.target).toEqual([...scene.layout.positions.slice(3, 6)]);
+    const projected = projectGraphScene(scene.layout.positions, scene.camera, scene.projection.viewport);
+    expect(projected.nodes[4]).toBeCloseTo(115, 2);
+    expect(projected.nodes[5]).toBeCloseTo(400, 2);
+    runtime.dispose();
   });
 });

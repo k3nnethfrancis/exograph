@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { markdownImageTarget, resolveMarkdownImageWithRetry } from "./widgets";
+import { markdownImageTarget, resolveMarkdownImageWithRetry, tableCellInlineContent } from "./widgets";
 
 describe("markdown image targets", () => {
   it("keeps spaces in Markdown image filenames while removing an optional title", () => {
@@ -24,5 +24,37 @@ describe("markdown image targets", () => {
 
     expect(result).toEqual({ url: "file:///tmp/recovered.svg" });
     expect(attempts).toBe(2);
+  });
+});
+
+describe("Markdown tables", () => {
+  it("renders aliased wikilinks in cells as compact interactive labels", () => {
+    expect(tableCellInlineContent("[[../public-benchmarks/astabench/README|AstaBench]]")).toEqual([
+      { kind: "wikilink", label: "AstaBench", target: "../public-benchmarks/astabench/README" },
+    ]);
+  });
+
+  it("uses the final path segment for a path-only wikilink label", () => {
+    expect(tableCellInlineContent("[[../public-benchmarks/astabench/README]]")).toEqual([
+      { kind: "wikilink", label: "README", target: "../public-benchmarks/astabench/README" },
+    ]);
+  });
+
+  it("preserves ordinary inline Markdown semantics alongside wikilinks", () => {
+    expect(tableCellInlineContent("**Claim** with *emphasis*, ~~removed~~, `code`, [site](https://example.test), #tag, and [[note|a link]]")).toEqual([
+      { kind: "strong", value: "Claim" },
+      { kind: "text", value: " with " },
+      { kind: "emphasis", value: "emphasis" },
+      { kind: "text", value: ", " },
+      { kind: "strike", value: "removed" },
+      { kind: "text", value: ", " },
+      { kind: "code", value: "code" },
+      { kind: "text", value: ", " },
+      { kind: "markdown-link", label: "site", target: "https://example.test" },
+      { kind: "text", value: ", " },
+      { kind: "tag", value: "#tag", target: "tag" },
+      { kind: "text", value: ", and " },
+      { kind: "wikilink", label: "a link", target: "note" },
+    ]);
   });
 });

@@ -1,3 +1,4 @@
+import type { GraphTraversalRequest, GraphTraversalResult } from "@exograph/core";
 import { utilityProcess, type UtilityProcess } from "electron";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +28,7 @@ import {
 } from "./derived-index-protocol";
 
 export interface DerivedIndexClient {
+  graphTraverse(model: WorkspaceModel, runtimeRoot: string, request: GraphTraversalRequest, signal?: AbortSignal): Promise<GraphTraversalResult>;
   status(model: WorkspaceModel, runtimeRoot: string, signal?: AbortSignal): Promise<IndexStatus>;
   search(
     model: WorkspaceModel,
@@ -133,6 +135,10 @@ export class UtilityDerivedIndexClient implements DerivedIndexClient {
 
   sync(model: WorkspaceModel, runtimeRoot: string, signal?: AbortSignal): Promise<IndexSyncResult> {
     return this.request({ operation: "sync", context: { model, runtimeRoot } }, signal);
+  }
+
+  graphTraverse(model: WorkspaceModel, runtimeRoot: string, request: GraphTraversalRequest, signal?: AbortSignal): Promise<GraphTraversalResult> {
+    return this.request({ operation: "graph-traverse", context: { model, runtimeRoot }, request }, signal);
   }
 
   graphContext(

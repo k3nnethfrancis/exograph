@@ -2,8 +2,7 @@
 
 **Status:** Current document-envelope and Changeset review contract.
 
-Exograph keeps Markdown as the canonical user document. It adds two inert, XML-like
-envelopes so a human request and an agent's durable result can be identified
+Exograph keeps Markdown as the canonical user document. It adds two inert, XML-like envelopes so a human request and an agent's durable result can be identified
 without turning the note into a proprietary chat object.
 
 ```md
@@ -79,6 +78,12 @@ linked response envelope directly after the request. For direct-edit work the
 response can be a short receipt; for analysis, research, and planning it holds
 the durable result. Terminal stdout remains only a concise session summary.
 
+Prompt and Skill delivery supply instructions, not authority. A product workflow
+may use a saved prompt override or resolve a provider-native, Exograph-bundled,
+or exact inline Skill copy, but every run still follows the same executable trust, filesystem
+scope, observed-change, and review contracts. Repository contributor Skills are
+separate guidance for coding agents working on Exograph itself.
+
 ## App lifecycle
 
 The document shows one invocation surface at a time. First-run authorization is
@@ -88,9 +93,9 @@ user chooses Run or Cancel. It is not a progress surface.
 | State | Surface | Exit |
 | --- | --- | --- |
 | Checking | Same-frame cursor-adjacent acknowledgement while Exograph verifies executable identity and trust | Run, authorize, or restore the draft |
-| Running | Cursor glyph plus one bounded bottom-left activity state | Stop the full process tree |
-| Review | Inline diff, anchored Keep/Reject, file position, and optional batch actions | Resolve every file or explicitly keep a drifted current file |
-| Completed | Brief result that gets out of the way | Dismiss or resume session |
+| Running | One compact activity state anchored to the invocation | Stop the full process tree |
+| Review | The same anchored surface becomes Keep/Reject/Open session as soon as a settled file proposal exists, even if the provider process is still finishing | Resolve every file or explicitly keep a drifted current file |
+| Completed | Brief result; the response keeps a subtle hover/focus session handoff when the provider returned resumable identity | Dismiss or resume session |
 | Failed | Compact actionable failure; details only on request | Dismiss or resume session |
 
 One invocation owns one exact Changeset across all authorized Note Roots.
@@ -127,3 +132,19 @@ review controls.
   in every Markdown editor.
 
 -- Exograph | 2026-07-13
+
+### Custom command appearance
+
+In Settings → Agents, Custom commands can have a color and an uploaded PNG or
+JPEG icon. The icon appears beside the command in suggestions, the send control,
+authorization, activity, and Invocation History. Names and handles remain visible
+so color is never the only identifier. Remove icon and Reset color restore the
+default appearance.
+
+Uploads are limited to 2 MB and 4096 × 4096 pixels. Exograph decodes the selected
+image, scales it to at most 128 pixels per side, and stores a PNG of at most
+64 KiB directly in workspace settings. Transparency is preserved. The original
+file is not needed afterward. Persisted icons must have a bounded PNG envelope
+and dimensions; an image that cannot render falls back to the command's default
+icon. Appearance changes do not change the executable fingerprint or command
+version and do not require trusting the command again.

@@ -7,6 +7,17 @@ type TerminalsApi = DesktopApi["terminals"];
 type ShellApi = DesktopApi["shell"];
 
 export interface DesktopInvokeHandlers {
+  "publishing:get-setup-status": DesktopApi["publishing"]["getSetupStatus"];
+  "publishing:start-auth": DesktopApi["publishing"]["startAuth"];
+  "publishing:setup": DesktopApi["publishing"]["setup"];
+  "publishing:cancel-setup": DesktopApi["publishing"]["cancelSetup"];
+  "publishing:reveal-theme": DesktopApi["publishing"]["revealTheme"];
+
+  "publishing:get-status": DesktopApi["publishing"]["getStatus"];
+  "publishing:build": DesktopApi["publishing"]["build"];
+  "publishing:publish": DesktopApi["publishing"]["publish"];
+  "publishing:stop": DesktopApi["publishing"]["stop"];
+  "publishing:reveal-output": DesktopApi["publishing"]["revealOutput"];
   "workspace:get-model": WorkspaceApi["getModel"];
   "workspace:get-settings": WorkspaceApi["getSettings"];
   "workspace:get-setup-state": WorkspaceApi["getSetupState"];
@@ -23,6 +34,7 @@ export interface DesktopInvokeHandlers {
   "workspace:ontology-keep": WorkspaceApi["keepOntology"];
   "workspace:ontology-reject": WorkspaceApi["rejectOntology"];
   "workspace:resolve-preview-target": WorkspaceApi["resolvePreviewTarget"];
+  "workspace:read-pdf-file": WorkspaceApi["readPdfFile"];
   "workspace:launch-agent-invocation": WorkspaceApi["launchAgentInvocation"];
   "workspace:get-agent-invocation-authorization": WorkspaceApi["getAgentInvocationAuthorization"];
   "workspace:prepare-graph-maintenance-skill": WorkspaceApi["prepareGraphMaintenanceSkill"];
@@ -55,6 +67,7 @@ export interface DesktopInvokeHandlers {
   "workspace:delete-path": WorkspaceApi["deletePath"];
   "notes:read": NotesApi["read"];
   "notes:save": NotesApi["save"];
+  "notes:save-copy": NotesApi["saveCopy"];
   "notes:stat": NotesApi["stat"];
   "notes:get-graph-context": NotesApi["getGraphContext"];
   "notes:get-graph-topology": NotesApi["getGraphTopology"];
@@ -78,6 +91,7 @@ export interface DesktopInvokeHandlers {
 }
 
 export interface DesktopEventPayloads {
+  "publishing:status": Awaited<ReturnType<DesktopApi["publishing"]["getStatus"]>>;
   "workspace:changed": { rootPath: string; eventType: string; filePath: string | null };
   "workspace:index-sync-state": IndexSyncStateEvent;
   "workspace:graph-changed": { source: "ontology" };
@@ -85,6 +99,7 @@ export interface DesktopEventPayloads {
   "workspace:invocation-updated": InvocationRecord;
   "workspace:invocation-activity": InvocationActivityEvent;
   "command:open-file": string;
+  "command:open-folder": string;
   "command:open-settings": { section: WorkspaceSettingsSection };
   "terminal:created": TerminalSessionInfo;
   "terminal:data": TerminalDataEvent;

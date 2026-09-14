@@ -1,10 +1,9 @@
 import { useEffect, useRef } from "react";
-import { Bot, Plus, SquareTerminal, X } from "lucide-react";
+import { Plus, SquareTerminal, X } from "lucide-react";
 
 import type { TerminalSessionInfo } from "../../../shared/api";
 import { isTerminalInputEnabled } from "../terminalSessions";
 import type { ExographThemeVariant } from "../theme/types";
-import { AgentIcon } from "./AgentIcon";
 import { ChromeTab } from "./Chrome";
 import type { TerminalHydrationReason } from "./terminalHydration";
 import type { DragManager } from "../hooks/useDragManager";
@@ -120,7 +119,7 @@ export function TerminalDock(props: TerminalDockProps) {
                   }}
                   onMouseDown={(event) => dragManager?.startDrag(event, { kind: "terminal", terminalId: session.id, sourcePaneId: paneId })}
                   title={`${session.title} · ${session.health ?? session.status}${session.healthDetail ? ` · ${session.healthDetail}` : ""}`}
-                  leading={<TerminalTabIcon kind={session.kind} />}
+                  leading={<SquareTerminal size={12} />}
                   closeLabel={onClosePane ? `Return ${session.title} to utility panel` : `Close ${session.title}`}
                   closeTestId={`close-terminal-${session.kind}`}
                   closeIcon={<X size={12} />}
@@ -167,14 +166,4 @@ export function TerminalDock(props: TerminalDockProps) {
       </div>
     </section>
   );
-}
-
-function TerminalTabIcon({ kind }: { kind: TerminalSessionInfo["kind"] }) {
-  if (kind === "shell") {
-    return <SquareTerminal size={12} />;
-  }
-  if (kind === "claude" || kind === "codex") {
-    return <AgentIcon kind={kind} size={12} />;
-  }
-  return <Bot size={12} />;
 }

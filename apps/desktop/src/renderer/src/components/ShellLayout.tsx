@@ -1,21 +1,25 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { WorkspaceSearchResults } from "@exograph/core";
-import { ChevronRight, FileText, Folder, Globe2, Network, PanelLeft, PanelRight, SquareTerminal } from "lucide-react";
+import type { WorkspaceShortcutBindings } from "@exograph/core";
+import { ChevronRight, FileText, Folder, Globe2, ListTree, PanelLeft, PanelRight, SquareTerminal } from "lucide-react";
 
 import type { AppearanceMode, ResolvedAppearance } from "../appearance";
 import type { DragManager } from "../hooks/useDragManager";
 import type { PaneNode, PaneNodeId, PaneTreeActions } from "../hooks/usePaneTree";
 import type { WorkspaceSearchResultMode } from "../hooks/useWorkspaceSearch";
+import type { UtilityDestination } from "../utilitySurfaceModel";
 import { FileTree, SidebarSearchPane } from "./FileTree";
 import type { RootSection } from "./ExplorerSections";
 import { PaneTree } from "./PaneTree";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 import type { WorkspaceBreadcrumbSegment } from "../workspaceBreadcrumb";
 import { WorkspaceSearchField } from "./WorkspaceSearchField";
+import { ExographMark } from "./ExographMark";
 
 interface ShellLayoutProps {
   titleSegments: WorkspaceBreadcrumbSegment[];
   workspaceLabel: string;
+  shortcutBindings?: WorkspaceShortcutBindings;
   noteSections: RootSection[];
   appearanceMode: AppearanceMode;
   resolvedAppearance: ResolvedAppearance;
@@ -37,17 +41,16 @@ interface ShellLayoutProps {
   renderLeaf: (leaf: import("../hooks/usePaneTree").PaneLeaf, focused: boolean) => ReactNode;
   dragManager: DragManager;
   utilityContent: ReactNode;
-  utilitySurface: "terminal" | "preview" | "connections";
+  utilitySurface: UtilityDestination;
   utilityOpen: boolean;
   onToggleUtility: () => void;
   onOpenUtilityBrowser: () => void;
   onOpenUtilityTerminal: () => void;
-  connections: ReactNode;
-  revealExplorerPathRequest?: { path: string; nonce: number } | null;
+  onOpenUtilityGraph: () => void;
+  onOpenNoteContext: () => void;
+  revealExplorerPathRequest?: { path: string; nonce: number; kind?: "file" | "directory" } | null;
   onAppearanceModeChange: (mode: AppearanceMode) => void;
   onOpenWorkspaceSettings: () => void;
-  connectionsOpen: boolean;
-  onOpenConnections: () => void;
   onSearchQueryChange: (value: string) => void;
   onSearchSubmit: () => void;
   onSearchClear: () => void;
@@ -60,7 +63,7 @@ interface ShellLayoutProps {
   onCreateFile: (directoryPath: string) => void;
   onCreateDirectory: (directoryPath: string) => void;
   onCreateTerminalInDirectory: (directoryPath: string) => void;
-  onRenamePath: (targetPath: string) => void;
+  onRenamePath: (targetPath: string, kind: "file" | "directory") => void;
   onDeletePath: (targetPath: string) => void;
   onOpenTitleSegment: (segment: WorkspaceBreadcrumbSegment) => void;
 }
@@ -153,18 +156,17 @@ export function ShellLayout(props: ShellLayoutProps) {
       ) : null}
       <aside aria-hidden={!props.utilityOpen} className="workspace-shell__utility" data-testid="utility-pane">
         <nav className="workspace-utility-rail" aria-label="Utility pane">
-          <button aria-label="Open preview" aria-pressed={props.utilityOpen && props.utilitySurface === "preview"} className="workspace-utility-rail__button" data-testid="utility-pane-preview" data-utility-drop-kind="preview" onClick={props.onOpenUtilityBrowser} title="Preview" type="button"><Globe2 size={16} aria-hidden="true" /></button>
           <button aria-label="Open terminal" aria-pressed={props.utilityOpen && props.utilitySurface === "terminal"} className="workspace-utility-rail__button" data-testid="utility-pane-terminal" data-utility-drop-kind="terminal" onClick={props.onOpenUtilityTerminal} title="Terminal" type="button"><SquareTerminal size={16} aria-hidden="true" /></button>
-          <button aria-label="Open connections" aria-pressed={props.connectionsOpen} className="workspace-utility-rail__button" data-testid="utility-pane-connections" onClick={props.onOpenConnections} title="Connections" type="button"><Network size={16} aria-hidden="true" /></button>
+          <button aria-label="Open preview" aria-pressed={props.utilityOpen && props.utilitySurface === "preview"} className="workspace-utility-rail__button" data-testid="utility-pane-preview" data-utility-drop-kind="preview" onClick={props.onOpenUtilityBrowser} title="Preview" type="button"><Globe2 size={16} aria-hidden="true" /></button>
+          <button aria-label="Open note context" aria-pressed={props.utilityOpen && props.utilitySurface === "context"} className="workspace-utility-rail__button" data-testid="utility-pane-context" onClick={props.onOpenNoteContext} title="Note context" type="button"><ListTree size={16} aria-hidden="true" /></button>
+          <button aria-label="Open graph" aria-pressed={props.utilityOpen && props.utilitySurface === "graph"} className="workspace-utility-rail__button" data-testid="utility-pane-graph" onClick={props.onOpenUtilityGraph} title="Graph" type="button"><ExographMark size={16} /></button>
         </nav>
-        <div className="workspace-utility-surface" data-utility-drop-kind={props.utilitySurface === "connections" ? undefined : props.utilitySurface}>
-          {props.connectionsOpen
-            ? props.connections
-            : props.utilityContent}
+        <div className="workspace-utility-surface" data-utility-drop-kind={props.utilitySurface === "terminal" || props.utilitySurface === "preview" ? props.utilitySurface : undefined}>
+          {props.utilityContent}
         </div>
       </aside>
       </div>
-      <WorkspaceMenu collapsed={props.sidebarCollapsed} label={props.workspaceLabel} onOpenSettings={props.onOpenWorkspaceSettings} />
+      <WorkspaceMenu collapsed={props.sidebarCollapsed} label={props.workspaceLabel} shortcutBindings={props.shortcutBindings} onOpenSettings={props.onOpenWorkspaceSettings} />
     </div>
   );
 }

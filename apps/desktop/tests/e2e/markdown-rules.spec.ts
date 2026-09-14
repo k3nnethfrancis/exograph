@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { launchExographWorkspaceFixture } from "../helpers";
@@ -449,11 +449,13 @@ test("suggests existing note targets while typing wikilinks", async () => {
     initialNoteLabel: null,
     prepareWorkspace: async (workspaceRoot) => {
       const notesRoot = path.join(workspaceRoot, "notes/test-notes");
+      await mkdir(path.join(notesRoot, "nested"), { recursive: true });
       await writeFile(path.join(notesRoot, "wikilink-suggest-test.md"), "# Wikilink Suggest Test\n\n", "utf8");
       await writeFile(path.join(notesRoot, "customer-alpha.md"), "# Customer Alpha\n", "utf8");
       await writeFile(path.join(notesRoot, "customer-beta.md"), "# Customer Beta\n", "utf8");
       await writeFile(path.join(notesRoot, "customer-gamma.md"), "# Customer Gamma\n", "utf8");
       await writeFile(path.join(notesRoot, "customer-delta.md"), "# Customer Delta\n", "utf8");
+      await writeFile(path.join(notesRoot, "nested/some-item.md"), "# Some Item\n", "utf8");
     },
   });
 
@@ -498,7 +500,144 @@ test("suggests existing note targets while typing wikilinks", async () => {
   await page.keyboard.type("\n[[no-such-existing-note");
   await expect(page.getByTestId("wikilink-suggestions")).toHaveCount(0);
 
+  await page.keyboard.type("\n[[some");
+  await expect(page.getByTestId("wikilink-suggestions")).toBeVisible();
+  await page.getByRole("button", { name: /some-item/i }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const content = document.querySelector(".cm-content") as (HTMLElement & { cmView?: { view?: any } }) | null;
+        return content?.cmView?.view?.state.doc.toString() ?? "";
+      }),
+    )
+    .toContain("[[nested/some-item|some-item]]");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const content = document.querySelector(".cm-content") as (HTMLElement & { cmView?: { view?: any } }) | null;
+        return content?.cmView?.view?.state.doc.toString() ?? "";
+      }),
+    )
+    .not.toContain("//some-item");
+
+  await page.keyboard.type("\n[[customer");
+  await expect(page.getByTestId("wikilink-suggestions")).toBeVisible();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const content = document.querySelector(".cm-content") as (HTMLElement & { cmView?: { view?: any } }) | null;
+        return content?.cmView?.view?.state.doc.toString() ?? "";
+      }),
+    )
+    .toContain("[[customer-beta]]");
+
   await cleanup();
+});
+
+test("selects the complete active Markdown source with the platform Select All shortcut", async () => {
+  const source = "- first item\n- second item\n";
+  const { page, cleanup } = await launchExographWorkspaceFixture({
+    mutable: true,
+    prepareWorkspace: async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, "notes/test-notes/select-all-list.md"), source, "utf8");
+    },
+  });
+
+  try {
+    await page.getByRole("button", { name: /select-all-list/i }).first().click();
+    await page.locator(".cm-content").click();
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+
+    await expect.poll(() => page.evaluate(() => {
+      const content = document.querySelector(".cm-content") as (HTMLElement & { cmView?: { view?: any } }) | null;
+      const view = content?.cmView?.view;
+      const selection = view?.state.selection.main;
+      return selection ? { from: selection.from, to: selection.to, length: view.state.doc.length } : null;
+    })).toEqual({ from: 0, to: source.length, length: source.length });
+
+    const sourceTab = await page.getByRole("button", { name: "related-note" }).first().boundingBox();
+    const editor = await page.locator(".workspace-shell__canvas .pane-leaf--editor").first().boundingBox();
+    expect(sourceTab).not.toBeNull();
+    expect(editor).not.toBeNull();
+    await page.mouse.move(sourceTab!.x + sourceTab!.width / 2, sourceTab!.y + sourceTab!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(editor!.x + editor!.width * 0.88, editor!.y + editor!.height / 2, { steps: 8 });
+    await page.mouse.up();
+
+    const editorPanes = page.locator(".workspace-shell__canvas .pane-leaf--editor");
+    await expect(editorPanes).toHaveCount(2);
+    const firstContent = editorPanes.nth(0).locator(".cm-content");
+    const secondContent = editorPanes.nth(1).locator(".cm-content");
+    await firstContent.click();
+    await secondContent.click();
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    const paneSelections = await Promise.all([firstContent, secondContent].map((content) => content.evaluate((node) => {
+      const view = (node as HTMLElement & { cmView?: { view?: any } }).cmView?.view;
+      const selection = view?.state.selection.main;
+      return selection ? { from: selection.from, to: selection.to, length: view.state.doc.length } : null;
+    })));
+    expect(paneSelections[1]).toEqual({ from: 0, to: paneSelections[1]?.length, length: paneSelections[1]?.length });
+    expect(paneSelections[0]).not.toEqual({ from: 0, to: paneSelections[0]?.length, length: paneSelections[0]?.length });
+
+    const search = page.getByTestId("workspace-search-input");
+    await search.fill("find this phrase");
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await expect.poll(() => search.evaluate((input) => ({
+      start: (input as HTMLInputElement).selectionStart,
+      end: (input as HTMLInputElement).selectionEnd,
+      length: (input as HTMLInputElement).value.length,
+    }))).toEqual({ start: 0, end: 16, length: 16 });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("keeps an empty-line caret on the root content rail", async () => {
+  const source = ["Body", "", "## Tasks", "", "1. ordered", "", "- bullet", "", "- [ ] task"].join("\n");
+  const { page, cleanup } = await launchExographWorkspaceFixture({
+    mutable: true,
+    prepareWorkspace: async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, "notes/test-notes/empty-caret.md"), source, "utf8");
+    },
+  });
+
+  try {
+    await page.getByRole("button", { name: /empty-caret/i }).first().click();
+    await expect(page.locator(".cm-content")).toContainText("ordered");
+    const geometry = await page.locator(".cm-content").evaluate(async (content) => {
+      const view = (content as HTMLElement & { cmView?: { view?: any } }).cmView?.view;
+      if (!view) throw new Error("Unable to resolve CodeMirror view");
+      const lineElements = [...content.querySelectorAll<HTMLElement>(":scope > .cm-line")];
+      const bodyOrigin = lineElements[0]?.getBoundingClientRect().left ?? null;
+      const measured: Array<{ offset: number | null; text: string; className: string }> = [];
+      for (const lineNumber of [2, 4, 6, 8]) {
+        const line = lineElements[lineNumber - 1];
+        measured.push({
+          offset: line && bodyOrigin !== null ? line.getBoundingClientRect().left - bodyOrigin : null,
+          text: line.textContent ?? "",
+          className: line.className,
+        });
+      }
+      return measured;
+    });
+    expect(geometry).toEqual(Array.from({ length: 4 }, () => ({
+      offset: 0,
+      text: "",
+      className: "exograph-md-line exograph-md-line--body cm-line",
+    })));
+    const firstBlank = page.locator(".cm-line").nth(1);
+    await firstBlank.click();
+    await page.keyboard.type("x");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowUp");
+    await expect(firstBlank).toHaveClass(/exograph-md-line--body/);
+    await expect(firstBlank).toHaveText("");
+  } finally {
+    await cleanup();
+  }
 });
 
 test("keeps wikilink completion overlays outside editor clipping", async () => {
@@ -590,7 +729,7 @@ test("lets Enter add a line above a first-line wikilink", async () => {
   await cleanup();
 });
 
-test("keeps generated graph references outside editable list layout", async () => {
+test("keeps generated graph references stable, scroll-owned, and outside editable list layout", async () => {
   const { page, cleanup } = await launchExographWorkspaceFixture({
     mutable: true,
     prepareWorkspace: async (workspaceRoot) => {
@@ -602,17 +741,108 @@ test("keeps generated graph references outside editable list layout", async () =
 
   await page.getByRole("button", { name: /refs-list-target/i }).first().click();
   const referencesSection = page.locator("section.markdown-graph-references");
-  await expect(referencesSection).toBeVisible();
-  await expect
-    .poll(() =>
-      referencesSection.evaluate((node) => ({
-        editable: node.getAttribute("contenteditable"),
-        linePaddingLeft: window.getComputedStyle(node.closest(".cm-line") ?? node).paddingLeft,
-        bulletContent: window.getComputedStyle(node.closest(".cm-line") ?? node, "::before").content,
-      })),
-    )
-    .toEqual({ editable: "false", linePaddingLeft: "0px", bulletContent: "none" });
+  await expect(referencesSection).toHaveCount(1);
+  const scrollable = await page.evaluate(() => {
+    const scroller = document.querySelector(".editor-surface .cm-scroller") as HTMLElement | null;
+    if (!scroller) throw new Error("Editor scroller unavailable");
+    scroller.style.setProperty("height", "80px", "important");
+    scroller.style.setProperty("max-height", "80px", "important");
+    scroller.scrollTop = 0;
+    scroller.dispatchEvent(new Event("scroll"));
+    return scroller.scrollHeight - scroller.clientHeight;
+  });
+  expect(scrollable).toBeGreaterThan(1);
+  await expect(referencesSection).toBeHidden();
+  await page.mouse.move(100, 300);
+  await page.mouse.move(120, 320);
+  await expect(referencesSection).toBeHidden();
 
+  const scrollToProgress = (progress: number) => page.evaluate((nextProgress) => {
+    const scroller = document.querySelector(".editor-surface .cm-scroller") as HTMLElement | null;
+    if (!scroller) throw new Error("Editor scroller unavailable");
+    scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * nextProgress;
+    scroller.dispatchEvent(new Event("scroll"));
+  }, progress);
+
+  await scrollToProgress(0.75);
+  await expect(referencesSection).toBeVisible();
+  await scrollToProgress(0.65);
+  await expect(referencesSection).toBeVisible();
+  await scrollToProgress(0.55);
+  await expect(referencesSection).toBeHidden();
+  await scrollToProgress(0.75);
+  await expect(referencesSection).toBeVisible();
+  const referenceStructure = await referencesSection.evaluate((node) => ({
+    editable: node.getAttribute("contenteditable"),
+    directEditorBlock: node.parentElement?.classList.contains("cm-content") ?? false,
+  }));
+  expect(referenceStructure).toEqual({ editable: "false", directEditorBlock: true });
+
+  const caretGeometry = await page.locator(".cm-content").evaluate((content) => {
+    const view = (content as HTMLElement & { cmView?: { view?: any } }).cmView?.view;
+    if (!view) throw new Error("Unable to resolve CodeMirror view");
+    view.focus();
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    const cursor = document.querySelector<HTMLElement>(".cm-cursor");
+    const references = document.querySelector<HTMLElement>(".markdown-graph-references");
+    return {
+      cursorHeight: cursor?.getBoundingClientRect().height ?? null,
+      referencesHeight: references?.getBoundingClientRect().height ?? null,
+    };
+  });
+  expect(caretGeometry.cursorHeight).not.toBeNull();
+  expect(caretGeometry.referencesHeight).not.toBeNull();
+  expect(caretGeometry.cursorHeight!).toBeLessThan(40);
+  expect(caretGeometry.cursorHeight!).toBeLessThan(caretGeometry.referencesHeight! / 2);
+
+  await referencesSection.getByRole("button", { name: "source-ref" }).focus();
+  await expect(referencesSection.getByRole("button", { name: "source-ref" })).toBeFocused();
+
+  await cleanup();
+});
+
+test("folds heading sections and leading-tag groups without changing Markdown", async () => {
+  const source = [
+    "# Parent",
+    "Heading child",
+    "## Nested",
+    "Nested child",
+    "# Next",
+    "#project",
+    "  owner: Kenneth",
+    "  status: active",
+    "After",
+  ].join("\n");
+  const { page, cleanup } = await launchExographWorkspaceFixture({
+    mutable: true,
+    prepareWorkspace: async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, "notes/test-notes/outline-folds.md"), source, "utf8");
+    },
+  });
+  const rendererErrors: string[] = [];
+  page.on("pageerror", (error) => rendererErrors.push(error.message));
+
+  await page.getByRole("button", { name: /outline-folds/i }).first().click();
+  const toggles = page.locator("[data-exograph-fold-anchor]");
+  await expect(page.locator(".cm-content")).toContainText("Parent");
+  await expect.poll(async () => ({ count: await toggles.count(), rendererErrors })).toEqual({ count: 4, rendererErrors: [] });
+
+  await toggles.nth(0).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".cm-line", { hasText: "Heading child" })).toBeHidden();
+  await expect(page.locator(".cm-line", { hasText: "Nested child" })).toBeHidden();
+  await expect(page.locator(".cm-line", { hasText: "Next" })).toBeVisible();
+
+  await page.locator("[data-exograph-fold-anchor]").last().focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".cm-line", { hasText: "owner: Kenneth" })).toBeHidden();
+  await expect(page.locator(".cm-line", { hasText: "After" })).toBeVisible();
+
+  const markdown = await page.locator(".cm-content").evaluate((content) => {
+    const view = (content as HTMLElement & { cmView?: { view?: { state: { doc: { toString(): string } } } } }).cmView?.view;
+    return view?.state.doc.toString();
+  });
+  expect(markdown).toBe(source);
   await cleanup();
 });
 

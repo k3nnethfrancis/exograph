@@ -155,6 +155,8 @@ function handelize(value: string): string {
 
 export interface ListRootTreeOptions {
   markdownOnly?: boolean;
+  /** Explicitly admits only these file extensions while retaining directories. */
+  allowedFileExtensions?: readonly string[];
   maxDepth?: number;
   includeEmptyDirectories?: boolean;
   excludedPaths?: string[];
@@ -171,6 +173,7 @@ async function listTreeRecursive(rootPath: string, options: ListRootTreeOptions,
   }
 
   const markdownOnly = options.markdownOnly ?? false;
+  const allowedFileExtensions = options.allowedFileExtensions?.map((extension) => extension.toLowerCase());
   const entries = await readdir(rootPath, { withFileTypes: true });
   const visibleEntries = entries
     .filter((entry) => {
@@ -178,13 +181,14 @@ async function listTreeRecursive(rootPath: string, options: ListRootTreeOptions,
         return true;
       }
 
-      return !markdownOnly && entry.isFile() && entry.name !== ".DS_Store";
+      return entry.isFile() && entry.name !== ".DS_Store" && (!markdownOnly || Boolean(allowedFileExtensions));
     })
     // Nested links can silently retarget a Note Root at content outside the
     // user's configured filesystem authority. Note-root aliases are resolved
     // during setup; content enumeration never follows nested symlinks.
     .filter((entry) => !entry.isSymbolicLink())
     .filter((entry) => entry.name !== "node_modules" && entry.name !== ".git")
+    .filter((entry) => entry.isDirectory() || !allowedFileExtensions || allowedFileExtensions.some((extension) => entry.name.toLowerCase().endsWith(extension)))
     .filter((entry) => !isWorkspaceContentExcluded(path.relative(noteRootPath, path.join(rootPath, entry.name)), contentPolicyFromOptions(options)))
     .sort((left, right) => {
       if (left.isDirectory() === right.isDirectory()) {
@@ -215,7 +219,7 @@ async function listTreeRecursive(rootPath: string, options: ListRootTreeOptions,
         };
       }
 
-      if (markdownOnly && !entry.name.endsWith(".md")) {
+      if (markdownOnly && !allowedFileExtensions && !entry.name.endsWith(".md")) {
         return null;
       }
 
@@ -504,7 +508,14 @@ async function findMatchingFiles(
 
 export async function createWorkspaceFile(targetPath: string, content?: string): Promise<string> {
   await mkdir(path.dirname(targetPath), { recursive: true });
-  await writeFile(targetPath, content ?? initialWorkspaceFileContent(targetPath), "utf8");
+  try {
+    await writeFile(targetPath, content ?? initialWorkspaceFileContent(targetPath), { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+      throw new Error(`Destination already exists: ${targetPath}`);
+    }
+    throw error;
+  }
   return targetPath;
 }
 

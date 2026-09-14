@@ -47,7 +47,7 @@ export interface InvocationReviewListItem {
   invocationId: string;
   createdAt: string;
   endedAt?: string;
-  command: Pick<InvocationRecord["command"], "handle" | "label">;
+  command: Pick<InvocationRecord["command"], "handle" | "label" | "appearance">;
   changedFileCount: number;
   pendingFileCount: number;
   /** Opaque review keys in deterministic changeset order. */
@@ -57,9 +57,10 @@ export interface InvocationReviewListItem {
 
 export interface InvocationHistoryItem {
   invocationId: string;
+  protocolInvocationId?: string;
   createdAt: string;
   endedAt?: string;
-  command: Pick<InvocationRecord["command"], "handle" | "label">;
+  command: Pick<InvocationRecord["command"], "handle" | "label" | "appearance">;
   outcome: "kept" | "rejected" | "pending" | "failed";
   changedFileCount: number;
   /** Opaque review keys in deterministic changeset order. */
@@ -78,7 +79,7 @@ export interface AgentCommandLaunchFacts {
   executablePath: string | null;
   executableReady: boolean;
   launchable: boolean;
-  block?: "disabled" | "unsupported-prompt-delivery" | "invalid-cwd-policy" | "document-required" | "cwd-missing" | "executable-missing";
+  block?: "disabled" | "unsupported-prompt-delivery" | "invalid-cwd-policy" | "document-required" | "cwd-missing" | "executable-missing" | "workspace-not-git";
   detail: string;
 }
 
@@ -126,6 +127,10 @@ export interface CliInstallationStatus {
   state: "current" | "legacy-exograph" | "missing" | "non-exograph" | "unavailable";
   /** The command found on PATH, when one is present. */
   commandPath?: string;
+  /** Whether the unmodified user-shell PATH can resolve this exact command. */
+  shellPathAvailable: boolean;
+  /** A shell command that exposes the installed CLI without changing shell files. */
+  shellPathCommand?: string;
   /** The checkout command it should point to, when this app can identify one. */
   sourcePath?: string;
   /** A command the user may run from a known checkout. Never run by the app. */

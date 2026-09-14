@@ -5,18 +5,17 @@ import { InvocationActivityAdapter } from "./invocation-activity-adapter";
 describe("invocation activity adapter", () => {
   it("parses split Claude JSONL into bounded tool facts", () => {
     const parser = new InvocationActivityAdapter("claude-code");
-    expect(parser.push("stdout", '{"type":"system"}\n{"type":"assistant","message":{"content":[{"type":"tool_')).toEqual([
+    expect(parser.push("stdout", '{"type":"system","session_id":"11111111-1111-4111-8111-111111111111"}\n{"type":"assistant","message":{"content":[{"type":"tool_')).toEqual([
       { kind: "working" },
     ]);
+    expect(parser.providerSessionId()).toBe("11111111-1111-4111-8111-111111111111");
     expect(parser.push("stdout", 'use","name":"Read","input":{"file_path":"/private/wiki/essay.md"}}]}}\n')).toEqual([
       { kind: "reading", label: "essay.md" },
     ]);
     expect(parser.push("stdout", '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"cat ~/.ssh/id_rsa"}}]}}\n')).toEqual([
       { kind: "running" },
     ]);
-    expect(parser.push("stdout", '{"type":"result","result":"private assistant prose"}\n')).toEqual([
-      { kind: "finishing" },
-    ]);
+    expect(parser.push("stdout", '{"type":"result","result":"private assistant prose"}\n')).toEqual([]);
   });
 
   it("ignores reasoning, assistant prose, stderr, and malformed output", () => {
@@ -32,7 +31,7 @@ describe("invocation activity adapter", () => {
   it("maps Codex lifecycle and file events without forwarding commands", () => {
     const parser = new InvocationActivityAdapter("codex-cli");
     const events = [
-      '{"type":"thread.started"}',
+      '{"type":"thread.started","thread_id":"22222222-2222-4222-8222-222222222222"}',
       '{"type":"item.started","item":{"type":"command_execution","command":"cat ~/.ssh/id_rsa"}}',
       '{"type":"item.completed","item":{"type":"file_change","changes":[{"path":"/private/wiki/tasks.md"}]}}',
       '{"type":"turn.completed"}',
@@ -41,8 +40,8 @@ describe("invocation activity adapter", () => {
       { kind: "working" },
       { kind: "running" },
       { kind: "editing", label: "tasks.md" },
-      { kind: "finishing" },
     ]);
+    expect(parser.providerSessionId()).toBe("22222222-2222-4222-8222-222222222222");
   });
 
   it("keeps generic command output entirely opaque", () => {

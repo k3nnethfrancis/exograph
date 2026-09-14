@@ -1,15 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import type { IndexMode, WorkspaceCanvasLayoutSettings, WorkspaceModel, WorkspacePaneContent, WorkspacePaneNode, WorkspaceSettings, WorkspaceSettingsRevision } from "./types";
+import type { IndexMode, WorkspaceCanvasLayoutSettings, WorkspaceModel, WorkspacePaneContent, WorkspacePaneNode, WorkspaceSettings, WorkspaceSettingsRevision, WorkspaceShortcutBindings, WorkspaceShortcutId } from "./types";
 import {
   agentCommandConfigurationError,
   normalizeAgentCommand,
   normalizeAgentCommands,
+  normalizeDefaultAgentCommandId,
   normalizeAgentInvocationPrompt,
+  isLegacyBuiltInCodexCommand,
 } from "./agent-invocation";
 import { isPathWithinRoot } from "./path-containment";
 import { createIndexedRoot, DEFAULT_INDEXING } from "./workspace";
@@ -20,6 +22,8 @@ export const DEFAULT_COLOR_THEME_ID: WorkspaceSettings["colorThemeId"] = "exogra
 export const DEFAULT_EDITOR_FONT_SIZE = 15;
 export const DEFAULT_TERMINAL_FONT_SIZE = 13;
 export const DEFAULT_EXPLORER_SCALE = 1;
+export const DEFAULT_GRAPH_INVERSE_NAVIGATION = true;
+export const DEFAULT_GRAPH_SHOW_OVERFLOW_LABELS = true;
 const UNSUPPORTED_WORKSPACE_SETTINGS_KEYS = [
   "migrationMetadata",
   "projectRoots",
@@ -78,15 +82,33 @@ export async function loadWorkspaceSettings(env: NodeJS.ProcessEnv = process.env
   await recoverWorkspaceSettingsTransaction(env);
   const settings = await loadWorkspaceSettingsFile(env);
   const requiresIndexedRootMigration = await duplicateIndexedRootPathsInPersistence(env);
+  const requiresCodexCommandMigration = await legacyCodexCommandInPersistence(env);
   if (settings) {
     // Validate every persisted registry entry against the same canonical
     // parser before Desktop can select or rewrite it.
     await loadWorkspaceRegistryFile(env, settings);
   }
-  if (settings && requiresIndexedRootMigration) {
+  if (settings && (requiresIndexedRootMigration || requiresCodexCommandMigration)) {
     await saveWorkspaceSettings(settings, env);
   }
   return settings;
+}
+
+async function legacyCodexCommandInPersistence(env: NodeJS.ProcessEnv): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(await readFile(resolveWorkspaceSettingsPath(env), "utf8")) as { agentCommands?: unknown };
+    return Array.isArray(parsed.agentCommands) && parsed.agentCommands.some((entry) => {
+      const command = normalizeAgentCommand(entry);
+      return Boolean(command && isLegacyBuiltInCodexCommand({
+        ...command,
+        command: typeof (entry as { command?: unknown }).command === "string"
+          ? (entry as { command: string }).command.trim()
+          : command.command,
+      }));
+    });
+  } catch {
+    return false;
+  }
 }
 
 async function loadWorkspaceSettingsFile(env: NodeJS.ProcessEnv): Promise<WorkspaceSettings | null> {
@@ -412,15 +434,21 @@ export function normalizeWorkspaceSettings(input: Partial<WorkspaceSettings> | n
   if (!workspaceRoot || !defaultTerminalCwd || noteRoots.length === 0) {
     return null;
   }
+  const agentCommands = normalizeAgentCommands(input.agentCommands);
+  const defaultAgentCommandId = normalizeDefaultAgentCommandId(input.defaultAgentCommandId, agentCommands);
   const agentInvocationPrompt = normalizeAgentInvocationPrompt(input.agentInvocationPrompt);
+  const ontologyDiscoveryPrompt = normalizeOptionalPrompt(input.ontologyDiscoveryPrompt);
 
   return {
     ...input,
     workspaceRoot,
     defaultTerminalCwd,
     noteRoots,
-    agentCommands: normalizeAgentCommands(input.agentCommands),
+    agentCommands,
+    ...(defaultAgentCommandId ? { defaultAgentCommandId } : {}),
     ...(agentInvocationPrompt ? { agentInvocationPrompt } : {}),
+    ontologyDiscoveryPrompt,
+    publishing: normalizePublishingSettings(input.publishing),
     indexedRoots,
     contentPolicy: normalizeWorkspaceContentPolicy(input.contentPolicy),
     indexing,
@@ -430,10 +458,57 @@ export function normalizeWorkspaceSettings(input: Partial<WorkspaceSettings> | n
     editorFontSize: clampSettingsNumber(input.editorFontSize, DEFAULT_EDITOR_FONT_SIZE, 11, 24),
     terminalFontSize: clampSettingsNumber(input.terminalFontSize, DEFAULT_TERMINAL_FONT_SIZE, 10, 22),
     explorerScale: clampSettingsNumber(input.explorerScale, DEFAULT_EXPLORER_SCALE, 0.82, 1.35),
+    graphInverseNavigation: typeof input.graphInverseNavigation === "boolean"
+      ? input.graphInverseNavigation
+      : DEFAULT_GRAPH_INVERSE_NAVIGATION,
+    graphShowOverflowLabels: typeof input.graphShowOverflowLabels === "boolean"
+      ? input.graphShowOverflowLabels
+      : DEFAULT_GRAPH_SHOW_OVERFLOW_LABELS,
+    shortcutBindings: normalizeWorkspaceShortcutBindings(input.shortcutBindings),
     exploreIndexSearchOnEnter: typeof input.exploreIndexSearchOnEnter === "boolean" ? input.exploreIndexSearchOnEnter : indexing.enabled && indexing.mode !== "off" && indexedRoots.length > 0,
     indexUpdateStrategy: input.indexUpdateStrategy === "manual" ? "manual" : "on-save",
     layout: normalizeWorkspaceLayout(input.layout),
   };
+}
+
+function normalizePublishingSettings(value: unknown): WorkspaceSettings["publishing"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  return {
+    publicationDirectory: typeof input.publicationDirectory === "string" ? input.publicationDirectory.trim() : "",
+    engineDirectory: typeof input.engineDirectory === "string" ? input.engineDirectory.trim() : "",
+    siteUrl: typeof input.siteUrl === "string" ? input.siteUrl.trim() : "",
+    destinationRepository: typeof input.destinationRepository === "string" ? input.destinationRepository.trim() : "",
+  };
+}
+
+function normalizeOptionalPrompt(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized && Buffer.byteLength(normalized, "utf8") <= 128 * 1024
+    ? normalized
+    : undefined;
+}
+
+const WORKSPACE_SHORTCUT_IDS: readonly WorkspaceShortcutId[] = ["explorer", "utility", "new-note", "daily-note", "terminal", "save"];
+
+function normalizeWorkspaceShortcutBindings(value: unknown): WorkspaceShortcutBindings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const bindings: WorkspaceShortcutBindings = {};
+  for (const id of WORKSPACE_SHORTCUT_IDS) {
+    const candidate = (value as Record<string, unknown>)[id];
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const code = (candidate as Record<string, unknown>).code;
+    if (typeof code !== "string" || !/^(?:Key[A-Z]|Enter)$/.test(code)) continue;
+    bindings[id] = {
+      code,
+      shift: (candidate as Record<string, unknown>).shift === true,
+      alt: (candidate as Record<string, unknown>).alt === true,
+    };
+  }
+  return bindings;
 }
 
 function assertSupportedWorkspaceSettings(
@@ -581,13 +656,13 @@ function resolveDesktopUserDataPath(env: NodeJS.ProcessEnv): string {
     return env.EXOGRAPH_USER_DATA_PATH;
   }
   const home = os.homedir();
-  if (process.platform === "darwin") {
-    return path.join(home, "Library", "Application Support", "@exograph", "desktop");
-  }
-  if (process.platform === "win32") {
-    return path.join(env.APPDATA ?? path.join(home, "AppData", "Roaming"), "@exograph", "desktop");
-  }
-  return path.join(env.XDG_CONFIG_HOME ?? path.join(home, ".config"), "@exograph", "desktop");
+  const appData = process.platform === "darwin" ? path.join(home, "Library", "Application Support")
+    : process.platform === "win32" ? env.APPDATA ?? path.join(home, "AppData", "Roaming")
+    : env.XDG_CONFIG_HOME ?? path.join(home, ".config");
+  const conventional = path.join(appData, "Exograph");
+  const legacy = path.join(appData, "@exograph", "desktop");
+  // App-off CLI remains usable before the desktop app performs the migration.
+  return existsSync(conventional) || !existsSync(legacy) ? conventional : legacy;
 }
 
 function workspaceIdForNotesFolder(notesFolder: string): string {

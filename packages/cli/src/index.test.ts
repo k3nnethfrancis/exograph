@@ -10,6 +10,10 @@ import {
   type ExographCommandSearchResponse,
   type ExographCommandStatusWithControlPlane,
   type ExographSpawnAgentCommandResponse,
+  type ExographCommandTerminalCreateResponse,
+  type ExographCommandTerminalListResponse,
+  type ExographCommandTerminalReadResponse,
+  type ExographCommandTerminalWriteResponse,
 } from "@exograph/core";
 import { EXOGRAPH_CLI_COMMANDS } from "@exograph/core/operator-help";
 import { AppClient } from "./app-client";
@@ -23,7 +27,12 @@ const client = {
   syncIndex: async (): Promise<ExographCommandIndexSyncResponse> => ({ status: indexStatusResponse(), phases: [], warnings: [] }),
   openFile: async () => {},
   spawnAgentCommand: async (): Promise<ExographSpawnAgentCommandResponse> => spawnResponse(),
-} satisfies Pick<AppClient, "getStatus" | "showWindow" | "search" | "getIndexStatus" | "syncIndex" | "openFile" | "spawnAgentCommand">;
+  listTerminals: async (): Promise<ExographCommandTerminalListResponse> => ({ terminals: [] }),
+  createTerminal: async (): Promise<ExographCommandTerminalCreateResponse> => ({ terminal: terminalResponse() }),
+  writeTerminal: async (_id: string, _input: string): Promise<ExographCommandTerminalWriteResponse> => ({ ok: true, terminal: terminalResponse(), writeId: 1 }),
+  readTerminal: async (_id: string, _cursor?: number): Promise<ExographCommandTerminalReadResponse> => ({ terminal: terminalResponse(), output: "", cursor: 0, truncated: false }),
+  stopTerminal: async (_id: string) => {},
+} satisfies Pick<AppClient, "getStatus" | "showWindow" | "search" | "getIndexStatus" | "syncIndex" | "openFile" | "spawnAgentCommand" | "listTerminals" | "createTerminal" | "writeTerminal" | "readTerminal" | "stopTerminal">;
 const connect = async () => client;
 const matchingClientEnv = {
   ...process.env,
@@ -32,6 +41,33 @@ const matchingClientEnv = {
 };
 
 describe("minimal Exograph operator CLI", () => {
+  it("traverses real offline notes with explicit scope and snapshot-bound pagination", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exo-cli-traverse-"));
+    try {
+      await writeFile(path.join(root, "a.md"), "# A\n[[b]] [[b]]");
+      await writeFile(path.join(root, "b.md"), "# B\n");
+      let output = "";
+      const options = { env: { EXOGRAPH_WORKSPACE_ROOT: root, EXOGRAPH_NOTE_ROOTS: root, EXOGRAPH_RUNTIME_ROOT: path.join(root, ".runtime") }, stdout: { write: (text: string) => { output += text; } } };
+      const args = ["node", "exo", "graph", "traverse", "--offline", "--start-path", path.join(root, "a.md"), "--limit", "1"];
+      expect(await runCli(args, options)).toBe(0);
+      const first = JSON.parse(output);
+      expect(first.nodes[0].relativePath).toBe("a.md");
+      expect(first.edges).toHaveLength(2);
+      output = "";
+      expect(await runCli([...args, "--cursor", first.nextCursor], options)).toBe(0);
+      const second = JSON.parse(output);
+      expect(second.nodes[0].relativePath).toBe("b.md");
+      expect(second.snapshotId).toBe(first.snapshotId);
+      expect(second.execution.visitedCount).toBe(2);
+      expect(second.traversalId).not.toBe(first.traversalId);
+      output = "";
+      expect(await runCli([...args, "--cursor", "invalid"], options)).toBe(1);
+      expect(JSON.parse(output).code).toBe("invalid-cursor");
+      await expect(runCli([...args, "--max-depth", "4"], options)).rejects.toThrow();
+      await expect(runCli(args, { env: {} })).rejects.toThrow(/explicit/i);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("prints every command from the shared operator catalog", async () => {
     let help = "";
     expect(await runCli(["node", "exograph", "--help"], { stderr: { write: (text) => { help += text; } } })).toBe(0);
@@ -77,17 +113,50 @@ describe("minimal Exograph operator CLI", () => {
 
   it("routes the compact search/index/open/invoke contract", async () => {
     let output = "";
+    const openedPaths: string[] = [];
+    const openingClient = { ...client, openFile: async (filePath: string) => { openedPaths.push(filePath); } };
     const options = {
       env: matchingClientEnv,
       stdout: { write: (text: string) => { output += text; } },
       stderr: { write: () => {} },
-      connectAppClient: connect,
+      connectAppClient: async () => openingClient,
     };
     expect(await runCli(["node", "exograph", "search", "hello"], options)).toBe(0);
     expect(await runCli(["node", "exograph", "index", "sync"], options)).toBe(0);
     expect(await runCli(["node", "exograph", "open", "note.md"], options)).toBe(0);
     expect(await runCli(["node", "exograph", "invoke", "@review", "check", "this"], options)).toBe(0);
+    expect(openedPaths).toEqual(["/workspace/note.md"]);
     expect(output).toContain("exograph.search.v1");
+  });
+
+  it("controls a referenced terminal through the app-backed CLI contract", async () => {
+    let output = "";
+    const calls: string[] = [];
+    const terminalClient = {
+      ...client,
+      getStatus: async (): Promise<ExographCommandStatusWithControlPlane> => statusResponse(),
+      listTerminals: async () => { calls.push("list"); return { terminals: [terminalResponse()] }; },
+      createTerminal: async () => { calls.push("create"); return { terminal: terminalResponse() }; },
+      writeTerminal: async (id: string, input: string) => { calls.push(`write:${id}:${JSON.stringify(input)}`); return { ok: true as const, terminal: terminalResponse(), writeId: 3 }; },
+      readTerminal: async (id: string, cursor?: number) => { calls.push(`read:${id}:${cursor ?? ""}`); return { terminal: terminalResponse(), output: "ready", cursor: 5, truncated: false }; },
+      stopTerminal: async (id: string) => { calls.push(`stop:${id}`); },
+    } satisfies typeof client;
+    const options = {
+      env: matchingClientEnv,
+      stdout: { write: (text: string) => { output += text; } },
+      stderr: { write: () => {} },
+      connectAppClient: async () => terminalClient,
+    };
+
+    expect(await runCli(["node", "exograph", "terminals", "list"], options)).toBe(0);
+    expect(await runCli(["node", "exograph", "terminals", "create"], options)).toBe(0);
+    expect(await runCli(["node", "exograph", "terminals", "write", "term-1", "echo", "hi", "--newline"], options)).toBe(0);
+    expect(await runCli(["node", "exograph", "terminals", "write", "term-1", "--newline"], options)).toBe(0);
+    expect(await runCli(["node", "exograph", "terminals", "read", "term-1", "--cursor", "2"], options)).toBe(0);
+    expect(await runCli(["node", "exograph", "terminals", "stop", "term-1"], options)).toBe(0);
+
+    expect(calls).toEqual(["list", "create", "write:term-1:\"echo hi\"", "write:term-1:\"\\r\"", "write:term-1:\"\\r\"", "read:term-1:2", "stop:term-1"]);
+    expect(output).toContain('"cursor": 5');
   });
 
   it("advances through page six and offset 100 with the CLI-owned cursor", async () => {
@@ -177,7 +246,7 @@ describe("minimal Exograph operator CLI", () => {
   });
 
   it("rejects deleted families instead of preserving aliases", async () => {
-    for (const command of ["read", "spawn", "preview", "config", "terminals"]) {
+    for (const command of ["read", "spawn", "preview", "config"]) {
       await expect(runCli(["node", "exograph", command], { stderr: { write: () => {} }, connectAppClient: connect })).rejects.toThrow("Usage:");
     }
   });
@@ -232,12 +301,28 @@ describe("minimal Exograph operator CLI", () => {
       expect(await runCli(["node", "exograph", "search", "local-first"], options)).toBe(0);
 
       expect(output).toContain('"available": false');
+      expect(output).toContain('"reason": "desktop-app-unavailable"');
       expect(output).toContain("orientation.md");
       expect(output).toContain('"path"');
       expect(discoveredRuntimeRoot).toBe(path.join(workspaceRoot, ".exograph"));
     } finally {
       await rm(workspaceRoot, { recursive: true, force: true });
     }
+  });
+
+  it("reports the live QMD health with app-backed status", async () => {
+    let output = "";
+    expect(await runCli(["node", "exograph", "status"], {
+      env: matchingClientEnv,
+      stdout: { write: (text) => { output += text; } },
+      stderr: { write: () => {} },
+      connectAppClient: connect,
+    })).toBe(0);
+
+    expect(JSON.parse(output)).toMatchObject({
+      workspace: { indexing: { backend: "qmd", mode: "hybrid" } },
+      search: { backend: "qmd", mode: "hybrid", errors: [] },
+    });
   });
 
   it("adds a machine-readable discovery diagnostic while preserving app-off status and search", async () => {
@@ -386,6 +471,17 @@ describe("minimal Exograph operator CLI", () => {
   });
 });
 
+function terminalResponse() {
+  return {
+    id: "term-1",
+    title: "Shell",
+    cwd: "/workspace",
+    kind: "shell",
+    command: "/bin/zsh",
+    status: "running",
+  };
+}
+
 function statusResponse(workspaceRoot = "/workspace"): ExographCommandStatusWithControlPlane {
   return {
     workspace: {
@@ -444,6 +540,8 @@ function workspaceSettings(root: string): WorkspaceSettings {
     editorFontSize: 15,
     terminalFontSize: 13,
     explorerScale: 1,
+    graphInverseNavigation: true,
+    graphShowOverflowLabels: true,
     exploreIndexSearchOnEnter: false,
     indexUpdateStrategy: "on-save",
   };

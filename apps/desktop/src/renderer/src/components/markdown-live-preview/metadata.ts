@@ -31,10 +31,18 @@ export interface CodeFenceContext {
   language: string;
 }
 
+export interface OutlineFoldContext {
+  kind: "heading" | "tag";
+  startLine: number;
+  endLine: number;
+  depth: number;
+}
+
 export interface MarkdownPreviewMetadata {
   listContexts: Map<number, ListContext>;
   tableContexts: Map<number, TableContext>;
   codeFenceContexts: Map<number, CodeFenceContext>;
+  outlineFoldContexts: Map<number, OutlineFoldContext>;
 }
 
 export function markdownPreviewMetadata(doc: Text): MarkdownPreviewMetadata {
@@ -42,6 +50,7 @@ export function markdownPreviewMetadata(doc: Text): MarkdownPreviewMetadata {
     listContexts: collectListMetadata(doc),
     tableContexts: collectTableMetadata(doc),
     codeFenceContexts: collectCodeFenceMetadata(doc),
+    outlineFoldContexts: collectOutlineFoldMetadata(doc),
   };
 }
 
@@ -60,6 +69,7 @@ export function updateMarkdownPreviewMetadataForChanges(
   let tableStructureTouched = false;
   let tableContentTouched = false;
   let codeFenceStructureTouched = false;
+  let outlineStructureTouched = false;
   changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
     const before = previousDoc.sliceString(fromA, toA);
     const after = inserted.toString();
@@ -85,6 +95,9 @@ export function updateMarkdownPreviewMetadataForChanges(
     codeFenceStructureTouched ||= /[`~]/.test(changedText)
       || openingFenceSignature(previousLine.text) !== openingFenceSignature(nextLine.text)
       || openingFenceSignature(previousEndLine.text) !== openingFenceSignature(nextEndLine.text);
+    outlineStructureTouched ||= lineBoundaryChanged
+      || outlineStructureSignature(previousLine.text) !== outlineStructureSignature(nextLine.text)
+      || outlineStructureSignature(previousEndLine.text) !== outlineStructureSignature(nextEndLine.text);
   });
 
   return {
@@ -99,7 +112,63 @@ export function updateMarkdownPreviewMetadataForChanges(
     codeFenceContexts: codeFenceStructureTouched
       ? collectCodeFenceMetadata(nextDoc)
       : remapCodeFenceMetadata(previousDoc, nextDoc, changes, metadata.codeFenceContexts),
+    outlineFoldContexts: outlineStructureTouched
+      ? collectOutlineFoldMetadata(nextDoc)
+      : metadata.outlineFoldContexts,
   };
+}
+
+function outlineStructureSignature(text: string): string {
+  const heading = text.match(/^(#{1,6})\s+/);
+  if (heading) return `heading:${heading[1].length}`;
+  const tag = text.match(/^(\s*)#([A-Za-z][\w/-]*)\b/);
+  if (tag) return `tag:${indentationColumns(tag[1])}`;
+  return `${text.trim().length === 0 ? "blank" : "text"}:${indentationColumns(text.match(leadingWhitespacePattern)?.[1] ?? "")}`;
+}
+
+export function collectOutlineFoldMetadata(doc: Text): Map<number, OutlineFoldContext> {
+  const contexts = new Map<number, OutlineFoldContext>();
+  const headings: Array<{ line: number; level: number }> = [];
+
+  for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber += 1) {
+    const text = doc.line(lineNumber).text;
+    const heading = text.match(/^(#{1,6})\s+/);
+    if (heading) headings.push({ line: lineNumber, level: heading[1].length });
+
+    const tag = text.match(/^(\s*)#([A-Za-z][\w/-]*)\b/);
+    if (!tag) continue;
+    const indent = indentationColumns(tag[1]);
+    let endLine = lineNumber;
+    for (let candidate = lineNumber + 1; candidate <= doc.lines; candidate += 1) {
+      const candidateText = doc.line(candidate).text;
+      if (candidateText.trim().length === 0) {
+        endLine = candidate;
+        continue;
+      }
+      const candidateIndent = indentationColumns(candidateText.match(leadingWhitespacePattern)?.[1] ?? "");
+      if (candidateIndent <= indent) break;
+      endLine = candidate;
+    }
+    if (endLine > lineNumber) {
+      contexts.set(lineNumber, { kind: "tag", startLine: lineNumber, endLine, depth: indent });
+    }
+  }
+
+  for (let index = 0; index < headings.length; index += 1) {
+    const current = headings[index];
+    let endLine = doc.lines;
+    for (let candidate = index + 1; candidate < headings.length; candidate += 1) {
+      if (headings[candidate].level <= current.level) {
+        endLine = headings[candidate].line - 1;
+        break;
+      }
+    }
+    if (endLine > current.line) {
+      contexts.set(current.line, { kind: "heading", startLine: current.line, endLine, depth: current.level - 1 });
+    }
+  }
+
+  return contexts;
 }
 
 function linesAroundRangeContain(doc: Text, startLine: number, endLine: number, token: string): boolean {
@@ -387,7 +456,33 @@ const tableSeparatorPattern = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$
 
 function parseTableRow(text: string): string[] {
   const trimmed = text.trim().replace(/^\|/, "").replace(/\|$/, "");
-  return trimmed.split("|").map((cell) => cell.trim());
+  const cells: string[] = [];
+  let cell = "";
+  let wikilinkDepth = 0;
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const character = trimmed[index]!;
+    const next = trimmed[index + 1];
+    if (character === "[" && next === "[") {
+      wikilinkDepth += 1;
+      cell += "[[";
+      index += 1;
+      continue;
+    }
+    if (character === "]" && next === "]" && wikilinkDepth > 0) {
+      wikilinkDepth -= 1;
+      cell += "]]";
+      index += 1;
+      continue;
+    }
+    if (character === "|" && wikilinkDepth === 0) {
+      cells.push(cell.trim());
+      cell = "";
+      continue;
+    }
+    cell += character;
+  }
+  cells.push(cell.trim());
+  return cells;
 }
 
 function parseAlignments(separatorText: string): ColumnAlign[] {

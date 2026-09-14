@@ -69,6 +69,18 @@ describe("notes", () => {
     expect(extractMarkdownLinks("[related](related-note.md)").map((item) => item.target)).toEqual(["related-note.md"]);
   });
 
+  it.each([
+    ["[[nested/Cedar|Cedar alias]]", "nested/Cedar", "Cedar alias"],
+    ["[[ nested/Cedar#Overview | Cedar alias ]]", "nested/Cedar#Overview", "Cedar alias"],
+    ["[[nested/Cedar|Cedar | alias]]", "nested/Cedar", "Cedar | alias"],
+    ["[[ nested/Cedar ]]", "nested/Cedar", "nested/Cedar"],
+  ])("separates target and alias while preserving the source span: %s", (source, target, label) => {
+    const body = `🧠 before ${source} after`;
+    const link = extractWikilinks(body)[0];
+    expect(link).toEqual({ target, label, sourceRange: { from: "🧠 before ".length, to: "🧠 before ".length + source.length } });
+    expect(body.slice(link.sourceRange.from, link.sourceRange.to)).toBe(source);
+  });
+
   it("reports body-relative UTF-16 end-exclusive source ranges", () => {
     const body = "🧠 before [[agent-memory]] and [related](related-note.md)";
     const wiki = extractWikilinks(body)[0];

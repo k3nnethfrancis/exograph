@@ -21,6 +21,7 @@ import {
   projectGraphScene,
   reconcileGraphLayout,
   reconcileGraphScene,
+  retainGraphSelectionOnResize,
   reconcileGraphSelection,
   selectGraphPath,
   validateGraphTopology,
@@ -288,9 +289,28 @@ describe("camera and controller transforms", () => {
     const positions = new Float32Array([-100, -50, 0, 100, 50, 0]);
     const framed = frameGraphCamera(positions, viewport);
     expect(framed.distance).toBeGreaterThan(200);
+    expect(framed.pitch).toBeCloseTo(0.46);
     expect(framed.target).toEqual([0, 0, 0]);
     expect(focusGraphCamera(positions, 1, viewport, 220)).toMatchObject({ distance: 220, target: [100, 50, 0] });
     expect(focusGraphCamera(positions, 7, viewport)).toEqual(framed);
+  });
+
+  it("opens with the full graph comfortably inside the viewport", () => {
+    const positions = new Float32Array([
+      -320, -220, -80,
+      330, -190, 40,
+      -280, 240, 70,
+      300, 230, -50,
+      0, 0, 120,
+    ]);
+    const projection = projectGraphScene(positions, frameGraphCamera(positions, viewport), viewport);
+    for (let index = 0; index < positions.length / 3; index += 1) {
+      const offset = index * 4;
+      expect(projection.nodes[offset]).toBeGreaterThan(20);
+      expect(projection.nodes[offset]).toBeLessThan(viewport.width - 20);
+      expect(projection.nodes[offset + 1]).toBeGreaterThan(20);
+      expect(projection.nodes[offset + 1]).toBeLessThan(viewport.height - 20);
+    }
   });
 
   it("orbits and pans without mutating the input camera", () => {
@@ -391,6 +411,25 @@ describe("picking and focal labels", () => {
     }
   });
 
+  it("can omit detached overflow while keeping labels beside nodes and reporting hidden selection labels", () => {
+    const graph = topology();
+    const projection = projectionState(new Float32Array([
+      210, 160, 0.3, 1,
+      0, 0, 0.3, 1,
+      0, 0, 0.3, 1,
+      0, 0, 0.3, 1,
+    ]), { width: 420, height: 320 });
+    const interaction = emptyGraphSelection(4, graph.edges.endpoints.length / 2);
+    interaction.selected = 1;
+    const candidates = [0, 1, 2, 3].map(index => ({ index, text: `Node ${index}`, width: 80, height: 14 }));
+    const shown = planGraphLabels(graph, projection, interaction, candidates, { maxLabels: 4 });
+    const hidden = planGraphLabels(graph, projection, interaction, candidates, { maxLabels: 4, showOverflowLabels: false });
+    expect(shown.placements).toHaveLength(4);
+    expect(hidden.placements).toEqual([shown.placements.find(placement => placement.index === 0)]);
+    expect(hidden.omittedRequired).toEqual([1]);
+    expect(interaction.selected).toBe(1);
+  });
+
   it("reports a required label that physically cannot fit instead of overlapping", () => {
     const graph = topology({
       nodes: {
@@ -433,4 +472,31 @@ describe("large numeric scene contract", () => {
     expect(projected.nodes).toHaveLength(count * 4);
     expect(elapsed).toBeLessThan(500);
   });
+});
+
+
+describe("narrow graph framing", () => {
+  it.each([{ width: 230, height: 800 }, { width: 200, height: 1000 }])("fits horizontal extents in $width by $height", (viewport) => {
+    const { right } = cameraBasis(DEFAULT_SCENE_CAMERA);
+    const positions = new Float32Array([...right.map(value => -1000 * value), ...right.map(value => 1000 * value)]);
+    const projected = projectGraphScene(positions, frameGraphCamera(positions, viewport), viewport);
+    for (let index = 0; index < 2; index += 1) {
+      expect(projected.nodes[index * 4]).toBeGreaterThan(12);
+      expect(projected.nodes[index * 4]).toBeLessThan(viewport.width - 12);
+      expect(projected.nodes[index * 4 + 3]).toBe(1);
+    }
+  });
+});
+
+
+it("retains a valid manual camera when selection containment would exceed the zoom limit", () => {
+  const camera = { ...DEFAULT_SCENE_CAMERA, distance: 30_000 };
+  const { right } = cameraBasis(camera);
+  const positions = new Float32Array(right.map(value => value * 10_000));
+  const before = { width: 800, height: 800 };
+  const after = { width: 230, height: 800 };
+  expect(projectGraphScene(positions, camera, before).nodes[3]).toBe(1);
+  const resized = retainGraphSelectionOnResize(positions, camera, 0, before, after);
+  expect(resized).toEqual(camera);
+  expect(projectGraphScene(new Float32Array(camera.target), resized, after).nodes[3]).toBe(1);
 });

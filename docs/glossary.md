@@ -5,15 +5,23 @@ This public glossary defines product meaning, not implementation.
 ## Language
 
 **Exograph**
-The open-source knowledge-graph interface and Markdown editor. Exograph lets people
-work with and manage a user-owned knowledge graph alongside terminal agents.
+The open-source exocortex interface: a Markdown editor, portable Ontology,
+replaceable local Search system, explorable knowledge graph, and agent operator
+surface over user-owned files.
 _Avoid_: lab name, the category name itself
 
 **Exocortex**
 The user-owned system formed by Markdown, relationships, evidence, local
-retrieval, and reviewable agent work. Exograph is its interface; ordinary files
-remain the durable substrate.
+retrieval, Ontology, and reviewable agent work. Exograph is its interface;
+ordinary files remain the durable substrate shared by people and tools.
 _Avoid_: proprietary database, app-owned memory, product synonym
+
+**Search**
+The provider-neutral retrieval boundary used by the desktop app, CLI, and MCP.
+Filesystem retrieval and QMD are current implementations; indexes, embeddings,
+rerankers, and future trained components remain replaceable derived systems
+over the same Markdown corpus.
+_Avoid_: QMD synonym, canonical knowledge store
 
 **Knowledge Graph**
 A user-owned, durable graph of Notes, relationships, evidence, and history that
@@ -84,7 +92,7 @@ The interoperability convention used to project base Concepts from a Note Root.
 Generic Markdown is the zero-configuration default; permissive OKF 0.1 is an
 explicit compatibility format. Format is not the Workspace Ontology, does not
 control graph presentation, and does not change source files.
-_Avoid_: ontology, plugin, visual profile
+_Avoid_: ontology, visual profile
 
 **Properties**
 Losslessly preserved document facts projected from a Note's raw frontmatter. A
@@ -112,6 +120,8 @@ _Avoid_: opaque confidence score
 
 **Graph View**
 A derived projection that maps selected Concepts, Relations, Properties, Ontology meaning, and Derived Signals into layout weights, visual encodings, labels, and interaction. It changes presentation, not knowledge.
+Its inspected Concept may differ temporarily from the active editor Note;
+opening the inspected Concept synchronizes the editor to that Note.
 _Avoid_: canonical graph, ontology
 
 **Derived Signal**
@@ -119,17 +129,17 @@ A versioned machine observation such as semantic similarity, inferred type, or p
 _Avoid_: automatic edge, inferred fact
 
 **Connection**
-A relationship exposed for the focused Note through Outline, Links, Graph, or earned Invocation History. Connections are derived from user-owned documents and reviewed invocation evidence.
+A relationship exposed for the focused Note through Note context, Graph, or earned Invocation History. Connections are derived from user-owned documents and reviewed invocation evidence.
 _Avoid_: miscellaneous inspector data
 
 **Baseline Core**
 The shipped core is a trustworthy Markdown workspace, modular Search, Folder
-Overview, Connections/graph context, mixed panes, configured Commands, explicit
+Overview, Note context and Graph, mixed panes, configured Commands, explicit
 inline invocation, reviewable observed changes, a single-active user-owned
 Ontology library, and the first reviewable graph-maintenance Skill. Optional
 Ontology discovery is an early-access proposal flow, not a required onboarding
-gate. The core does not require plugins, provider-specific harnesses, Feed,
-Gym, training, cloud indexing, or durable terminal history.
+gate. The core does not require provider-specific harnesses, Feed, Gym,
+training, cloud indexing, or durable terminal history.
 _Avoid_: minimal demo, vanilla app
 
 **Pane**
@@ -145,12 +155,15 @@ A provider-neutral, user-configured executable addressed by a handle. A Command 
 _Avoid_: Harness, provider, agent type
 
 **Skill**
-User-editable instructions and data in a writable Note Root for a bounded graph/wiki task executed by a configured Command. A Skill declares purpose, scope, expected proposal, and evaluation criteria; it does not load code, grant authority, run in the background, or bypass invocation review.
-_Avoid_: Skill Manager, plugin entrypoint, automatic agent action
-
-**Plugin**
-A future installable, versioned distribution bundle that may package Skills, ontology templates, Command templates, integrations, or other proven capabilities. Plugin describes packaging and sharing, not an internal module, runtime seam, permission grant, or arbitrary renderer code.
-_Avoid_: capability interface, core module, dynamic UI injection
+Bounded Markdown instructions for a person-initiated task. Delivery and ownership
+depend on the workflow: ontology discovery uses an Exograph-bundled prompt with
+an optional Workspace setting override; graph maintenance prefers a
+provider-native installed Skill, then an Exograph-bundled version, then an exact
+inline fallback. Repository contributor
+Skills are maintained with Exograph's source and guide coding agents rather
+than product Commands. No Skill loads code, grants authority, runs in the
+background, or bypasses Command trust and invocation review.
+_Avoid_: universal storage rule, authority grant, automatic agent action
 
 **Invocation**
 One explicitly authorized Command run, including its intent, executable-bound trust decision, owned process lifecycle, provider-session provenance, and one exact Changeset with durable review decisions.

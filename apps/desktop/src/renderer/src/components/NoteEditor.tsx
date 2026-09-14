@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { SaveConflictNotice } from "./SaveConflictNotice";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 
 import CodeMirror, { ExternalChange, type ReactCodeMirrorRef } from "@uiw/react-codemirror";
@@ -8,13 +9,15 @@ import { bracketMatching, foldGutter } from "@codemirror/language";
 import { lintGutter, lintKeymap } from "@codemirror/lint";
 import { EditorSelection, Prec } from "@codemirror/state";
 import { keymap, lineNumbers, EditorView, type ViewUpdate } from "@codemirror/view";
-import { Clock3, Code2, Network, Plus, Save, SlidersHorizontal } from "lucide-react";
+import { Clock3, Code2, Plus, Save, SlidersHorizontal } from "lucide-react";
 import type { AgentCommand, NoteDocument, WorkspaceGraphContext } from "@exograph/core";
+import { findDocumentAgentEnvelopes } from "@exograph/core/document-agent-protocol";
 import type { InvocationFileReviewPayload } from "../../../shared/api";
 import { exographEditorTheme, exographSyntaxHighlighting } from "../theme/codemirror";
 import type { ExographThemeVariant } from "../theme/types";
 import { codeLanguageForPath } from "./codeLanguages";
-import { AgentIcon } from "./AgentIcon";
+import { AgentCommandIcon } from "./AgentCommandIcon";
+import { ExographMark } from "./ExographMark";
 import { coerceFrontmatterValue, getDocumentDisplayTitle, stringifyFrontmatterValue } from "./documentDisplay";
 import { markdownInlineFormattingEdit } from "./markdownInlineFormatting";
 import {
@@ -73,19 +76,26 @@ interface AgentSuggestionState {
 
 interface EditorDocument extends NoteDocument {
   dirty: boolean;
+  saveConflict?: "changed" | "missing";
+  resolvingConflict?: boolean;
   readOnly?: boolean;
+  filesystemState?: "deleted";
 }
 
 interface NoteEditorProps {
   document: EditorDocument | null;
   graphContext: WorkspaceGraphContext | null;
-  saveStatus: "idle" | "saving" | "saved" | "error";
+  saveStatus: "idle" | "saving" | "saved" | "error" | "conflict";
   propertiesCollapsed: boolean;
   onToggleProperties: () => void;
   onOpenGraph: () => void;
   onUpdateFrontmatter: (key: string, value: unknown) => void;
   onBodyChange: (body: string) => void;
   onSave: () => void | Promise<void>;
+  onSaveConflictCopy?: () => void;
+  onDiscardSaveConflict?: () => Promise<void>;
+  onRecoverDeleted: () => void;
+  onSaveDeletedAs: () => void;
   onOpenTag: (tag: string) => void;
   onOpenTarget: (target: string) => void;
   onSuggestTargets: (query: string) => Promise<Array<{ label: string; target: string; detail?: string }>>;
@@ -109,6 +119,11 @@ interface NoteEditorProps {
   agentComposeRequest?: AgentComposeRequest | null;
   onAgentComposeRequestHandled?: (nonce: number) => void;
   onDiagnosticContext: (context: EditorFaultContext) => void;
+  invocationActivity?: {
+    protocolInvocationId?: string;
+    render: (position?: InvocationReviewPosition) => ReactNode;
+  };
+  onResumeProtocolInvocation?: (protocolInvocationId: string) => void;
 }
 
 export interface EditorInitialSelectionRequest {
@@ -130,6 +145,10 @@ export function NoteEditor(props: NoteEditorProps) {
     onUpdateFrontmatter,
     onBodyChange,
     onSave,
+    onSaveConflictCopy,
+    onDiscardSaveConflict,
+    onRecoverDeleted,
+    onSaveDeletedAs,
     onOpenTag,
     onOpenTarget,
     onSuggestTargets,
@@ -153,6 +172,8 @@ export function NoteEditor(props: NoteEditorProps) {
     agentComposeRequest,
     onAgentComposeRequestHandled,
     onDiagnosticContext,
+    invocationActivity,
+    onResumeProtocolInvocation,
   } = props;
   const [rawMarkdownMode, setRawMarkdownMode] = useState(false);
   const [chromeVisible, setChromeVisible] = useState(false);
@@ -176,6 +197,18 @@ export function NoteEditor(props: NoteEditorProps) {
   const [newPropertyKey, setNewPropertyKey] = useState("");
   const [newPropertyValue, setNewPropertyValue] = useState("");
   const [reviewPosition, setReviewPosition] = useState<InvocationReviewPosition | undefined>(undefined);
+  const [activityPosition, setActivityPosition] = useState<InvocationReviewPosition | undefined>(undefined);
+
+  useEffect(() => {
+    const root = codeMirrorRef.current?.view?.dom;
+    if (!root || !onResumeProtocolInvocation) return;
+    const onResume = (event: Event) => {
+      const protocolInvocationId = (event as CustomEvent<{ protocolInvocationId?: string }>).detail?.protocolInvocationId;
+      if (protocolInvocationId) onResumeProtocolInvocation(protocolInvocationId);
+    };
+    root.addEventListener("exograph:resume-invocation", onResume);
+    return () => root.removeEventListener("exograph:resume-invocation", onResume);
+  }, [document?.filePath, onResumeProtocolInvocation]);
 
   useEffect(() => {
     setRawMarkdownMode(false);
@@ -245,6 +278,8 @@ export function NoteEditor(props: NoteEditorProps) {
   }, [graphContext, rawMarkdownMode, showNoteMetadata]);
   const graphReferencesRef = useRef(graphReferences);
   graphReferencesRef.current = graphReferences;
+  const agentCommandsRef = useRef(agentCommands);
+  agentCommandsRef.current = agentCommands;
   const invocationCommands = useMemo(() => agentCommands.filter((command) => command.enabled), [agentCommands]);
   const invokeAgentRef = useRef(onInvokeAgent);
   const bodyChangeRef = useRef(onBodyChange);
@@ -284,6 +319,7 @@ export function NoteEditor(props: NoteEditorProps) {
   });
   const agentComposer = useMemo(
     () => inlineAgentComposerExtension({
+      getCommand: (handle) => agentCommandsRef.current.find((command) => command.handle === handle),
       onSend: (draft) => {
         setInlineComposerActive(false);
         setInlineComposerHandle(null);
@@ -300,7 +336,7 @@ export function NoteEditor(props: NoteEditorProps) {
       },
       renderPersistedInvocations: !rawMarkdownMode,
     }),
-    [rawMarkdownMode],
+    [rawMarkdownMode, agentCommands],
   );
   const normalizedNewPropertyKey = normalizeFrontmatterPropertyKey(newPropertyKey);
   const newPropertyKeyFeedback = frontmatterPropertyKeyFeedback(newPropertyKey, document?.frontmatter ?? {});
@@ -838,6 +874,53 @@ export function NoteEditor(props: NoteEditorProps) {
     };
   }, [document?.body, document?.filePath, document?.kind, invocationReview?.payload]);
 
+  useLayoutEffect(() => {
+    const view = codeMirrorRef.current?.view;
+    const protocolInvocationId = invocationActivity?.protocolInvocationId;
+    if (!view || !protocolInvocationId) {
+      setActivityPosition(undefined);
+      return;
+    }
+    const place = () => {
+      const envelopes = findDocumentAgentEnvelopes(view.state.doc.toString());
+      const envelope = envelopes.find((candidate) =>
+        candidate.kind === "response" && candidate.invocationId === protocolInvocationId,
+      ) ?? envelopes.find((candidate) =>
+        candidate.kind === "invocation" && candidate.id === protocolInvocationId,
+      );
+      const surface = view.dom.closest<HTMLElement>(".editor-surface");
+      const bounds = surface?.getBoundingClientRect();
+      const coords = envelope ? view.coordsAtPos(envelope.contentTo) : null;
+      if (!coords || !bounds) {
+        setActivityPosition(undefined);
+        return;
+      }
+      const maxWidth = Math.max(180, Math.min(280, bounds.width - 24));
+      const left = Math.max(bounds.left + 12, Math.min(coords.left + 12, bounds.right - maxWidth - 12));
+      const preferredTop = coords.bottom + 7;
+      const top = preferredTop + 58 <= bounds.bottom
+        ? preferredTop
+        : Math.max(bounds.top + 12, coords.top - 56);
+      setActivityPosition({ left, top, maxWidth, origin: `${Math.round(coords.left)}px ${Math.round(coords.top)}px` });
+    };
+    let frame: number | null = null;
+    const schedulePlacement = () => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        place();
+      });
+    };
+    place();
+    view.scrollDOM.addEventListener("scroll", schedulePlacement, { passive: true });
+    window.addEventListener("resize", schedulePlacement);
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      view.scrollDOM.removeEventListener("scroll", schedulePlacement);
+      window.removeEventListener("resize", schedulePlacement);
+    };
+  }, [document?.body, document?.filePath, invocationActivity?.protocolInvocationId]);
+
   useEffect(() => {
     if (!document || !revealLineRequest || revealLineRequest.filePath !== document.filePath) {
       return;
@@ -973,7 +1056,7 @@ export function NoteEditor(props: NoteEditorProps) {
                 title="Open graph for note"
                 type="button"
               >
-                <Network size={14} />
+                <ExographMark size={14} />
               </button>
             ) : null}
             <div className="editor-panel__title" data-testid="editor-title" title={document.filePath}>
@@ -984,19 +1067,19 @@ export function NoteEditor(props: NoteEditorProps) {
 
         <div className="editor-panel__actions">
           <span className="sr-only" data-testid="editor-save-status" aria-live="polite">
-            {saveStatus === "saving" ? "Saving" : saveStatus === "saved" ? "Saved" : saveStatus === "error" ? "Save failed" : document.dirty ? "Unsaved" : "Saved"}
+            {saveStatus === "saving" ? "Saving" : saveStatus === "saved" ? "Saved" : saveStatus === "conflict" ? "Save conflict" : saveStatus === "error" ? "Save failed" : document.dirty ? "Unsaved" : "Saved"}
           </span>
           <button
             aria-label="Save document"
             className={`toolbar-button toolbar-button--icon ${compact ? "toolbar-button--compact" : ""}`}
             data-testid="editor-save"
-            disabled={!document.dirty || saveStatus === "saving"}
+            disabled={!document.dirty || saveStatus === "saving" || Boolean(document.saveConflict) || editingFrozen || document.filesystemState === "deleted"}
             onClick={() => {
               const view = codeMirrorRef.current?.view;
               if (inlineComposerActive && view) flushSync(() => bodyChangeRef.current(view.state.doc.toString()));
               void saveRef.current();
             }}
-            title={document.dirty ? "Save" : "No unsaved changes"}
+            title={document.filesystemState === "deleted" ? "Use Recover or Save as…" : document.dirty ? "Save" : "No unsaved changes"}
             type="button"
           >
             <Save size={14} />
@@ -1015,6 +1098,20 @@ export function NoteEditor(props: NoteEditorProps) {
           ) : null}
         </div>
       </div>
+
+      {document.saveConflict ? <SaveConflictNotice kind={document.saveConflict} pending={Boolean(document.resolvingConflict) || editingFrozen} onSaveCopy={onSaveConflictCopy} onDiscard={onDiscardSaveConflict} /> : null}
+      {document.filesystemState === "deleted" ? (
+        <div className="editor-deleted-notice" data-testid="editor-deleted-notice" role="status">
+          <div>
+            <strong>This file was deleted or moved outside Exograph.</strong>
+            <span>Your open edits are preserved until you recover them.</span>
+          </div>
+          <div className="editor-deleted-notice__actions">
+            <button className="toolbar-button" data-testid="recover-deleted-document" onClick={onRecoverDeleted} type="button">Recover</button>
+            <button className="toolbar-button" data-testid="save-deleted-document-as" onClick={onSaveDeletedAs} type="button">Save as…</button>
+          </div>
+        </div>
+      ) : null}
 
       {showNoteMetadata && !propertiesCollapsed ? (
         <div className="properties-card" data-testid="properties-panel">
@@ -1158,7 +1255,7 @@ export function NoteEditor(props: NoteEditorProps) {
                   acceptAgentSuggestion(command);
                 }}
               >
-                {command.handle === "claude" || command.handle === "codex" ? <AgentIcon kind={command.handle} size={16} /> : null}
+                <AgentCommandIcon command={command} size={16} />
                 <span className="agent-suggestions__copy">
                   <span className="agent-suggestions__label">{command.label}</span>
                   <span className="agent-suggestions__command">{command.command}</span>
@@ -1217,8 +1314,10 @@ export function NoteEditor(props: NoteEditorProps) {
             onRefreshConflict={invocationReview.onRefreshConflict}
             onOpenConflict={invocationReview.onOpenConflict}
             onDismiss={invocationReview.onDismiss}
+            onResume={invocationReview.onResume}
           />
         ) : null}
+        {invocationActivity ? invocationActivity.render(activityPosition) : null}
       </div>
 
     </section>
@@ -1238,6 +1337,7 @@ interface NoteInvocationReview {
   onRefreshConflict: () => void;
   onOpenConflict: () => void;
   onDismiss?: () => void;
+  onResume?: () => void;
 }
 
 function clampPosition(position: number, docLength: number): number {

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { InvocationRecord } from "@exograph/core";
+import { createDefaultClaudeAgentCommand, type InvocationRecord } from "@exograph/core";
 import type { InvocationActivityEvent } from "@exograph/core/invocation-activity";
 
 import {
+  invocationCommandPresentation,
   acknowledgeInvocationActivity,
   applyInvocationActivityEvent,
   applyInvocationRecord,
@@ -12,6 +13,7 @@ import {
   boundedInvocationErrorDetail,
   failActiveInvocationActivity,
   failInvocationActivity,
+  resolveInvocationActivityPaneId,
   takeEarlyInvocationActivityEvents,
 } from "./invocationActivityState";
 
@@ -45,13 +47,27 @@ function record(status: InvocationRecord["status"]): InvocationRecord {
 }
 
 describe("invocation activity state", () => {
+  it("keeps configured appearance while checking and after launch failure", () => {
+    const styled = { ...createDefaultClaudeAgentCommand(), appearance: { color: "#112233" } };
+    const presentation = invocationCommandPresentation(styled.handle, [styled]);
+    expect(acknowledgeInvocationActivity(presentation).commandAppearance).toEqual(styled.appearance);
+    expect(failInvocationActivity(presentation, "failure").commandAppearance).toEqual(styled.appearance);
+  });
   it("acknowledges a send synchronously without claiming provider work began", () => {
-    expect(acknowledgeInvocationActivity(command)).toEqual({
+    expect(acknowledgeInvocationActivity(command, "pane-a")).toEqual({
       invocationId: null,
+      paneId: "pane-a",
       kind: "checking",
       commandHandle: "claude",
       commandLabel: "Claude",
     });
+  });
+
+  it("keeps one origin pane until it closes, then falls back deterministically", () => {
+    expect(resolveInvocationActivityPaneId("pane-a", ["pane-a", "pane-b"], "pane-b")).toBe("pane-a");
+    expect(resolveInvocationActivityPaneId("pane-a", ["pane-b", "pane-c"], "pane-c")).toBe("pane-c");
+    expect(resolveInvocationActivityPaneId("pane-a", ["pane-b", "pane-c"], "utility-pane")).toBe("pane-b");
+    expect(resolveInvocationActivityPaneId("pane-a", [], "pane-b")).toBeNull();
   });
 
   it("moves through bounded activity and terminal states", () => {
@@ -63,10 +79,57 @@ describe("invocation activity state", () => {
       emittedAt: "2026-07-20T00:00:01.000Z",
     });
 
-    expect(reading).toMatchObject({ invocationId: "invocation-1", kind: "reading", label: "essay.md" });
-    expect(applyInvocationRecord(reading, record("running"))).toMatchObject({ kind: "reading", label: "essay.md" });
+    expect(reading).toMatchObject({ invocationId: "invocation-1", kind: "working", label: "Reading essay.md" });
+    expect(applyInvocationRecord(reading, record("running"))).toMatchObject({ kind: "working", label: "Reading essay.md" });
     expect(applyInvocationRecord(reading, record("process-exited"))).toMatchObject({ kind: "done" });
     expect(applyInvocationRecord(reading, record("failed"))).toMatchObject({ kind: "failed" });
+  });
+
+  it("yields working activity to review as soon as an exact proposal exists", () => {
+    const running = {
+      ...record("running"),
+      protocolInvocationId: "11111111-1111-4111-8111-111111111111",
+      providerSessionId: "22222222-2222-4222-8222-222222222222",
+      changeset: {
+        version: 1 as const,
+        status: "pending-review" as const,
+        settledAt: "2026-07-20T00:00:02.000Z",
+        files: [{
+          id: "change-1",
+          operation: "modified" as const,
+          decision: { status: "pending" as const },
+        }],
+      },
+    };
+    const review = applyInvocationRecord(beginInvocationActivity(command), running);
+    expect(review).toMatchObject({
+      kind: "review",
+      protocolInvocationId: running.protocolInvocationId,
+      providerSessionId: running.providerSessionId,
+    });
+    expect(applyInvocationActivityEvent(review, {
+      invocationId: running.id,
+      kind: "done",
+      emittedAt: "2026-07-20T00:00:03.000Z",
+    })).toBe(review);
+  });
+
+  it("does not restart the spinner after a running proposal is resolved", () => {
+    const resolved = {
+      ...record("running"),
+      changeset: {
+        version: 1 as const,
+        status: "kept" as const,
+        settledAt: "2026-07-20T00:00:02.000Z",
+        resolvedAt: "2026-07-20T00:00:03.000Z",
+        files: [{
+          id: "change-1",
+          operation: "modified" as const,
+          decision: { status: "kept" as const, reviewedAt: "2026-07-20T00:00:03.000Z", acceptedSha256: null },
+        }],
+      },
+    };
+    expect(applyInvocationRecord(beginInvocationActivity(command), resolved)).toMatchObject({ kind: "done" });
   });
 
   it("ignores unrelated invocation events", () => {
@@ -90,8 +153,8 @@ describe("invocation activity state", () => {
     };
     const nextEvent: InvocationActivityEvent = {
       invocationId: "invocation-1",
-      kind: "reading",
-      label: "new.md",
+      kind: "working",
+      label: "Reading new.md",
       emittedAt: "2026-07-20T00:00:02.000Z",
     };
     const buffered = new Map<string, InvocationActivityEvent[]>();
@@ -105,8 +168,8 @@ describe("invocation activity state", () => {
       takeEarlyInvocationActivityEvents(buffered, "invocation-1"),
     )).toMatchObject({
       invocationId: "invocation-1",
-      kind: "reading",
-      label: "new.md",
+      kind: "working",
+      label: "Reading new.md",
     });
     expect(buffered.size).toBe(0);
   });
@@ -127,13 +190,26 @@ describe("invocation activity state", () => {
 
     expect(next).toEqual({
       invocationId: "invocation-1",
-      kind: "editing",
+      kind: "working",
       commandHandle: "claude",
       commandLabel: "Claude",
-      label: "secret.md",
+      label: "Editing secret.md",
     });
     expect(JSON.stringify(next)).not.toContain("chain of thought");
     expect(JSON.stringify(next)).not.toContain("private/wiki");
+  });
+
+  it.each(["done", "stopped", "failed"] as const)("lets process exit publish %s before review preparation completes", (kind) => {
+    const current = applyInvocationRecord(beginInvocationActivity(command), record("running"));
+    expect(applyInvocationActivityEvent(current, {
+      invocationId: "invocation-1",
+      kind,
+      emittedAt: "2026-07-20T00:00:02.000Z",
+    })).toMatchObject({ kind, label: undefined });
+  });
+
+  it("presents a user-ended command as stopped", () => {
+    expect(applyInvocationRecord(beginInvocationActivity(command), record("user-ended"))).toMatchObject({ kind: "stopped" });
   });
 
   it("keeps actionable failures bounded and removes local paths", () => {

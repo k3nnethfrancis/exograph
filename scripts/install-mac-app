@@ -124,14 +124,32 @@ if [ ! -d "$APP_SOURCE" ]; then
 fi
 
 APP_TARGET="$APP_DIR/Exograph.app"
+APP_STAGING="$APP_DIR/.Exograph.app.install-$$"
+APP_BACKUP="$APP_DIR/.Exograph.app.backup-$$"
+APP_TARGET_EXISTED=0
+APP_PROMOTED=0
+
+rollback_app_replacement() {
+  local status="${1:-$?}"
+  trap - EXIT INT TERM
+  if [ "$DRY_RUN" -eq 0 ]; then
+    rm -rf "$APP_STAGING"
+    if [ "$APP_TARGET_EXISTED" -eq 1 ] && [ -e "$APP_BACKUP" ]; then
+      rm -rf "$APP_TARGET"
+      mv "$APP_BACKUP" "$APP_TARGET" || true
+    elif [ "$APP_TARGET_EXISTED" -eq 0 ] && [ "$APP_PROMOTED" -eq 1 ]; then
+      rm -rf "$APP_TARGET"
+    fi
+    rm -rf "$APP_BACKUP"
+  fi
+  exit "$status"
+}
 
 log "installing app"
 log "source: $APP_SOURCE"
 log "target: $APP_TARGET"
 
 run mkdir -p "$APP_DIR"
-APP_STAGING="$APP_DIR/.Exograph.app.install-$$"
-APP_BACKUP="$APP_DIR/.Exograph.app.backup-$$"
 run rm -rf "$APP_STAGING" "$APP_BACKUP"
 if ! run cp -R "$APP_SOURCE" "$APP_STAGING"; then
   if [ "$APP_DIR" = "/Applications" ]; then
@@ -148,16 +166,26 @@ EOF
   exit 1
 fi
 
+if [ "$DRY_RUN" -eq 0 ]; then
+  trap 'rollback_app_replacement $?' EXIT
+  trap 'rollback_app_replacement 130' INT
+  trap 'rollback_app_replacement 143' TERM
+fi
 if [ -e "$APP_TARGET" ]; then
+  APP_TARGET_EXISTED=1
   run mv "$APP_TARGET" "$APP_BACKUP"
 fi
+if [ "${EXOGRAPH_TEST_INTERRUPT_AFTER_BACKUP:-0}" = "1" ]; then
+  kill -TERM "$$"
+fi
 if ! run mv "$APP_STAGING" "$APP_TARGET"; then
-  if [ -e "$APP_BACKUP" ]; then
-    run mv "$APP_BACKUP" "$APP_TARGET" || true
-  fi
   exit 1
 fi
+APP_PROMOTED=1
 run rm -rf "$APP_BACKUP"
+if [ "$DRY_RUN" -eq 0 ]; then
+  trap - EXIT INT TERM
+fi
 
 if [ "$INSTALL_CLI" -eq 1 ]; then
   run "$REPO_ROOT/scripts/install-local" --skip-install --skip-build

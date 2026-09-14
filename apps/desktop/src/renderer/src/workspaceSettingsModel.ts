@@ -15,14 +15,20 @@ export const DEFAULT_EXPLORER_SCALE = 1;
 
 export function workspaceSettingsImmediateDraftKey(settings: WorkspaceSettingsDialogState): string {
   return JSON.stringify({
+    publishing: settings.publishing,
     appearanceMode: settings.appearanceMode,
     colorThemeId: settings.colorThemeId,
     editorFontSize: settings.editorFontSize,
     terminalFontSize: settings.terminalFontSize,
     explorerScale: settings.explorerScale,
+    graphInverseNavigation: settings.graphInverseNavigation,
+    graphShowOverflowLabels: settings.graphShowOverflowLabels,
+    ontologyDiscoveryPrompt: settings.ontologyDiscoveryPrompt,
+    shortcutBindings: settings.shortcutBindings,
     exploreIndexSearchOnEnter: settings.exploreIndexSearchOnEnter,
     indexUpdateStrategy: settings.indexUpdateStrategy,
     agentCommands: settings.agentCommands,
+    defaultAgentCommandId: settings.defaultAgentCommandId,
     agentInvocationPrompt: settings.agentInvocationPrompt,
   });
 }

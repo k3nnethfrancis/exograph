@@ -22,12 +22,12 @@ export function createDefaultCodexAgentCommand(): AgentCommand {
     id: "codex",
     label: "Codex",
     handle: "codex",
-    command: "codex exec --sandbox workspace-write -",
+    command: "codex exec --sandbox workspace-write --skip-git-repo-check -",
     adapter: "codex-cli",
     continuityPolicy: "fresh",
     cwdPolicy: "workspace_root",
     promptDelivery: "stdin",
-    version: 1,
+    version: 2,
     enabled: true,
   };
 }

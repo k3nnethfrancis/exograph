@@ -33,7 +33,7 @@ search, command-wire, or renderer state contracts.
   renderer owns review presentation and decisions.
 - Direct PTY lifecycle: `terminal/terminal-manager.ts` and
   `terminal/terminal-runtime*.ts`. Read
-  `../../../../docs/terminal-runtime-decision.md` before changing terminal
+  `../../../../docs/adr/0009-direct-pty-terminal-runtime.md` before changing terminal
   behavior.
 
 `index.ts` is composition only: assemble services, register IPC, and make no

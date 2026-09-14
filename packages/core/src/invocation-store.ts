@@ -109,6 +109,15 @@ export class InvocationStore {
     return this.artifacts.captureManifest(invocationId, phase, noteRoots, options);
   }
 
+  captureSettledManifest(
+    invocationId: string,
+    noteRoots: readonly string[],
+    launch: InvocationWorkspaceManifest,
+    options?: InvocationManifestCaptureOptions,
+  ): Promise<InvocationWorkspaceManifest> {
+    return this.artifacts.captureSettledManifest(invocationId, noteRoots, launch, options);
+  }
+
   captureLaunchArtifacts(invocationId: string, input: InvocationLaunchArtifactInput): Promise<InvocationLaunchArtifacts> {
     return this.artifacts.captureLaunchArtifacts(invocationId, input);
   }

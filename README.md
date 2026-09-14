@@ -1,104 +1,90 @@
 # Exograph
 
-> An open-source knowledge-graph interface and Markdown editor for working
-> alongside terminal agents.
+**The open-source exocortex. A Markdown editor that builds a knowledge graph with a custom ontology and tunable search. Terminal agents use the same workspace headlessly through the CLI.**
 
-Exograph is a user-owned exocortex built from ordinary Markdown, an explorable
-knowledge graph, local search, and reviewable work from terminal agents. Any
-agent that can run as a headless Command can participate; Claude Code, Codex,
-Pi, and Hermes are examples rather than privileged integrations.
+Exograph opens a folder of Markdown as a local workspace for writing, search, graph exploration, terminals, and agent work. Your notes remain ordinary files on disk; Exograph adds structure and interfaces around them without moving the corpus into a hosted or proprietary knowledge base.
 
-Markdown and frontmatter stay canonical. Exograph's indexes, layouts, invocation records, and review state live under `.exograph/` as rebuildable local state.
+> **Pre-release alpha.** The currently qualified packaged path is an unsigned
+> Apple silicon macOS app. Build from source to evaluate it.
 
-## What it does
+## Quick start
 
-- **Write and navigate** Markdown notes with folders, backlinks, tags, properties, daily notes, live preview, terminals, and web previews.
-- **Search and see connections** through immediate filename/path search or optional local lexical, semantic, and hybrid retrieval; inspect the same knowledge as a graph.
-- **Work with agents deliberately** through inline `@` invocations, local CLI commands, and an optional two-tool read-only MCP server. Agent changes are captured as a reviewable Changeset; saving a note never runs an agent.
-
-Exograph is macOS-first and currently an unsigned alpha.
-
-## Start here
-
-### Use Exograph
-
-Build and install the local unsigned app:
+Requirements: Apple silicon macOS, Node.js 24, and pnpm 11.2.2 or newer within
+the 11.x line.
 
 ```sh
+git clone --branch dev https://github.com/k3nnethfrancis/exograph.git
+cd exograph
 pnpm install
+pnpm dev:qa
+```
+
+Choose a Markdown folder during onboarding. Exograph will open it as a
+Workspace without importing or converting its files.
+
+To build and install the current unsigned app and the `exo` command:
+
+```sh
 ./scripts/install-mac-app --with-cli
 ```
 
-Launch Exograph from `~/Applications`, choose a main Markdown wiki, decide what Markdown becomes Notes, optionally install the MCP server, then configure the local agent commands you want available through `@`.
+The app installs to `~/Applications`; the CLI installs to `~/.local/bin`.
 
-For the full workflow, read [Using Exograph](docs/using-exograph.md). For command-line and MCP access, read [CLI and MCP](docs/cli.md).
+## What Exograph adds
 
-### Develop Exograph
+- **A local Markdown workspace** — live editing, links, backlinks, properties,
+  outlines, images, panes, previews, and real PTY terminals.
+- **An explorable knowledge graph** — Markdown links, tags, and frontmatter
+  become an evidence-aware graph rendered through WebGPU with a Canvas fallback.
+- **A portable ontology** — an optional `ontology.yaml` interprets existing
+  paths and properties as types, relations, and validation findings. Exograph
+  previews changes before activating them and never rewrites notes to apply it.
+- **Tunable local search** — immediate filesystem retrieval and optional QMD
+  lexical, semantic, or hybrid search share one replaceable provider boundary.
+- **Document-native agents** — invoke Claude, Codex, or another configured local
+  command from a note, then review its file changes before keeping or rejecting
+  them.
+- **Headless agent access** — the structured `exo` CLI exposes workspace status,
+  search, indexing, note opening, agent commands, and live terminal control. A
+  small read-only MCP server exposes workspace status and note search.
 
-Prerequisites: Node.js 24 and pnpm 11.2.2.
+After onboarding, try the source CLI in another shell:
 
 ```sh
-pnpm install
-pnpm dev
+pnpm exo status
+pnpm exo search "knowledge graph"
 ```
 
-Use `pnpm dev:qa` when an installed app is also running: it isolates the development app's settings and runtime. Use `pnpm pack:mac` when validating packaged-app or first-run behavior.
+See [CLI and MCP](docs/cli.md) for the complete command surface and app-off
+behavior.
 
-Read [AGENTS.md](AGENTS.md) for ownership and validation guidance and
-[Architecture](docs/architecture.md) for package boundaries.
+## Trust boundary
 
-## Core workflows
+Markdown is canonical; indexes, graph projections, and proposals are derived.
+Configured agent commands are native processes with the permissions of your
+local user account—they are not sandboxed. Exograph can review and restore
+observed changes inside the selected Note Root, but it does not claim authority
+over writes elsewhere on the machine.
 
-| Need | Start here |
-| --- | --- |
-| Open a folder, write notes, use links/tags/properties | [Using Exograph](docs/using-exograph.md) |
-| Understand Notes, Concepts, Relations, Evidence, and graph origins | [Knowledge graph](docs/knowledge-graph.md) |
-| Configure local search and understand index status | [Search](docs/search.md) |
-| Use `@claude`/`@codex`, review changes, or resume a session | [Agent invocations](docs/document-agent-protocol.md) |
-| Use Exograph from a shell or tool-capable client | [CLI and MCP](docs/cli.md) |
-| Define or switch a workspace ontology | [Workspace ontology](docs/workspace-ontology.md) |
-| Recover from a setup, search, invocation, MCP, or CLI problem | [Troubleshooting](docs/troubleshooting.md) |
+## Documentation
 
-## Repository map
+- [Using Exograph](docs/using-exograph.md)
+- [Knowledge graph](docs/knowledge-graph.md)
+- [Workspace ontology](docs/workspace-ontology.md)
+- [Search](docs/search.md)
+- [Agent invocation](docs/document-agent-protocol.md)
+- [Architecture and contributor docs](docs/README.md)
 
-- `apps/desktop` — Electron main process, preload bridge, and React renderer.
-- `packages/core` — Markdown, workspace, graph, search, invocation, and shared protocol models.
-- `packages/cli` — the `exo` CLI and read-only MCP server.
-- `evals/graph` — internal graph-rendering regression evaluation.
-- `docs` — user guides and current technical contracts.
+## Contributing
 
-## Validate a change
+Start with [AGENTS.md](AGENTS.md), then read the closest subsystem guide. Run
+the narrowest relevant test first and the canonical repository gate before
+handoff:
 
 ```sh
 pnpm ci:check
 ```
 
-That runs unused-code checks, typechecks, tests, builds, and an install dry run. Graph changes also require the focused commands documented in [`evals/graph/README.md`](evals/graph/README.md).
+## License
 
-Before changing a cross-process boundary, find its owner in
-[AGENTS.md](AGENTS.md). Desktop-visible behavior requires the relevant Electron
-journey; browser-only tests do not prove Electron IPC or packaged-app behavior.
-Packaging, first-run, and native-module changes require an unsigned Mac package
-and installed-app evidence.
-
-Keep changes focused, update public documentation when behavior changes, and
-use GitHub Issues rather than committing task ledgers, review packets, or
-working notes.
-
-## Local trust boundary
-
-Exograph can launch explicitly configured native commands. It is a trusted
-local tool, not a sandbox. Note Roots bound the files Exograph reads, reviews,
-and presents; they do not restrict what an authorized command can do as the
-current operating-system user.
-
-Do not publish a workspace's `.exograph/` directory. It is rebuildable local
-state and may contain paths, note content, prompts, invocation evidence, or
-command metadata.
-
-## Status
-
-Exograph is early software, not a signed public binary release. The current
-alpha supports source development and unsigned macOS packaging; Windows and
-Linux are not yet supported release targets. Published versions and downloads
-live in GitHub Releases.
+Exograph is available under the [Apache License 2.0](LICENSE).

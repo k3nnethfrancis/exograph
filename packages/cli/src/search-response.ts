@@ -16,7 +16,12 @@ export interface AgentSearchResponse {
   schema_version: typeof AGENT_SEARCH_SCHEMA_VERSION;
   query: string;
   scope: { workspace_root: string; note_roots: string[] };
-  retrieval: { provider: "qmd" | "filesystem"; mode: IndexSearchResponse["mode"]; warnings: string[] };
+  retrieval: {
+    provider: "qmd" | "filesystem";
+    mode: IndexSearchResponse["mode"];
+    warnings: string[];
+    incomplete?: IndexSearchResponse["incomplete"];
+  };
   page: AgentSearchPage;
   results: Array<{
     path: string;
@@ -64,7 +69,12 @@ export function agentSearchResponse(
     schema_version: AGENT_SEARCH_SCHEMA_VERSION,
     query: response.query,
     scope: { workspace_root: model.workspaceRoot, note_roots: noteRoots },
-    retrieval: { provider: response.source, mode: response.mode, warnings: response.warnings },
+    retrieval: {
+      provider: response.source,
+      mode: response.mode,
+      warnings: response.warnings,
+      incomplete: response.incomplete,
+    },
     page: {
       limit: page.limit,
       returned,

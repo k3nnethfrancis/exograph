@@ -1,3 +1,4 @@
+import { parseGraphTraversalRequest, type GraphTraversalRequest, type GraphTraversalResult } from "@exograph/core";
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdir } from "node:fs/promises";
@@ -7,6 +8,11 @@ import {
   EXOGRAPH_COMMAND_TOKEN_HEADER,
   type ExographCommandBasicErrorResponse,
   type ExographCommandOkResponse,
+  type ExographCommandTerminalCreateResponse,
+  type ExographCommandTerminalInfo,
+  type ExographCommandTerminalListResponse,
+  type ExographCommandTerminalReadResponse,
+  type ExographCommandTerminalWriteResponse,
   type ExographCommandServerInfo,
   type ExographCommandStatusResponse,
   type ExographSpawnAgentCommandResponse,
@@ -20,13 +26,19 @@ import { InvocationRunnerError, type InvocationResult } from "../invocation/invo
 
 export interface CommandServerOptions {
   runtimeRoot: string;
+  onGraphTraverse?: (request: GraphTraversalRequest) => Promise<GraphTraversalResult>;
   onShowWindow: () => void;
-  onOpenFile: (filePath: string) => Promise<void>;
+  onOpenPath: (filePath: string) => Promise<void>;
   onIndexSearch: (query: string, options: { limit?: number; offset?: number; intent?: string; includeContent?: boolean; maxLinesPerResult?: number }) => Promise<IndexSearchResponse>;
   onIndexStatus: () => Promise<IndexStatus>;
   onIndexSync: () => Promise<IndexSyncResult>;
   onGetStatus: () => ExographCommandStatusResponse;
   onSpawnAgentCommand: (input: { handle: string; task: string }) => Promise<InvocationResult>;
+  onListTerminals: () => ExographCommandTerminalInfo[];
+  onCreateTerminal: () => Promise<ExographCommandTerminalInfo>;
+  onWriteTerminal: (input: { id: string; data: string }) => Promise<{ terminal: ExographCommandTerminalInfo | null; writeId?: number }>;
+  onReadTerminal: (input: { id: string; cursor?: number }) => Promise<ExographCommandTerminalReadResponse | null>;
+  onStopTerminal: (id: string) => Promise<boolean>;
 }
 
 export class CommandServer {
@@ -111,6 +123,17 @@ export class CommandServer {
         return;
       }
 
+      if (method === "POST" && pathname === EXOGRAPH_COMMAND_ROUTES.graphTraverse) {
+        const body = await readBody(req);
+        let request: GraphTraversalRequest;
+        try { request = parseGraphTraversalRequest(body); }
+        catch (error) { throw new CommandServerHttpError(400, error instanceof Error ? error.message : String(error)); }
+        if (request.workspaceRoot !== this.options.onGetStatus().workspace.workspaceRoot) throw new CommandServerHttpError(409, "Traversal Workspace does not match the active Workspace.");
+        if (!this.options.onGraphTraverse) throw new CommandServerHttpError(503, "Graph traversal is unavailable in this runtime.");
+        json(res, await this.options.onGraphTraverse(request));
+        return;
+      }
+
       if (method === "GET" && pathname === EXOGRAPH_COMMAND_ROUTES.search) {
         const query = url.searchParams.get("q") ?? "";
         if (!query) {
@@ -148,7 +171,7 @@ export class CommandServer {
           return;
         }
         try {
-          await this.options.onOpenFile(filePath);
+          await this.options.onOpenPath(filePath);
         } catch (error) {
           json(res, { error: error instanceof Error ? error.message : String(error) } satisfies ExographCommandBasicErrorResponse, 400);
           return;
@@ -203,6 +226,44 @@ export class CommandServer {
           }
           throw error;
         }
+        return;
+      }
+
+      if (method === "GET" && pathname === EXOGRAPH_COMMAND_ROUTES.terminals) {
+        json(res, { terminals: this.options.onListTerminals() } satisfies ExographCommandTerminalListResponse);
+        return;
+      }
+
+      if (method === "POST" && pathname === EXOGRAPH_COMMAND_ROUTES.terminals) {
+        json(res, { terminal: await this.options.onCreateTerminal() } satisfies ExographCommandTerminalCreateResponse);
+        return;
+      }
+
+      const terminalMatch = pathname.match(/^\/terminals\/([^/]+)\/(read|write|stop)$/);
+      if (terminalMatch && method === "POST") {
+        const [, id, action] = terminalMatch;
+        if (!id || !action) throw new CommandServerHttpError(400, "Missing terminal id or action.");
+        const body = await readBody(req);
+        if (action === "read") {
+          const cursor = isRecord(body) && typeof body.cursor === "number" && Number.isSafeInteger(body.cursor) && body.cursor >= 0
+            ? body.cursor
+            : undefined;
+          const result = await this.options.onReadTerminal({ id, cursor });
+          if (!result) throw new CommandServerHttpError(404, "Terminal was not found.");
+          json(res, result);
+          return;
+        }
+        if (action === "write") {
+          const input = isRecord(body) && typeof body.input === "string" ? body.input : undefined;
+          if (input === undefined) throw new CommandServerHttpError(400, "Missing input in body.");
+          const result = await this.options.onWriteTerminal({ id, data: input });
+          if (!result.terminal || result.writeId === undefined) throw new CommandServerHttpError(404, "Terminal was not found or cannot receive input.");
+          json(res, { ok: true, terminal: result.terminal, writeId: result.writeId } satisfies ExographCommandTerminalWriteResponse);
+          return;
+        }
+        const stopped = await this.options.onStopTerminal(id);
+        if (!stopped) throw new CommandServerHttpError(404, "Terminal was not found.");
+        json(res, { ok: true } satisfies ExographCommandOkResponse);
         return;
       }
 

@@ -21,3 +21,9 @@ can trace their authority and recovery behavior before changing one.
 `WorkspaceFiles` remains the canonical containment authority for Note paths;
 this catalog intentionally does not turn any persisted path into an additional
 filesystem authorization surface. See [architecture.md](architecture.md).
+
+Editor dirty buffers and save conflicts are **not durable artifacts**. Normal
+quit/reload and Workspace replacement wait for revision-checked saves or explicit
+copy/reload resolution. A renderer crash or force-kill can still lose unsaved
+local text. See [the editor save contract](architecture.md#editor-saves-and-external-writers)
+and [`useOpenDocuments.conflicts.test.ts`](../apps/desktop/src/renderer/src/hooks/useOpenDocuments.conflicts.test.ts).

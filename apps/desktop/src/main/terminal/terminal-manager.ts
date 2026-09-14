@@ -24,6 +24,9 @@ interface TerminalRecord {
   info: TerminalSessionInfo;
   process: TerminalProcess;
   tailCache: TerminalTailCache;
+  /** Opaque character cursors for the bounded, non-persistent live tail. */
+  outputCursor: number;
+  tailStartCursor: number;
   lastInputAt?: number;
   lastOutputAt?: number;
   lastWriteId: number;
@@ -43,6 +46,12 @@ export interface TerminalManagerOptions {
   initialColumns?: number;
   initialRows?: number;
   idleThresholdMs?: number;
+}
+
+export interface TerminalTailReadResult {
+  output: string;
+  cursor: number;
+  truncated: boolean;
 }
 
 /** Immutable invocation scope; terminal launches never consult ambient Workspace state. */
@@ -182,6 +191,30 @@ export class TerminalManager extends EventEmitter {
     return tailLines(record.tailCache.text(), normalizeTailLineLimit(options.maxLines));
   }
 
+  /**
+   * Read output added after an earlier opaque cursor. The tail is deliberately
+   * bounded in memory, so callers are told when the requested position was
+   * no longer retained rather than receiving a misleading partial delta.
+   */
+  readTailSince(id: string, cursor?: number): TerminalTailReadResult | null {
+    const record = this.sessions.get(id);
+    if (!record) return null;
+
+    const output = record.tailCache.text();
+    if (cursor === undefined) {
+      return { output, cursor: record.outputCursor, truncated: false };
+    }
+    const safeCursor = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : record.outputCursor;
+    if (safeCursor < record.tailStartCursor || safeCursor > record.outputCursor) {
+      return { output, cursor: record.outputCursor, truncated: true };
+    }
+    return {
+      output: output.slice(safeCursor - record.tailStartCursor),
+      cursor: record.outputCursor,
+      truncated: false,
+    };
+  }
+
   async resize(id: string, cols: number, rows: number): Promise<void> {
     const record = this.sessions.get(id);
     if (!record || record.info.status === "exited") {
@@ -246,6 +279,8 @@ export class TerminalManager extends EventEmitter {
       info,
       process,
       tailCache: new TerminalTailCache(this.tailCacheCharLimit),
+      outputCursor: 0,
+      tailStartCursor: 0,
       lastWriteId: 0,
     };
     this.sessions.set(id, record);
@@ -285,6 +320,8 @@ export class TerminalManager extends EventEmitter {
         record.lastWriteLatencyMs = record.lastOutputAt - record.lastInputAt;
       }
       record.tailCache.append(data);
+      record.outputCursor += data.length;
+      record.tailStartCursor = record.outputCursor - record.tailCache.charCount();
       record.info.health = this.terminalHealth(record, Date.now());
       record.info.healthDetail = this.terminalHealthDetail(record, Date.now());
       this.emit("data", { id, generation: attachGeneration, data });

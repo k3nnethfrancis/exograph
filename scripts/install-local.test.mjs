@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -77,13 +77,14 @@ async function createPackagedApp(repo, architecture, marker) {
   return path.dirname(appContents);
 }
 
-function runInstaller(fixture, args) {
+function runInstaller(fixture, args, environment = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(fixture.installer, args, {
       env: {
         ...process.env,
         HOME: path.dirname(fixture.repo),
         PATH: `${fixture.tools}:${process.env.PATH}`,
+        ...environment,
       },
     });
     let stdout = "";
@@ -212,6 +213,25 @@ test("mac app install leaves a working app intact when staging the replacement f
 
   assert.notEqual(result.code, 0);
   assert.equal(await readFile(path.join(installedContents, "marker"), "utf8"), "existing build\n");
+});
+
+test("mac app install restores the previous app when interrupted after backup", async () => {
+  const fixture = await createFixture();
+  const appDir = path.join(path.dirname(fixture.repo), "Applications");
+  const installedContents = path.join(appDir, "Exograph.app", "Contents");
+  await createPackagedApp(fixture.repo, "mac-arm64", "new build\n");
+  await mkdir(installedContents, { recursive: true });
+  await writeFile(path.join(installedContents, "marker"), "existing build\n", "utf8");
+
+  const result = await runInstaller(
+    { ...fixture, installer: fixture.macInstaller },
+    ["--skip-build", "--app-dir", appDir],
+    { EXOGRAPH_TEST_INTERRUPT_AFTER_BACKUP: "1" },
+  );
+
+  assert.notEqual(result.code, 0);
+  assert.equal(await readFile(path.join(installedContents, "marker"), "utf8"), "existing build\n");
+  assert.deepEqual((await readdir(appDir)).filter((name) => name.startsWith(".Exograph.app.")), []);
 });
 
 test("mac app install rejects a stale bundle for another architecture", async () => {

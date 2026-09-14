@@ -81,6 +81,7 @@ async function selectFocusedGraphNode(
   detailTitle: import("@playwright/test").Locator,
   expectedTitle: string,
   filePath: string,
+  inspectedFilePath: string,
 ) {
   let projected = await projectedGraphNode(canvas, filePath);
   for (let attempt = 0; projected.picked !== projected.index && attempt < 8; attempt += 1) {
@@ -104,7 +105,7 @@ async function selectFocusedGraphNode(
     return (element as HTMLCanvasElement & {
       __exographGraphSnapshot?: () => { inspectedFilePath: string | null };
     }).__exographGraphSnapshot?.().inspectedFilePath ?? null;
-  })).toBe(filePath);
+  })).toBe(inspectedFilePath);
   await expect(detailTitle).toHaveText(expectedTitle);
   return { x: box!.x + projected.x, y: box!.y + projected.y, localX: projected.x, localY: projected.y, index: projected.index };
 }
@@ -126,7 +127,6 @@ async function projectedGraphNode(canvas: import("@playwright/test").Locator, fi
     const lookup = await window.exograph.notes.graphConceptLookup(
       { filePath: targetPath },
       sourceSnapshotId,
-      "generic-markdown",
     );
     if (lookup.status !== "ok" || !lookup.summary) return null;
     const point = graphCanvas.__exographGraphPointForIndex?.(lookup.summary.index) ?? null;
@@ -210,7 +210,7 @@ test("boots the shell, opens notes, and creates terminals on demand", async () =
     page.evaluate(async () => (await window.exograph.terminals.list()).map((session) => session.kind)),
   ).toEqual(["shell"]);
 
-  await page.getByTestId("utility-pane-connections").click();
+  await page.getByTestId("utility-pane-context").click();
   await page.getByTestId("connections-tab-links").click();
   await expect(page.getByTestId("utility-pane")).toBeVisible();
   const tag = page.locator('[data-testid="tags-panel"] .tag-pill').first();
@@ -218,10 +218,10 @@ test("boots the shell, opens notes, and creates terminals on demand", async () =
   const tagName = (await tag.textContent())?.replace(/^#/, "") ?? "";
   await tag.click();
   // Tags now navigate like other knowledge links rather than opening a
-  // second, competing results view inside Connections.
+  // second, competing results view inside Note context.
   await expect(page.getByTestId("editor-title")).toHaveText(tagName);
 
-  // Restore the source note before exercising its Connections links.
+  // Restore the source note before exercising its Note context links.
   await page.locator(".tab-strip .chrome-tab", { hasText: "focus-note" }).click();
   await expect(page.getByTestId("editor-title")).toHaveText("focus-note");
 
@@ -232,7 +232,7 @@ test("boots the shell, opens notes, and creates terminals on demand", async () =
   expect(existsSync(path.join(repoRoot, "fixtures/test-workspace/notes/test-notes", `${tagName}.md`))).toBe(false);
 });
 
-test("keeps editor, full graph, and backlink-only Connections on one navigation contract", async () => {
+test("keeps editor, full graph, and backlink-only Note context on one navigation contract", async () => {
   const { page, workspaceRoot, cleanup } = await launchExographWorkspaceFixture({
     mutable: true,
     initialNoteLabel: "graph-target",
@@ -252,7 +252,52 @@ test("keeps editor, full graph, and backlink-only Connections on one navigation 
     const graphPane = page.getByTestId("graph-pane");
     const graphCanvas = graphPane.locator('canvas[aria-label="Interactive knowledge graph"]');
     await expect(graphPane).toBeVisible();
+    await expect(graphPane.locator(".spatial-graph__viewport")).toHaveAttribute("data-scene-ready", "true");
     await expect(graphPane.locator(".spatial-graph__detail-title")).toHaveText("Graph Target");
+    await expect.poll(async () => graphCanvas.evaluate((canvas) => {
+      return (canvas as HTMLCanvasElement & {
+        __exographGraphSnapshot?: () => { camera: { pitch: number; distance: number }; pendingWork: number };
+      }).__exographGraphSnapshot?.();
+    })).toMatchObject({ camera: { pitch: 0.46, distance: expect.any(Number) }, pendingWork: 0 });
+    await graphCanvas.focus();
+    await page.keyboard.press("ArrowRight");
+    const focusCandidate = await graphCanvas.evaluate((canvas) => {
+      const debugCanvas = canvas as HTMLCanvasElement & {
+        __exographGraphSnapshot?: () => { selected: number; camera: { yaw: number } };
+        __exographGraphPointForIndex?: (index: number) => { x: number; y: number; visible: boolean } | null;
+      };
+      const snapshot = debugCanvas.__exographGraphSnapshot?.();
+      const point = snapshot ? debugCanvas.__exographGraphPointForIndex?.(snapshot.selected) : null;
+      return snapshot && point ? { selected: snapshot.selected, yaw: snapshot.camera.yaw, point } : null;
+    });
+    expect(focusCandidate?.point.visible).toBe(true);
+    expect(focusCandidate?.yaw).not.toBeCloseTo(-0.42, 2);
+    await graphCanvas.dblclick({ position: focusCandidate!.point });
+    await expect.poll(async () => graphCanvas.evaluate((canvas) => {
+      return (canvas as HTMLCanvasElement & {
+        __exographGraphSnapshot?: () => { camera: { yaw: number }; moving: boolean; selected: number };
+      }).__exographGraphSnapshot?.();
+    })).toMatchObject({ camera: { yaw: -0.42 }, moving: false, selected: focusCandidate!.selected });
+    await expect(graphPane.locator(".spatial-graph__detail-title")).toHaveText("Graph Target");
+    await graphCanvas.focus();
+    const initialKeyboardSelection = await graphCanvas.evaluate((canvas) => {
+      return (canvas as HTMLCanvasElement & { __exographGraphSnapshot?: () => { selected: number } })
+        .__exographGraphSnapshot?.().selected ?? -1;
+    });
+    await page.keyboard.press("]");
+    await expect.poll(async () => graphCanvas.evaluate((canvas) => {
+      return (canvas as HTMLCanvasElement & { __exographGraphSnapshot?: () => { selected: number } })
+        .__exographGraphSnapshot?.().selected ?? -1;
+    })).not.toBe(initialKeyboardSelection);
+    await page.keyboard.press("[");
+    await expect.poll(async () => graphCanvas.evaluate((canvas) => {
+      return (canvas as HTMLCanvasElement & { __exographGraphSnapshot?: () => { selected: number } })
+        .__exographGraphSnapshot?.().selected ?? -1;
+    })).toBe(initialKeyboardSelection);
+    await page.keyboard.press("Space");
+    await expect(graphPane.locator(".spatial-graph__detail-title")).toHaveText("Graph Target");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("editor-title")).toHaveText("graph-target");
     await expect.poll(async () => graphCanvas.evaluate((canvas) => {
       return (canvas as HTMLCanvasElement & { __exographGraphSnapshot?: () => unknown }).__exographGraphSnapshot?.();
     })).toMatchObject({ pendingWork: 0, pendingFrame: false, moving: false });
@@ -344,6 +389,59 @@ test("keeps editor, full graph, and backlink-only Connections on one navigation 
       inspectedFilePath: beforeFallback!.inspectedFilePath,
     });
 
+    const canvasKeyboardSelection = await graphCanvas.evaluate((canvas) => {
+      return (canvas as HTMLCanvasElement & { __exographGraphSnapshot?: () => { selected: number } })
+        .__exographGraphSnapshot?.().selected ?? -1;
+    });
+    await graphCanvas.focus();
+    await page.keyboard.press("]");
+    await expect.poll(async () => graphCanvas.evaluate((canvas) => {
+      return (canvas as HTMLCanvasElement & { __exographGraphSnapshot?: () => { selected: number } })
+        .__exographGraphSnapshot?.().selected ?? -1;
+    })).not.toBe(canvasKeyboardSelection);
+    await page.keyboard.press("[");
+    await expect.poll(async () => graphCanvas.evaluate((canvas) => {
+      return (canvas as HTMLCanvasElement & { __exographGraphSnapshot?: () => { selected: number } })
+        .__exographGraphSnapshot?.().selected ?? -1;
+    })).toBe(canvasKeyboardSelection);
+
+    const sourceBeforeCanvasZoom = await projectedGraphNode(graphCanvas, graphSourcePath);
+    const targetBeforeCanvasZoom = await projectedGraphNode(graphCanvas, graphTargetPath);
+    const pairDistanceBeforeCanvasZoom = Math.hypot(
+      sourceBeforeCanvasZoom.x - targetBeforeCanvasZoom.x,
+      sourceBeforeCanvasZoom.y - targetBeforeCanvasZoom.y,
+    );
+    await graphCanvas.evaluate((canvas, point) => {
+      canvas.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        clientX: point.x,
+        clientY: point.y,
+        deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+        deltaY: -100,
+      }));
+    }, zoomPoint);
+    const sourceAfterCanvasZoom = await projectedGraphNode(graphCanvas, graphSourcePath);
+    const targetAfterCanvasZoom = await projectedGraphNode(graphCanvas, graphTargetPath);
+    expect(Math.hypot(
+      sourceAfterCanvasZoom.x - targetAfterCanvasZoom.x,
+      sourceAfterCanvasZoom.y - targetAfterCanvasZoom.y,
+    )).toBeGreaterThan(pairDistanceBeforeCanvasZoom * 1.05);
+
+    await page.mouse.move(zoomPoint.x, zoomPoint.y);
+    await page.mouse.down({ button: "right" });
+    await page.mouse.move(zoomPoint.x + 28, zoomPoint.y + 20, { steps: 4 });
+    await page.mouse.up({ button: "right" });
+    const sourceAfterCanvasPan = await projectedGraphNode(graphCanvas, graphSourcePath);
+    expect(sourceAfterCanvasPan.x).toBeGreaterThan(sourceAfterCanvasZoom.x + 20);
+    expect(sourceAfterCanvasPan.y).toBeGreaterThan(sourceAfterCanvasZoom.y + 14);
+    expect(sourceAfterCanvasPan.picked).toBe(sourceAfterCanvasPan.index);
+    expect(await graphCanvas.evaluate((canvas) => {
+      return (canvas as HTMLCanvasElement & {
+        __exographGraphSnapshot?: () => { selected: number; rendererKind: string | null };
+      }).__exographGraphSnapshot?.() ?? null;
+    })).toMatchObject({ selected: beforeFallback!.selected, rendererKind: "canvas2d" });
+
     const initialNodeCount = Number.parseInt((await graphPane.locator(".spatial-graph__count").textContent()) ?? "0", 10);
     await writeFile(path.join(workspaceRoot, "notes/test-notes/graph-live.md"), "# Graph Live\n\n[[graph-target]]\n", "utf8");
     await expect.poll(async () => Number.parseInt((await graphPane.locator(".spatial-graph__count").textContent()) ?? "0", 10))
@@ -389,7 +487,7 @@ test("keeps editor, full graph, and backlink-only Connections on one navigation 
       }).__exographGraphSnapshot?.();
     })).toMatchObject({
       graphReturnPath: path.join(workspaceRoot, "notes/test-notes/graph-source.md"),
-      inspectedFilePath: path.join(workspaceRoot, "notes/test-notes/graph-target.md"),
+      inspectedFilePath: path.join(workspaceRoot, "notes/test-notes/graph-source.md"),
     });
     await graphCanvas.focus();
     await page.keyboard.press("Escape");
@@ -460,6 +558,7 @@ test("keeps editor, full graph, and backlink-only Connections on one navigation 
       graphPane.locator(".spatial-graph__detail-title"),
       "Graph Unopened",
       path.join(workspaceRoot, "notes/test-notes/graph-unopened.md"),
+      path.join(workspaceRoot, "notes/test-notes/graph-source.md"),
     );
     await expect(page.getByTestId("editor-title")).toHaveText("graph-source");
     await page.mouse.dblclick(unopenedPoint.x, unopenedPoint.y);
@@ -484,39 +583,25 @@ test("keeps editor, full graph, and backlink-only Connections on one navigation 
     await expect(page.getByTestId("editor-title")).toHaveText("graph-target");
     await expect(graphPane.locator(".spatial-graph__detail-title")).toHaveText("Graph Target");
 
-    await page.getByTestId("utility-pane-toggle").click();
-    await page.getByTestId("utility-pane-connections").click();
+    await page.getByTestId("utility-pane-context").click();
     await page.getByTestId("connections-tab-outline").click();
     await expect(page.getByTestId("connections-panel-outline")).toContainText("Graph Target");
     await page.getByTestId("connections-tab-links").click();
     await expect(page.getByTestId("connections-panel-links").getByRole("button", { name: "Graph Source" })).toBeVisible();
-    await page.getByTestId("connections-tab-graph").click();
-    const localGraph = page.getByTestId("connections-panel-graph");
-    await expect(localGraph.getByTestId("graph-neighborhood-panel")).toBeVisible();
-    const localCanvas = localGraph.getByTestId("graph-neighborhood-canvas");
-    await expect(localCanvas).toBeVisible();
-    await expect.poll(() => localCanvas.evaluate((element) => {
-      const canvas = element as HTMLCanvasElement;
-      const context = canvas.getContext("2d");
-      if (!context || canvas.width === 0 || canvas.height === 0) return 0;
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-      let visible = 0;
-      for (let index = 3; index < pixels.length; index += 4) visible += Number((pixels[index] ?? 0) > 0);
-      return visible;
-    })).toBeGreaterThan(0);
-    await expect(localGraph).toContainText("1 edges");
-    await localGraph.getByRole("button", { name: "Open full graph" }).click();
+    await expect(page.getByTestId("connections-tab-graph")).toHaveCount(0);
+    await page.getByTestId("utility-pane-graph").click();
     await expect(graphPane.locator(".spatial-graph__detail-title")).toHaveText("Graph Target");
 
     await graphPane.getByRole("button", { name: "Close graph" }).click();
-    await expect(graphPane).toHaveCount(0);
+    await expect(graphPane).not.toBeVisible();
+    await expect(page.getByTestId("utility-pane-toggle")).toHaveAttribute("aria-pressed", "false");
     await expect(page.getByTestId("editor-title")).toHaveText("graph-target");
   } finally {
     await cleanup();
   }
 });
 
-test("preserves Graph Target detail when Connections opens the full Graph", async () => {
+test("opens the production Graph utility focused on the active Note", async () => {
   const { page, cleanup } = await launchExographWorkspaceFixture({
     mutable: true,
     initialNoteLabel: "graph-target",
@@ -529,15 +614,59 @@ test("preserves Graph Target detail when Connections opens the full Graph", asyn
 
   try {
     await page.getByTestId("utility-pane-toggle").click();
-    await page.getByTestId("utility-pane-connections").click();
-    await page.getByTestId("connections-tab-graph").click();
-    const localGraph = page.getByTestId("connections-panel-graph");
-    await expect(localGraph.getByTestId("graph-neighborhood-panel")).toBeVisible();
-    await localGraph.getByRole("button", { name: "Open full graph" }).click();
+    await page.getByTestId("utility-pane-graph").click();
 
     const graphPane = page.getByTestId("graph-pane");
     await expect(graphPane).toBeVisible();
     await expect(graphPane.locator(".spatial-graph__detail-title")).toHaveText("Graph Target");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("distinguishes ambiguous references from openable Notes", async () => {
+  const { page, workspaceRoot, cleanup } = await launchExographWorkspaceFixture({
+    mutable: true,
+    initialNoteLabel: "ambiguous-source",
+    prepareWorkspace: async (workspaceRoot) => {
+      const notes = path.join(workspaceRoot, "notes/test-notes");
+      await mkdir(path.join(notes, "one"), { recursive: true });
+      await mkdir(path.join(notes, "two"), { recursive: true });
+      await writeFile(path.join(notes, "ambiguous-source.md"), "# Ambiguous Source\n\n[[duplicate]]\n", "utf8");
+      await writeFile(path.join(notes, "one/duplicate.md"), "# First Duplicate\n", "utf8");
+      await writeFile(path.join(notes, "two/duplicate.md"), "# Second Duplicate\n", "utf8");
+    },
+  });
+
+  try {
+    await page.getByTestId("utility-pane-toggle").click();
+    await page.getByTestId("utility-pane-graph").click();
+    const graphPane = page.getByTestId("graph-pane");
+    const graphCanvas = graphPane.locator('canvas[aria-label="Interactive knowledge graph"]');
+    await expect(graphPane.locator(".spatial-graph__viewport")).toHaveAttribute("data-scene-ready", "true");
+    const ambiguous = await graphCanvas.evaluate(async (canvas) => {
+      const debug = canvas as HTMLCanvasElement & {
+        __exographGraphSnapshot?: () => { sourceSnapshotId: string | null } | null;
+        __exographGraphPointForIndex?: (index: number) => { x: number; y: number; visible: boolean } | null;
+      };
+      const sourceSnapshotId = debug.__exographGraphSnapshot?.()?.sourceSnapshotId;
+      if (!sourceSnapshotId) return null;
+      const count = Number.parseInt(document.querySelector(".spatial-graph__count")?.textContent ?? "0", 10);
+      const result = await window.exograph.notes.getGraphConceptSummaries(
+        Array.from({ length: count }, (_, index) => index),
+        sourceSnapshotId,
+      );
+      const summary = result.summaries.find((candidate) => candidate.label === "duplicate" && !candidate.filePath);
+      if (!summary) return null;
+      const point = debug.__exographGraphPointForIndex?.(summary.index) ?? null;
+      return point ? { ...point, index: summary.index } : null;
+    });
+    expect(ambiguous).not.toBeNull();
+    await graphCanvas.click({ position: ambiguous! });
+    await expect(graphPane.locator(".spatial-graph__detail-title--reference")).toHaveText("duplicate");
+    await expect(graphPane.locator(".spatial-graph__detail-meta")).toContainText("Ambiguous reference");
+    await graphCanvas.dblclick({ position: ambiguous! });
+    await expect(page.getByTestId("editor-title")).toHaveText("ambiguous-source");
   } finally {
     await cleanup();
   }
@@ -705,7 +834,7 @@ test("creates, renames, and deletes notes from the explorer", async () => {
   await cleanup();
 });
 
-test("handles global save and daily-note keybindings", async () => {
+test("handles global save, new-note, daily-note, and collision-safe creation keybindings", async () => {
   const { page, workspaceRoot, cleanup } = await launchExographWorkspaceFixture({ mutable: true });
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   const focusNotePath = path.join(workspaceRoot, "notes/test-notes/focus-note.md");
@@ -731,6 +860,13 @@ test("handles global save and daily-note keybindings", async () => {
   await expect.poll(async () => readFile(focusNotePath, "utf8")).toContain("Saved with keybinding.");
 
   await page.keyboard.press(`${modifier}+N`);
+  await expect(page.getByTestId("editor-title")).toHaveText("untitled");
+  await expect.poll(async () => readFile(path.join(workspaceRoot, "notes/test-notes", "untitled.md"), "utf8")).toMatch(initialMarkdownNotePattern);
+  await page.keyboard.press(`${modifier}+N`);
+  await expect(page.getByTestId("editor-title")).toHaveText("untitled-2");
+  await expect.poll(async () => readFile(path.join(workspaceRoot, "notes/test-notes", "untitled-2.md"), "utf8")).toMatch(initialMarkdownNotePattern);
+
+  await page.keyboard.press(`${modifier}+Shift+N`);
   await expect(page.getByTestId("editor-title")).toHaveText(dailyName);
   await expect.poll(async () => readFile(path.join(workspaceRoot, "notes/test-notes", `${dailyName}.md`), "utf8")).toMatch(initialMarkdownNotePattern);
   await expect.poll(() => page.evaluate(() => {
@@ -861,7 +997,7 @@ test("shows terminals created outside renderer controls", async () => {
 
   const initialTabs = await page.getByTestId("terminal-tab-shell").count();
   await page.evaluate(async () => {
-    await window.exograph.terminals.create({ kind: "shell" });
+    await window.exograph.terminals.create({ terminalKind: "shell" });
   });
 
   await expect(page.getByTestId("terminal-tab-shell")).toHaveCount(initialTabs + 1);
@@ -905,7 +1041,7 @@ test("accepts terminal keyboard input", async () => {
 
   await page.getByTestId("editor-panel").click();
   await page.getByTestId("terminal-surface").click();
-  await page.keyboard.type("after editor");
+  await page.keyboard.type(" after editor");
   await expect(page.getByTestId("terminal-surface")).toContainText("hello exograph after editor");
 
   await cleanup();
@@ -993,7 +1129,7 @@ test("keeps terminal input latency within targets while another terminal streams
     await waitForTerminalInputEnabled(page);
     await page.keyboard.type("cat\n");
     await page.evaluate(async () => {
-      const streamingShell = await window.exograph.terminals.create({ kind: "shell" });
+      const streamingShell = await window.exograph.terminals.create({ terminalKind: "shell" });
       await window.exograph.terminals.write(
         streamingShell.id,
         "i=1; while [ $i -le 260 ]; do printf 'stream-latency-%03d\\n' \"$i\"; i=$((i+1)); sleep 0.01; done\n",
@@ -1175,7 +1311,7 @@ test("lets you close editor tabs", async () => {
   const { page, cleanup } = await launchExographWorkspaceFixture();
 
   await page.getByTestId("utility-pane-toggle").click();
-  await page.getByTestId("utility-pane-connections").click();
+  await page.getByTestId("utility-pane-context").click();
   await page.getByTestId("connections-tab-links").click();
   await page.getByTestId("connections-panel-links").getByRole("button", { name: "Related Note" }).first().click();
   await expect(page.getByTestId("editor-title")).toHaveText("related-note");
@@ -1189,18 +1325,51 @@ test("renders inspector content when expanded", async () => {
   const { page, cleanup } = await launchExographWorkspaceFixture();
 
   await page.getByTestId("utility-pane-toggle").click();
-  await page.getByTestId("utility-pane-connections").click();
+  await page.getByTestId("utility-pane-context").click();
 
-  await expect(page.getByTestId("inspector-panel")).toContainText("Connections");
+  await expect(page.getByTestId("inspector-panel")).toContainText("Note context");
   await expect(page.getByTestId("connections-tab-activity")).toHaveCount(0);
   await page.getByTestId("connections-tab-links").click();
   await expect(page.getByTestId("connections-panel-links")).toContainText(/Related Note|agent-memory|research/);
-  await page.getByTestId("connections-tab-graph").click();
-  await expect(page.getByTestId("graph-neighborhood-panel")).toContainText("Neighborhood");
-  await expect(page.getByTestId("graph-neighborhood-panel")).toContainText("Agent Memory");
-  await expect(page.getByTestId("graph-neighborhood-panel")).toContainText("Related Note");
+  await expect(page.getByTestId("connections-tab-graph")).toHaveCount(0);
+  await page.getByTestId("utility-pane-graph").click();
+  await expect(page.getByTestId("graph-pane")).toBeVisible();
 
   await cleanup();
+});
+
+test("opens an Outline heading at its exact editor line", async () => {
+  const { page, cleanup } = await launchExographWorkspaceFixture({
+    mutable: true,
+    initialNoteLabel: "outline-note",
+    prepareWorkspace: async (workspaceRoot) => {
+      const filler = Array.from({ length: 60 }, (_, index) => `Paragraph ${index + 1}`).join("\n\n");
+      await writeFile(
+        path.join(workspaceRoot, "notes/test-notes/outline-note.md"),
+        `# Outline Note\n\n## Repeated\n\nFirst section.\n\n${filler}\n\n## Repeated\n\nSecond section.\n`,
+        "utf8",
+      );
+    },
+  });
+
+  try {
+    await page.getByTestId("utility-pane-toggle").click();
+    await page.getByTestId("utility-pane-context").click();
+    const repeated = page.getByTestId("outline-panel").getByRole("button", { name: "Repeated" });
+    await expect(repeated).toHaveCount(2);
+    await repeated.nth(1).click();
+
+    await expect.poll(async () => page.evaluate(() => {
+      const content = document.querySelector(".cm-content") as (HTMLElement & { cmView?: { view?: any } }) | null;
+      const view = content?.cmView?.view;
+      if (!view) return null;
+      const line = view.state.doc.lineAt(view.state.selection.main.head);
+      return { text: line.text, line: line.number, focused: view.hasFocus, scrollTop: view.scrollDOM.scrollTop };
+    })).toMatchObject({ text: "## Repeated", line: 127, focused: true });
+    expect(await page.locator(".cm-scroller").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  } finally {
+    await cleanup();
+  }
 });
 
 test("opens workspace settings from the workspace menu", async () => {
@@ -1961,7 +2130,7 @@ test("keeps the inspector pinned while long notes scroll", async () => {
   });
 
   await longFixture.page.getByTestId("utility-pane-toggle").click();
-  await longFixture.page.getByTestId("utility-pane-connections").click();
+  await longFixture.page.getByTestId("utility-pane-context").click();
   const before = await longFixture.page.getByTestId("inspector-panel").boundingBox();
   await longFixture.page.locator(".editor-surface .cm-scroller").evaluate((element) => {
     element.scrollTop = element.scrollHeight;

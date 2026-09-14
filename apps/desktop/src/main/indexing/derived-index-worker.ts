@@ -69,6 +69,8 @@ function run(request: DerivedIndexRequest): Promise<DerivedIndexResult> {
       return qmdSearchProvider.embed(model, runtimeRoot, request.options);
     case "sync":
       return index.rebuild();
+    case "graph-traverse":
+      return graphFor(model, runtimeRoot).traverse(request.request);
     case "graph-context":
       return graphFor(model, runtimeRoot).contextForNote(request.filePath);
     case "graph-topology":
@@ -125,7 +127,7 @@ function isRequest(value: unknown): value is DerivedIndexRequest {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<DerivedIndexRequest>;
   const common = Number.isSafeInteger(candidate.id)
-    && ["status", "search", "update", "embed", "sync", "graph-context", "graph-topology", "graph-concept-summaries", "graph-concept-lookup", "graph-concept-detail-by-index", "graph-refresh", "graph-invalidate", "ontology-preview", "ontology-keep", "ontology-reject"].includes(String(candidate.operation))
+    && ["graph-traverse", "status", "search", "update", "embed", "sync", "graph-context", "graph-topology", "graph-concept-summaries", "graph-concept-lookup", "graph-concept-detail-by-index", "graph-refresh", "graph-invalidate", "ontology-preview", "ontology-keep", "ontology-reject"].includes(String(candidate.operation))
     && Boolean(candidate.context?.model)
     && typeof candidate.context?.runtimeRoot === "string";
   if (!common) return false;

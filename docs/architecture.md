@@ -1,8 +1,9 @@
 # Architecture
 
-Exograph is a local Electron application over user-owned Markdown. This document is
-the technical map for contributors: follow the boundaries below rather than
-adding convenience paths around them.
+Exograph is a local Electron application that gives people and agents two
+interfaces over the same user-owned Markdown, graph, Ontology, and Search
+contracts. This document is the technical map for contributors: follow the
+boundaries below rather than adding convenience paths around them.
 
 ## Read in this order
 
@@ -21,8 +22,9 @@ Markdown + frontmatter in a selected Note Root
   → format projection
   → WorkspaceGraph knowledge snapshot
   → optional reviewed ontology interpretation
-  → Connections / compact graph topology
-  → WebGPU or Canvas presentation
+  → derived views
+      ├─ bounded Note-context reads
+      └─ compact graph topology → WebGPU or Canvas Graph
 ```
 
 Markdown is canonical. `.exograph/` holds local, rebuildable state: indexes,
@@ -76,10 +78,11 @@ domain logic.
 | --- | --- | --- |
 | `WorkspaceConfigStore` | canonical settings, workspace registry, revisioned atomic writes, unknown-key preservation, unsupported-format rejection | live runtime activation |
 | `WorkspaceRuntimeCoordinator` | swaps expensive workspace authority when roots change | unrelated appearance/layout saves |
+| `DocumentPersistence` + `useOpenDocuments` | exact-byte read revisions, guarded editor saves and exclusive copies; dirty buffers and explicit conflict resolution | filesystem authorization, invocation journals or crash recovery |
 | `WorkspaceFiles` | canonical paths, Note Root containment, symlink policy, watchers | graph/search interpretation |
 | `WorkspaceGraph` | graph snapshots, evidence, backlinks, ontology review and local context | rendering or direct UI state |
 | `WorkspaceIndex` | provider selection, search health, sync, honest degradation | Note/graph identity |
-| `OntologyDiscoveryCoordinator` | one serialized discovery transaction: trusted Command selection, frozen graph/Ontology identity, provider execution, validation, Candidate staging, and notification | renderer state or direct Markdown mutation |
+| `OntologyDiscoveryCoordinator` | one serialized discovery transaction: explicit default-Command validation, frozen graph/Ontology identity, provider execution, validation, Candidate staging, and notification | renderer state, silent provider fallback, or direct Markdown mutation |
 | `useWorkspaceBootstrap` + `OnboardingFlow` | one renderer setup model and its dedicated UI, including persisted resume/recovery and local CLI/MCP feedback | a second onboarding state machine or runtime activation authority |
 | `TerminalManager` | direct PTY lifecycle and bounded reload tail | provider-specific agent semantics |
 | `InvocationRunner` | command trust, process ownership, changesets, review, recovery | renderer UI decisions |
@@ -91,6 +94,27 @@ invariant. Add a new abstraction only after two concrete call sites prove the
 same contract.
 
 ## Critical boundaries
+
+### Editor saves and external writers
+
+Desktop Note reads return a SHA-256 revision of the exact bytes parsed. Every
+editor save supplies that revision. `DocumentPersistence` serializes editor
+saves by canonical path and compares current bytes before writing through an
+existing file handle. A missing file is never recreated by autosave. A mismatch
+returns a typed conflict; the renderer retains the latest dirty buffer and
+pauses autosave until the person saves an exclusive copy or explicitly discards
+local edits and reloads the current file. A late conflict reopens its editor.
+Normal quit, reload, Workspace activation and root-authority changes flush while
+editing is frozen, and stop if any buffer cannot save.
+
+External tools and invocation writers do not participate in the editor save
+queue. Revision checking detects observed changes; it is not atomic filesystem
+compare-and-swap against an uncooperative writer. A path check after writing
+also catches an observed replacement of the open file. There remains a race
+with outside writes during or immediately after the check/write sequence.
+Buffers and conflicts remain in renderer memory: renderer crashes, force-kill,
+power loss and failed partial filesystem writes have no new recovery guarantee.
+This boundary creates no recovery store or invocation journal entries.
 
 ### Workspace and filesystem authority
 
@@ -144,7 +168,7 @@ validation; only the inline path has document context and in-note review.
 There is one production terminal runtime: xterm over direct `node-pty`. App
 exit ends PTYs. A bounded in-memory tail helps renderer reload but is not a
 durable transcript or terminal-restoration system. See
-[`terminal-runtime-decision.md`](terminal-runtime-decision.md).
+[`ADR 0009`](adr/0009-direct-pty-terminal-runtime.md).
 
 ## Testing and change discipline
 
@@ -159,5 +183,11 @@ prove preload IPC. Graph renderer work additionally uses
 [`../evals/graph/README.md`](../evals/graph/README.md). Public command-server
 routes, CLI flags, preload types, and shared protocol types are contracts:
 change their focused tests and docs in the same patch.
+
+The renderer authority ratchet
+[`renderer-authority-boundary.test.ts`](../apps/desktop/src/renderer/src/renderer-authority-boundary.test.ts)
+mechanically rejects production renderer imports of Node, Electron, Electron
+main, or preload implementations. Renderer features cross the typed shared/preload
+interface instead of widening their own authority.
 
 For persisted state ownership and recovery, read [`durable-state.md`](durable-state.md).

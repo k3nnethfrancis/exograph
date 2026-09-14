@@ -140,7 +140,7 @@ async function waitForCompleteGeometryFrame(page: Page, options: { minCols: numb
     await page.waitForTimeout(50);
   }
 
-  const sourceTail = await page.evaluate(async (id) => window.exograph.terminals.read(id, { maxChars: 8_000 }), terminalId).catch((error) => String(error));
+  const sourceTail = await page.evaluate(async (id) => window.exograph.terminals.read(id, { maxLines: 200 }), terminalId).catch((error) => String(error));
   throw new Error(`Timed out waiting for complete geometry frame:\n${JSON.stringify(lastFrame, null, 2)}\nsourceTail:\n${sourceTail}`);
 }
 

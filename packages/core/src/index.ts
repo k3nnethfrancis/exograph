@@ -7,6 +7,7 @@ export * from "./folder-index";
 export * from "./workspace-settings";
 export * from "./terminal-settings";
 export * from "./notes";
+export * from "./document-persistence";
 export * from "./onboarding-state";
 export * from "./knowledge-graph";
 export { NOTE_ROOT_FORMAT_ID, type NoteRootFormatId, type NoteRootFormatStatus } from "./note-root-format";
@@ -29,3 +30,7 @@ export * from "./store-paths";
 export * from "./workspace-index";
 export * from "./search-provider";
 export * from "./command-protocol";
+
+export * from "./graph-traversal";
+
+export * from "./publication-export";

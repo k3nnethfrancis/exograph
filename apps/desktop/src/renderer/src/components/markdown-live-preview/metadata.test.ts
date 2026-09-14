@@ -1,7 +1,43 @@
 import { EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 
-import { collectListMetadata, markdownPreviewMetadata, updateListMetadataForChanges, updateMarkdownPreviewMetadataForChanges } from "./metadata";
+import { collectListMetadata, collectOutlineFoldMetadata, markdownPreviewMetadata, updateListMetadataForChanges, updateMarkdownPreviewMetadataForChanges } from "./metadata";
+
+describe("markdown live preview outline folding", () => {
+  it("groups heading content until the next heading at the same or higher level", () => {
+    const state = EditorState.create({
+      doc: ["# One", "intro", "## Child", "detail", "### Grandchild", "more", "# Two", "after"].join("\n"),
+    });
+
+    expect([...collectOutlineFoldMetadata(state.doc).entries()]).toEqual([
+      [1, { kind: "heading", startLine: 1, endLine: 6, depth: 0 }],
+      [3, { kind: "heading", startLine: 3, endLine: 6, depth: 1 }],
+      [5, { kind: "heading", startLine: 5, endLine: 6, depth: 2 }],
+      [7, { kind: "heading", startLine: 7, endLine: 8, depth: 0 }],
+    ]);
+  });
+
+  it("treats only a leading tag with indented children as a fold group", () => {
+    const state = EditorState.create({
+      doc: ["#project", "  owner: Kenneth", "  status: active", "paragraph #inline", "#empty", "next"].join("\n"),
+    });
+
+    expect([...collectOutlineFoldMetadata(state.doc).entries()]).toEqual([
+      [1, { kind: "tag", startLine: 1, endLine: 3, depth: 0 }],
+    ]);
+  });
+
+  it("keeps nested tag groups independent and stops at aligned siblings", () => {
+    const state = EditorState.create({
+      doc: ["#project", "  #phase", "    task", "  sibling", "outside"].join("\n"),
+    });
+
+    expect([...collectOutlineFoldMetadata(state.doc).entries()]).toEqual([
+      [1, { kind: "tag", startLine: 1, endLine: 4, depth: 0 }],
+      [2, { kind: "tag", startLine: 2, endLine: 3, depth: 2 }],
+    ]);
+  });
+});
 
 describe("markdown live preview metadata repair", () => {
   it("repairs list metadata locally across line joins and line-number shifts", () => {
@@ -67,5 +103,17 @@ describe("markdown live preview metadata repair", () => {
 
     expect(repaired).toEqual(markdownPreviewMetadata(transaction.newDoc));
     expect(repaired.tableContexts.get(5)?.rows).toEqual([["beta", "1"]]);
+  });
+
+  it("keeps aliased wikilinks together as one table cell", () => {
+    const state = EditorState.create({ doc: [
+      "| Task | Benchmark |",
+      "| --- | --- |",
+      "| Discovery | [[../public-benchmarks/astabench/README|AstaBench]] |",
+    ].join("\n") });
+
+    expect(markdownPreviewMetadata(state.doc).tableContexts.get(3)?.rows).toEqual([
+      ["Discovery", "[[../public-benchmarks/astabench/README|AstaBench]]"],
+    ]);
   });
 });

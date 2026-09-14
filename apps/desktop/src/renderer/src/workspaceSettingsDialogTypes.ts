@@ -1,4 +1,4 @@
-import type { AgentCommand, IndexedRoot, SearchEngine, WorkspaceContentPolicy, WorkspaceSettings, WorkspaceSettingsRevision } from "@exograph/core";
+import type { AgentCommand, IndexedRoot, SearchEngine, WorkspaceContentPolicy, WorkspaceSettings, WorkspaceSettingsRevision, WorkspaceShortcutBindings } from "@exograph/core";
 
 import type { AppearanceMode } from "./appearance";
 import type { ColorThemeId } from "./theme/types";
@@ -22,6 +22,7 @@ export function defaultIndexedRoot(path: string, index: number): IndexedRoot {
 }
 
 export interface WorkspaceSettingsDialogState {
+  publishing?: WorkspaceSettings["publishing"];
   section: WorkspaceSettingsSection;
   settingsRevision: WorkspaceSettingsRevision;
   workspaceRoot: string;
@@ -36,9 +37,14 @@ export interface WorkspaceSettingsDialogState {
   editorFontSize: string;
   terminalFontSize: string;
   explorerScale: string;
+  graphInverseNavigation: boolean;
+  graphShowOverflowLabels: boolean;
+  ontologyDiscoveryPrompt?: string;
+  shortcutBindings?: WorkspaceShortcutBindings;
   exploreIndexSearchOnEnter: boolean;
   indexUpdateStrategy: WorkspaceSettings["indexUpdateStrategy"];
   agentCommands: AgentCommand[];
+  defaultAgentCommandId?: string;
   agentInvocationPrompt?: string;
   saveStatus: "idle" | "saving" | "saved" | "error";
   errorMessage: string | null;

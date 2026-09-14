@@ -17,8 +17,11 @@ export { createDefaultClaudeAgentCommand, createDefaultCodexAgentCommand } from 
 export {
   agentCommandConfigurationError,
   DEFAULT_AGENT_COMMAND_PROMPT_DELIVERY,
+  isFeatureAgentCommand,
+  isLegacyBuiltInCodexCommand,
   normalizeAgentCommand,
   normalizeAgentCommands,
+  normalizeDefaultAgentCommandId,
   normalizeAgentHandle,
 } from "./agent-command-configuration";
 export type {
@@ -63,6 +66,7 @@ export type InvocationStatus =
 export type InvocationMentionProvenance = "human-authored" | "prior-invocation-authored" | "unknown";
 
 export interface AgentCommandSnapshot {
+  appearance?: AgentCommand["appearance"];
   id: string;
   label: string;
   handle: string;

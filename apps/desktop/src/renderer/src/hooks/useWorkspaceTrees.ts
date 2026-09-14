@@ -3,6 +3,7 @@ import type { TreeNode, WorkspaceModel } from "@exograph/core";
 
 import {
   replaceTreeChildrenInRoots,
+  mergeTreeRootsWithMaterializedBranches,
   treeDirectoryHasChildrenInRoots,
   treeLoadKey,
 } from "../workspaceTree";
@@ -21,7 +22,7 @@ export function useWorkspaceTrees(options: UseWorkspaceTreesOptions) {
     nextNoteTrees: Record<string, TreeNode[]>,
   ): void {
     excludedPathsRef.current = model.contentPolicy?.excludedPaths ?? [];
-    setNoteTrees(nextNoteTrees);
+    setNoteTrees((current) => mergeTreeRootsWithMaterializedBranches(current, nextNoteTrees));
     loadedTreeDirectoriesRef.current = loadedRootKeys(model);
   }
 
@@ -42,10 +43,20 @@ export function useWorkspaceTrees(options: UseWorkspaceTreesOptions) {
     loadedTreeDirectoriesRef.current.add(loadKey);
 
     const children = await window.exograph.workspace.listTree(directoryPath, {
-      markdownOnly: true,
+      allowedFileExtensions: [".md", ".pdf"],
       maxDepth: 1,
       excludedPaths: excludedPathsRef.current,
     });
+    setNoteTrees((current) => replaceTreeChildrenInRoots(current, directoryPath, children));
+  }
+
+  async function refreshTreeDirectory(directoryPath: string): Promise<void> {
+    const children = await window.exograph.workspace.listTree(directoryPath, {
+      allowedFileExtensions: [".md", ".pdf"],
+      maxDepth: 1,
+      excludedPaths: excludedPathsRef.current,
+    });
+    loadedTreeDirectoriesRef.current.add(treeLoadKey("notes", directoryPath));
     setNoteTrees((current) => replaceTreeChildrenInRoots(current, directoryPath, children));
   }
 
@@ -54,6 +65,7 @@ export function useWorkspaceTrees(options: UseWorkspaceTreesOptions) {
     replaceTreesForModel,
     reloadTreesForModel,
     expandTreeDirectory,
+    refreshTreeDirectory,
   };
 }
 
@@ -65,7 +77,7 @@ export async function loadInitialTrees(
     model.noteRoots.map(
       async (root) =>
         [root.path, await window.exograph.workspace.listTree(root.path, {
-          markdownOnly: true,
+          allowedFileExtensions: [".md", ".pdf"],
           maxDepth: options.noteTreeMaxDepth,
           excludedPaths: model.contentPolicy?.excludedPaths ?? [],
         })] as const,

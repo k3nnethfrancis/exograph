@@ -4,11 +4,27 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
-import { repositoryWorkspaceContentPolicy, type WorkspaceModel } from "@exograph/core";
+import { repositoryWorkspaceContentPolicy, type GraphTraversalResult, type WorkspaceModel } from "@exograph/core";
 import type { DerivedIndexClient } from "../indexing/derived-index-process";
 import { WorkspaceNotesService } from "./workspace-notes-service";
 
 describe("WorkspaceNotesService", () => {
+  it("rejects traversal outside the active scope and discards late worker results after switching", async () => {
+    const model = workspaceModel("/workspace", "/workspace/notes");
+    const held = deferred<GraphTraversalResult>();
+    let signal: AbortSignal | undefined;
+    const graphTraverse = vi.fn((_model, _runtime, _request, activeSignal) => { signal = activeSignal; return held.promise; });
+    const service = new WorkspaceNotesService({ getWorkspaceModel: () => model, getRuntimeRoot: () => "/runtime", derivedIndex: { graphTraverse } as unknown as DerivedIndexClient });
+    await expect(service.traverseGraph({ workspaceRoot: "/other", start: "a" })).rejects.toThrow();
+    expect(graphTraverse).not.toHaveBeenCalled();
+    const result = service.traverseGraph({ workspaceRoot: "/workspace", start: "a" });
+    const rejection = expect(result).rejects.toThrow();
+    service.activateWorkspace({ model: workspaceModel("/other", "/other/notes"), runtimeRoot: "/other-runtime", generation: 1 });
+    expect(signal?.aborted).toBe(true);
+    held.resolve({ schemaVersion: "exograph.graph-traversal.v1", workspace: { root: "/workspace", noteRootIds: [] }, snapshotId: "s", status: "error", code: "missing-start", message: "Missing" });
+    await rejection;
+  });
+
   it("authorizes only existing files inside the active wiki for operator opens", async () => {
     const { service, noteRoot } = await workspaceNotesService();
     const notePath = path.join(noteRoot, "opened.md");
@@ -19,6 +35,15 @@ describe("WorkspaceNotesService", () => {
     await expect(service.authorizeOpenFile(notePath)).resolves.toBe(notePath);
     await expect(service.authorizeOpenFile(outsidePath)).rejects.toThrow("outside configured note roots");
     await expect(service.authorizeOpenFile(noteRoot)).rejects.toThrow("only open an existing file");
+  });
+
+  it("authorizes exact existing folders for operator reveal without weakening file-only opens", async () => {
+    const { service, noteRoot } = await workspaceNotesService();
+    const folderPath = path.join(noteRoot, "project");
+    await mkdir(folderPath);
+
+    await expect(service.authorizeOpenPath(folderPath)).resolves.toEqual({ path: folderPath, kind: "directory" });
+    await expect(service.authorizeOpenFile(folderPath)).rejects.toThrow("only open an existing file");
   });
 
   it("searches body and frontmatter tags across note roots", async () => {
@@ -92,6 +117,29 @@ describe("WorkspaceNotesService", () => {
     await expect(service.resolveTarget(sourcePath, "target")).resolves.toBe(relativeTarget);
     await expect(service.resolveTarget(sourcePath, "elsewhere")).resolves.toBe(basenameTarget);
     await expect(service.resolveTarget(sourcePath, "https://example.com")).resolves.toBeNull();
+  });
+
+  it("resolves an existing in-root PDF exactly without creating a Markdown target", async () => {
+    const { service, noteRoot } = await workspaceNotesService();
+    const sourcePath = path.join(noteRoot, "folder", "source.md");
+    const pdfPath = path.join(noteRoot, "folder", "report.pdf");
+    await writeFile(sourcePath, "# Source\n\n[[report.pdf]]\n", "utf8");
+    await writeFile(pdfPath, "%PDF-1.4\nfixture", "utf8");
+
+    await expect(service.resolveTarget(sourcePath, "report.pdf")).resolves.toBe(pdfPath);
+    await expect(service.ensureTarget(sourcePath, "report.pdf")).resolves.toBe(pdfPath);
+    await expect(access(path.join(noteRoot, "folder", "report.pdf.md"))).rejects.toThrow();
+  });
+
+  it("never creates a missing PDF link target", async () => {
+    const { service, noteRoot } = await workspaceNotesService();
+    const sourcePath = path.join(noteRoot, "folder", "source.md");
+    const missingPdf = path.join(noteRoot, "folder", "missing.pdf");
+    await writeFile(sourcePath, "# Source\n\n[[missing.pdf]]\n", "utf8");
+
+    await expect(service.ensureTarget(sourcePath, "missing.pdf")).rejects.toThrow("must be an existing file");
+    await expect(access(missingPdf)).rejects.toThrow();
+    await expect(access(`${missingPdf}.md`)).rejects.toThrow();
   });
 
   it("creates missing wiki targets next to the source note by default", async () => {
@@ -258,6 +306,56 @@ describe("WorkspaceNotesService", () => {
     const suggestions = await service.suggestTargets(sourcePath, "agent");
 
     expect(suggestions.map((suggestion) => suggestion.target)).toEqual(["agent", "agent-notes"]);
+  });
+
+  it("suggests one source-relative target without duplicating the Note Root", async () => {
+    const { service, noteRoot } = await workspaceNotesService();
+    const sourcePath = path.join(noteRoot, "folder", "source.md");
+    const targetPath = path.join(noteRoot, "some-item.md");
+    await writeFile(sourcePath, "# Source\n", "utf8");
+    await writeFile(targetPath, "# Some Item\n", "utf8");
+
+    const [suggestion] = await service.suggestTargets(sourcePath, "some");
+
+    expect(suggestion).toMatchObject({
+      filePath: targetPath,
+      title: "some-item",
+      target: "../some-item",
+      snippet: "some-item",
+    });
+    expect(suggestion?.target).not.toMatch(/\/\//);
+    await expect(service.resolveTarget(sourcePath, suggestion!.target)).resolves.toBe(targetPath);
+  });
+
+  it("keeps cross-Root suggestions resolvable from the source Note", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "exograph-cross-root-suggestion-"));
+    const sourceRoot = path.join(workspaceRoot, "source-notes");
+    const targetRoot = path.join(workspaceRoot, "research-notes");
+    await mkdir(path.join(sourceRoot, "nested"), { recursive: true });
+    await mkdir(targetRoot, { recursive: true });
+    const sourcePath = path.join(sourceRoot, "nested", "source.md");
+    const targetPath = path.join(targetRoot, "finding.md");
+    await writeFile(sourcePath, "# Source\n", "utf8");
+    await writeFile(targetPath, "# Finding\n", "utf8");
+    const model: WorkspaceModel = {
+      workspaceRoot,
+      defaultTerminalCwd: workspaceRoot,
+      noteRoots: [
+        { id: "source", label: "Source", path: sourceRoot },
+        { id: "research", label: "Research", path: targetRoot },
+      ],
+      indexedRoots: [],
+      indexing: { enabled: false, mode: "off", backend: "qmd" },
+    };
+    const service = new WorkspaceNotesService({ getWorkspaceModel: () => model });
+
+    try {
+      const [suggestion] = await service.suggestTargets(sourcePath, "finding");
+      expect(suggestion?.target).toBe("../../research-notes/finding");
+      await expect(service.resolveTarget(sourcePath, suggestion!.target)).resolves.toBe(targetPath);
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 
   it("reads folder overviews without creating an index and hides index.md from children", async () => {

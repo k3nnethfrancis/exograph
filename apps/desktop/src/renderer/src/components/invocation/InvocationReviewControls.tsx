@@ -60,6 +60,7 @@ export interface InvocationReviewControlsProps {
   onOpenConflict?: (item: InvocationReviewItemProjection, index: number) => void;
   onKeepConflict?: (item: InvocationReviewItemProjection, index: number) => void;
   onDismiss?: () => void;
+  onResume?: () => void;
 }
 
 export function InvocationReviewControls({
@@ -75,6 +76,7 @@ export function InvocationReviewControls({
   onOpenConflict,
   onKeepConflict,
   onDismiss,
+  onResume,
 }: InvocationReviewControlsProps) {
   if (queue.items.length === 0) return null;
 
@@ -117,7 +119,7 @@ export function InvocationReviewControls({
             {reviewPathSummary(item)}
           </span>
         </div>
-        {multiple || onDismiss ? (
+        {multiple || onDismiss || onResume ? (
           <div className="invocation-review-controls__navigation">
             {multiple ? (
               <nav aria-label="Review files">
@@ -137,6 +139,7 @@ export function InvocationReviewControls({
                 </IconAction>
               </nav>
             ) : null}
+            {onResume ? <IconAction label="Open agent session" onClick={onResume}><ArrowUpRight size={14} /></IconAction> : null}
             {onDismiss ? <IconAction label="Close review" onClick={onDismiss}><X size={14} /></IconAction> : null}
           </div>
         ) : null}
@@ -238,7 +241,7 @@ function ConflictActions({
     <div className="invocation-review-controls__conflict">
       <ShieldAlert aria-hidden="true" size={15} />
       <p>
-        <strong>Review changed</strong>
+        <strong>File changed</strong>
         <span>{conflict}</span>
       </p>
       <div aria-label="Conflict actions" role="group">
@@ -338,7 +341,7 @@ function reviewPathSummary(item: InvocationReviewItemProjection): string {
   if (item.operation === "renamed" && item.previousPath) {
     return `${fileName(item.previousPath)} → ${fileName(item.path)}`;
   }
-  return item.path;
+  return fileName(item.path);
 }
 
 function reviewPathTitle(item: InvocationReviewItemProjection): string {

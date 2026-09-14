@@ -78,6 +78,7 @@ function state(): OnboardingState {
     exploreIndexSearchOnEnter: true,
     indexUpdateStrategy: "manual",
     agentCommands: [createDefaultClaudeAgentCommand(), createDefaultCodexAgentCommand()],
+    defaultAgentCommandId: "codex",
     agentInvocationPrompt: "Use {{message}} for {{working_note}}.",
     selectedMcpProviders: ["claude", "codex"],
     status: "idle",

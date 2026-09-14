@@ -50,6 +50,7 @@ use `window.exograph` through preload/shared API types.
 pnpm --filter @exograph/desktop exec vitest run src/renderer/src/hooks/useCanvasDocumentNavigation.test.ts
 pnpm --filter @exograph/desktop exec vitest run src/renderer/src/hooks/useInvocationReviewController.test.ts src/renderer/src/invocationReviewQueue.test.ts
 pnpm --filter @exograph/desktop exec vitest run src/renderer/src/components/markdown-live-preview/index.test.ts
+pnpm --filter @exograph/desktop exec vitest run src/renderer/src/renderer-authority-boundary.test.ts
 pnpm --filter @exograph/desktop exec playwright test tests/e2e/markdown-rules.spec.ts
 pnpm --filter @exograph/desktop typecheck
 ```

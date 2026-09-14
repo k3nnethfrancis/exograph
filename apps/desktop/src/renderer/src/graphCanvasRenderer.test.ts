@@ -18,7 +18,7 @@ describe("Canvas graph renderer", () => {
     renderer.resize({ width: 320, height: 180, dpr: 2.5 });
     const measurement = renderer.render(plan());
 
-    expect(canvas).toMatchObject({ width: 800, height: 450, style: { width: "320px", height: "180px" } });
+    expect(canvas).toMatchObject({ width: 800, height: 450, style: { width: "", height: "" } });
     expect(context.calls[0]).toEqual(["setTransform", 2.5, 0, 0, 2.5, 0, 0]);
     expect(context.count("quadraticCurveTo")).toBe(1);
     expect(context.count("arc")).toBe(3);

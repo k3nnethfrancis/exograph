@@ -23,6 +23,13 @@ function composer(overrides: Partial<ComposerState> = {}): ComposerState {
 }
 
 describe("inline agent affordance", () => {
+  it("replaces an open composer widget after appearance changes", () => {
+    const first = new InlineAgentAffordanceWidget(composer(), { color: "#112233" });
+    const changed = new InlineAgentAffordanceWidget(composer(), { color: "#445566" });
+    expect(first.eq(changed)).toBe(false);
+    expect(first.eq(new InlineAgentAffordanceWidget(composer(), { color: "#112233" }))).toBe(true);
+    expect(first.eq(new InlineAgentAffordanceWidget(composer()))).toBe(false);
+  });
   it("builds a prefilled Skill request as ordinary inline composer text", () => {
     expect(inlineAgentComposerInsertion({
       handle: "claude",

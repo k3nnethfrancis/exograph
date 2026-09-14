@@ -6,18 +6,8 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0"
     />
-    <script>
-      (() => {
-        const mode = "system";
-        const resolved = mode === "system"
-          ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-          : mode;
-        document.documentElement.dataset.appearanceMode = mode;
-        document.documentElement.dataset.theme = resolved;
-        document.documentElement.dataset.colorTheme = "exograph-neutral";
-        document.documentElement.style.colorScheme = resolved;
-      })();
-    </script>
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self'" />
+    <script type="module" src="./src/theme-bootstrap.ts"></script>
     <title>Exograph</title>
   </head>
   <body>

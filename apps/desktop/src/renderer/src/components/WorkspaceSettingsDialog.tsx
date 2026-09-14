@@ -1,19 +1,26 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
-import { Bot, FolderOpen, Palette, Search, TerminalSquare, X } from "lucide-react";
+import "./settingsSearch.css";
+import { useEffect, useId, useRef, useState, type ComponentType, type Dispatch, type SetStateAction } from "react";
+import { Bot, Globe, FolderOpen, Keyboard, Palette, Search, TerminalSquare, X } from "lucide-react";
 import type { AgentCommand, IndexStatus, WorkspaceSettings } from "@exograph/core";
+import { normalizeDefaultAgentCommandId } from "@exograph/core/agent-command-configuration";
 import { defaultWorkspaceContentPolicy, repositoryWorkspaceContentPolicy } from "@exograph/core/workspace-content-policy";
 import type { AgentCommandContinuityStatus } from "../../../shared/api";
 
+import { useSettingsDialogFocus } from "../hooks/useSettingsDialogFocus";
 import type { AppearanceMode } from "../appearance";
 import { THEME_FAMILIES, normalizeColorThemeId } from "../theme/registry";
 import type { ColorThemeId } from "../theme/types";
 import type { IndexBusyState, WorkspaceSettingsDialogState, WorkspaceSettingsSection } from "../workspaceSettingsDialogTypes";
 import { selectWorkspaceSettingsSearchEngine } from "../workspaceSettingsModel";
-import { HelpTooltip } from "./HelpTooltip";
 import { PathList } from "./PathList";
 import { AgentInvocationPromptEditor } from "./AgentInvocationPromptEditor";
+import { DEFAULT_ONTOLOGY_DESIGN_PROMPT } from "../../../shared/ontology-design-prompt";
 import { AgentCommandConfigurator } from "./AgentCommandConfigurator";
+import { DefaultAgentSelector } from "./DefaultAgentSelector";
 import { OntologyReviewRow } from "./OntologyReviewRow";
+import { ExographMark } from "./ExographMark";
+import { PublishingSection } from "./PublishingSection";
+import { ShortcutsSection } from "./ShortcutsSection";
 
 interface WorkspaceSettingsDialogProps {
   indexBusy: IndexBusyState;
@@ -28,11 +35,19 @@ interface WorkspaceSettingsDialogProps {
   structuralDraftKey: (settings: WorkspaceSettingsDialogState) => string;
 }
 
-const SETTINGS_SECTIONS: Array<{ id: WorkspaceSettingsSection; label: string; description: string; icon: typeof FolderOpen }> = [
+const SETTINGS_SECTIONS: Array<{
+  id: WorkspaceSettingsSection;
+  label: string;
+  description: string;
+  icon: ComponentType<{ size?: number }>;
+}> = [
   { id: "workspace", label: "Workspace", description: "Folders and roots", icon: FolderOpen },
   { id: "index", label: "Search", description: "Search behavior", icon: Search },
   { id: "appearance", label: "Appearance", description: "Theme and editor", icon: Palette },
+  { id: "graph", label: "Graph", description: "Navigation and ontology", icon: ExographMark },
   { id: "terminal", label: "Terminal", description: "Display", icon: TerminalSquare },
+  { id: "shortcuts", label: "Shortcuts", description: "App commands", icon: Keyboard },
+  { id: "publishing", label: "Publishing", description: "Site and preview", icon: Globe },
   { id: "agents", label: "Agents", description: "@ mentions and commands", icon: Bot },
 ];
 
@@ -48,14 +63,34 @@ export function WorkspaceSettingsDialog({
   setSettings,
   structuralDraftKey,
 }: WorkspaceSettingsDialogProps) {
+  const titleId = useId();
+  const backdropPress = useRef(false);
+  const { dialogRef, closeRef, onKeyDown } = useSettingsDialogFocus(onClose);
   const hasStructuralChanges = structuralDraftKey(settings) !== settings.appliedWorkspaceKey;
 
   return (
-    <div className="dialog-overlay" data-testid="workspace-settings-overlay">
-      <div className="dialog-card dialog-card--settings" data-testid="workspace-settings-dialog">
+    <div
+      className="dialog-overlay"
+      data-testid="workspace-settings-overlay"
+      onPointerDown={(event) => {
+        backdropPress.current = event.button === 0 && event.target === event.currentTarget;
+        if (backdropPress.current) event.preventDefault();
+      }}
+      onPointerCancel={() => { backdropPress.current = false; }}
+      onPointerUp={(event) => {
+        backdropPress.current = backdropPress.current && event.target === event.currentTarget;
+      }}
+      onClick={(event) => {
+        const closeFromBackdrop = backdropPress.current && event.target === event.currentTarget && !event.defaultPrevented;
+        backdropPress.current = false;
+        if (closeFromBackdrop) onClose();
+      }}
+    >
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={onKeyDown} className="dialog-card dialog-card--settings" data-testid="workspace-settings-dialog">
         <div className="dialog-card__header">
-          <div className="dialog-card__title">Workspace Settings</div>
+          <div id={titleId} className="dialog-card__title">Workspace Settings</div>
           <button
+            ref={closeRef}
             aria-label="Close workspace settings"
             className="dialog-card__close"
             data-testid="workspace-settings-close"
@@ -106,7 +141,10 @@ export function WorkspaceSettingsDialog({
               />
             ) : null}
             {settings.section === "appearance" ? <AppearanceSection settings={settings} setSettings={setSettings} /> : null}
+            {settings.section === "graph" ? <GraphSection settings={settings} setSettings={setSettings} /> : null}
             {settings.section === "terminal" ? <TerminalSection settings={settings} setSettings={setSettings} /> : null}
+            {settings.section === "shortcuts" ? <ShortcutsSection bindings={settings.shortcutBindings} onChange={(shortcutBindings) => setSettings((current) => current ? { ...current, shortcutBindings, saveStatus: "idle" } : current)} /> : null}
+            {settings.section === "publishing" ? <PublishingSection settings={settings} setSettings={setSettings} /> : null}
             {settings.section === "agents" ? <AgentsSection settings={settings} setSettings={setSettings} /> : null}
           </div>
         </div>
@@ -153,7 +191,7 @@ export function WorkspaceSettingsDialog({
 }
 
 export function workspaceSettingsSavedFooterCopy(hasStructuralChanges: boolean): string {
-  return hasStructuralChanges ? "Draft saved. Apply to use workspace or search changes." : "Settings saved.";
+  return hasStructuralChanges ? "Apply to save workspace and search changes. Closing Settings discards unapplied changes." : "Settings saved.";
 }
 
 export function workspaceSettingsDialogIntroCopy(section: WorkspaceSettingsSection, hasStructuralChanges: boolean): string {
@@ -163,6 +201,7 @@ export function workspaceSettingsDialogIntroCopy(section: WorkspaceSettingsSecti
       : "Workspace changes are ready to apply.";
   }
 
+  if (section === "publishing") return "Build a website from a folder of notes.";
   if (section === "index") {
     return "Choose how Exograph searches this workspace.";
   }
@@ -174,8 +213,14 @@ export function workspaceSettingsDialogIntroCopy(section: WorkspaceSettingsSecti
   if (section === "appearance") {
     return "Adjust how Exograph looks and reads.";
   }
+  if (section === "graph") {
+    return "Adjust graph navigation, labels, and ontology.";
+  }
   if (section === "terminal") {
     return "Adjust terminal text.";
+  }
+  if (section === "shortcuts") {
+    return "Choose the shortcuts Exograph uses in this workspace.";
   }
   return "Configure the agents available from @ mentions.";
 }
@@ -238,41 +283,40 @@ function WorkspaceSection({
           onRemove={() => setSettings((current) => (current ? { ...current, noteRoots: [], applyStatus: "idle", applyErrorMessage: null } : current))}
         />
       </div>
-      <div className="dialog-field dialog-field--section">
-        <div className="dialog-field__label">Content scope</div>
-        <div className="settings-control-row" role="group" aria-label="Content scope">
-          <button
-            aria-pressed={(settings.contentPolicy?.excludedPaths.length ?? 0) > 0}
-            className="toolbar-button"
-            data-testid="workspace-settings-content-scope-notes"
-            onClick={() => setSettings((current) => current ? {
+      <label className="dialog-field dialog-field--section">
+        <span className="dialog-field__label">Markdown files</span>
+        <select
+          aria-label="Markdown files"
+          className="dialog-card__input"
+          data-testid="workspace-settings-markdown-files"
+          value={markdownScopePreset(settings.contentPolicy)}
+          onChange={(event) => {
+            const preset = event.target.value;
+            if (preset !== "repository" && preset !== "all") return;
+            setSettings((current) => current ? {
               ...current,
-              contentPolicy: repositoryWorkspaceContentPolicy(),
+              contentPolicy: {
+                ...(current.contentPolicy ?? defaultWorkspaceContentPolicy()),
+                excludedPaths: preset === "repository" ? repositoryWorkspaceContentPolicy().excludedPaths : [],
+              },
               applyStatus: "idle",
               applyErrorMessage: null,
-            } : current)}
-            type="button"
-          >
-            Repository Markdown
-          </button>
-          <button
-            aria-pressed={(settings.contentPolicy?.excludedPaths.length ?? 0) === 0}
-            className="toolbar-button"
-            data-testid="workspace-settings-content-scope-all"
-            onClick={() => setSettings((current) => current ? {
-              ...current,
-              contentPolicy: defaultWorkspaceContentPolicy(),
-              applyStatus: "idle",
-              applyErrorMessage: null,
-            } : current)}
-            type="button"
-          >
-            All Markdown
-          </button>
-        </div>
-        <div className="onboarding-section__hint">Code files never become Notes. Repository Markdown skips tool folders such as build, dist, coverage, node_modules, release, and vendor.</div>
-      </div>
-      <OntologyReviewRow />
+            } : current);
+          }}
+        >
+          <option value="all">All Markdown</option>
+          <option value="repository">Exclude generated and dependency folders</option>
+          {markdownScopePreset(settings.contentPolicy) === "custom" ? <option value="custom" disabled>Custom exclusions ({settings.contentPolicy?.excludedPaths.length})</option> : null}
+        </select>
+        <span className="onboarding-section__hint">Choose which Markdown files appear as Notes, in Search, and in Graph. Exclusions skip folders such as build, dist, and node_modules.</span>
+      </label>
+      {markdownScopePreset(settings.contentPolicy) === "custom" ? (
+        <details className="workspace-content-exclusions">
+          <summary>View custom exclusions</summary>
+          {settings.contentPolicy?.excludedPaths.map(pattern => <div key={pattern}><code>{pattern}</code></div>)}
+        </details>
+      ) : null}
+
     </>
   );
 }
@@ -283,166 +327,108 @@ function IndexSection({
   onRunIndexUpdate,
   settings,
   setSettings,
-}: Pick<WorkspaceSettingsDialogProps, "indexBusy" | "indexStatus" | "onRunIndexUpdate" | "settings" | "setSettings">) {
+}: Pick<WorkspaceSettingsDialogProps, "indexBusy" | "indexStatus" | "settings" | "setSettings" | "onRunIndexUpdate">) {
   const statusCopy = indexSettingsStatusCopy(indexStatus, indexBusy, settings.indexUpdateStrategy);
   const qmdSelected = settings.searchEngine === "qmd";
+  const actionsDisabled = indexBusy !== null || !indexStatus?.enabled || indexStatus.mode === "off" || indexStatus.indexedRoots.length === 0;
+  const lexicalIndex = indexStatus?.mode === "lexical";
+  const actionHint = !indexStatus ? "Index status unavailable. Reopen Settings to retry."
+    : !indexStatus.enabled || indexStatus.mode === "off" || indexStatus.indexedRoots.length === 0 ? "Apply QMD settings to enable index actions."
+    : "Actions use the applied search settings.";
 
   function selectSearchEngine(searchEngine: "qmd" | "filesystem") {
-    setSettings((current) =>
-      current ? selectWorkspaceSettingsSearchEngine(current, searchEngine) : current);
+    setSettings((current) => current ? selectWorkspaceSettingsSearchEngine(current, searchEngine) : current);
   }
 
   return (
-    <>
-      <div className="dialog-field dialog-field--section">
-        <div className="dialog-field__label">Search engine</div>
-        <label className="dialog-check">
+    <div className="settings-search">
+      <fieldset className="settings-search__engines">
+        <legend className="dialog-field__label">Search engine</legend>
+        <label className="settings-search__choice">
           <input checked={qmdSelected} data-testid="workspace-settings-search-engine-qmd" onChange={() => selectSearchEngine("qmd")} type="radio" name="workspace-search-engine" />
-          <span>QMD <small>Recommended · local indexed search</small></span>
+          <span><strong>QMD</strong><small>Indexed content search</small></span>
         </label>
-        <label className="dialog-check">
+        <label className="settings-search__choice">
           <input checked={!qmdSelected} data-testid="workspace-settings-search-engine-simple" onChange={() => selectSearchEngine("filesystem")} type="radio" name="workspace-search-engine" />
-          <span>Simple search <small>Immediate filename and path matches</small></span>
+          <span><strong>Simple search</strong><small>Filenames and paths</small></span>
         </label>
-      </div>
-      {!qmdSelected ? (
-        <div className="onboarding-section__hint" data-testid="workspace-settings-simple-search-note">
-          Simple search is active. Switch to QMD to set up or resume a local index.
-        </div>
-      ) : null}
-      {qmdSelected ? (
-        <>
-          <div className="index-summary">
-            <div className="index-summary__stats">
-              <span>QMD</span>
-              <span>{indexStatus?.mode ?? settings.indexMode}</span>
-              <span>
-                {indexStatus?.indexedRoots.length ?? settings.indexedRoots.length} root
-                {(indexStatus?.indexedRoots.length ?? settings.indexedRoots.length) === 1 ? "" : "s"}
-              </span>
-              <span>{indexStatus?.documentCount ?? 0} docs</span>
-              {(indexStatus?.mode ?? settings.indexMode) !== "lexical" ? (
-                <span>{waitingEmbeddingsCopy(indexStatus?.pendingEmbeddings ?? 0)}</span>
-              ) : (
-                <span>semantic off</span>
-              )}
-            </div>
-          </div>
-          {statusCopy ? (
-            <div className={`onboarding-section__hint ${statusCopy.tone === "error" ? "dialog-card__status--error" : ""}`} data-testid="workspace-settings-index-status-note">
-              {statusCopy.text}
-            </div>
-          ) : null}
-          <label className="dialog-field dialog-field--section">
-            <span className="dialog-field__label">QMD retrieval</span>
-        <select
-          className="dialog-card__input"
-          data-testid="workspace-settings-index-mode"
-          value={settings.indexMode}
-          onChange={(event) => {
-            const nextMode = event.target.value as Exclude<WorkspaceSettings["indexing"]["mode"], "off">;
-            setSettings((current) =>
-              current
-                ? {
-                  ...current,
-                  indexMode: nextMode,
-                    applyStatus: "idle",
-                    applyErrorMessage: null,
-                  }
-                : current,
-            );
-          }}
-        >
-          <option value="lexical">Lexical</option>
-          <option value="semantic">Semantic</option>
-          <option value="hybrid">Hybrid</option>
-        </select>
+      </fieldset>
+      {qmdSelected ? <>
+        <div className="settings-search__options">
+          <label className="dialog-field">
+            <span className="dialog-field__label">Search mode</span>
+            <select className="dialog-card__input" data-testid="workspace-settings-index-mode" value={settings.indexMode}
+              onChange={(event) => {
+                const indexMode = event.target.value as Exclude<WorkspaceSettings["indexing"]["mode"], "off">;
+                setSettings((current) => current ? { ...current, indexMode, applyStatus: "idle", applyErrorMessage: null } : current);
+              }}>
+              <option value="lexical">Keywords</option>
+              <option value="semantic">Meaning</option>
+              <option value="hybrid">Keywords + meaning</option>
+            </select>
           </label>
-      <label className="dialog-check">
-        <input
-          checked={settings.exploreIndexSearchOnEnter}
-          data-testid="workspace-settings-explore-index-enter"
-          onChange={(event) =>
-            setSettings((current) => (current ? { ...current, exploreIndexSearchOnEnter: event.target.checked, saveStatus: "idle", errorMessage: null } : current))
-          }
-          type="checkbox"
-        />
-        <span>Use QMD when I press Enter in Explore.</span>
-      </label>
-      <label className="dialog-field dialog-field--section">
-        <span className="dialog-field__label">Search updates</span>
-        <select
-          className="dialog-card__input"
-          data-testid="workspace-settings-index-update-strategy"
-          value={settings.indexUpdateStrategy}
-          onChange={(event) =>
-            setSettings((current) =>
-              current ? { ...current, indexUpdateStrategy: event.target.value as WorkspaceSettings["indexUpdateStrategy"], saveStatus: "idle", errorMessage: null } : current,
-            )
-          }
-        >
-          <option value="on-save">On save</option>
-          <option value="manual">Manual only</option>
-        </select>
-      </label>
-      <div className="dialog-field dialog-field--section">
-        <div className="dialog-field__header">
-          <span className="dialog-field__label">Documents</span>
+          <label className="dialog-field">
+            <span className="dialog-field__label">Index updates</span>
+            <select className="dialog-card__input" data-testid="workspace-settings-index-update-strategy" value={settings.indexUpdateStrategy}
+              onChange={(event) => setSettings((current) => current ? { ...current, indexUpdateStrategy: event.target.value as WorkspaceSettings["indexUpdateStrategy"], saveStatus: "idle", errorMessage: null } : current)}>
+              <option value="on-save">On save</option>
+              <option value="manual">Manual</option>
+            </select>
+          </label>
         </div>
-        <div className="dialog-card__actions dialog-card__actions--split">
-          <button
-            className="toolbar-button"
-            data-testid="workspace-settings-sync-index"
-            disabled={indexBusy !== null || !indexStatus?.enabled || indexStatus.indexedRoots.length === 0}
-            onClick={() => void onRunIndexUpdate("syncing")}
-            type="button"
-          >
-            {indexBusy === "syncing" ? "Syncing..." : "Sync documents"}
-          </button>
-        </div>
-      </div>
-      <details className="dialog-details dialog-details--section settings-maintenance">
-        <summary>
-          Search maintenance
-          <HelpTooltip label="Use these controls when QMD is stale or embeddings are incomplete." />
-        </summary>
-        {indexStatus?.recentJobs?.length ? (
-          <div className="index-activity" data-testid="workspace-settings-index-activity">
-            <div className="index-activity__title">Recent activity</div>
-            {indexStatus.recentJobs.slice(0, 3).map((job) => (
-              <div className="index-activity__row" key={job.id}>
-                <span>{job.kind}</span>
-                <span>{formatDuration(job.durationMs)}</span>
-                <span>{formatRelativeTime(job.completedAt)}</span>
-                <span>{job.status === "failed" ? "failed" : job.pendingEmbeddings === undefined ? "complete" : `${job.pendingEmbeddings} embeddings waiting`}</span>
-              </div>
-            ))}
+        <label className="dialog-check">
+          <input checked={settings.exploreIndexSearchOnEnter} data-testid="workspace-settings-explore-index-enter" type="checkbox"
+            onChange={(event) => setSettings((current) => current ? { ...current, exploreIndexSearchOnEnter: event.target.checked, saveStatus: "idle", errorMessage: null } : current)} />
+          <span>Search content when I press Enter in Explore</span>
+        </label>
+        <section className="settings-search__index" aria-label="Current index">
+          <div className="settings-search__index-heading">
+            <span className="dialog-field__label">Current index</span>
+            {indexStatus ? <span className="settings-search__count">{indexStatus.documentCount} documents · {indexStatus.indexedRoots.length} folders</span> : null}
           </div>
-        ) : null}
-        <div className="dialog-card__actions dialog-card__actions--split">
-          <button
-            className="toolbar-button"
-            data-testid="workspace-settings-update-index"
-            disabled={indexBusy !== null || !indexStatus?.enabled || indexStatus.indexedRoots.length === 0}
-            onClick={() => void onRunIndexUpdate("updating")}
-            type="button"
-          >
-            {indexBusy === "updating" ? "Refreshing..." : "Reconcile documents"}
-          </button>
-          <button
-            className="toolbar-button"
-            data-testid="workspace-settings-embed-index"
-            disabled={indexBusy !== null || !indexStatus?.enabled || indexStatus.mode === "lexical" || indexStatus.indexedRoots.length === 0}
-            onClick={() => void onRunIndexUpdate("embedding")}
-            type="button"
-          >
-            {indexBusy === "embedding" ? "Embedding..." : "Build embeddings"}
-          </button>
-        </div>
-      </details>
-        </>
-      ) : null}
-    </>
+          {statusCopy ? <div className={`onboarding-section__hint ${statusCopy.tone === "error" ? "dialog-card__status--error" : ""}`} data-testid="workspace-settings-index-status-note" role="status">{statusCopy.text}</div> : null}
+          <div className="settings-search__action">
+            <div>
+              <strong>Sync index</strong>
+              <small>{lexicalIndex ? "Update indexed documents." : "Update documents and build missing embeddings."}</small>
+            </div>
+            <button className="toolbar-button" data-testid="workspace-settings-sync-index" disabled={actionsDisabled}
+              aria-describedby="settings-search-action-hint" aria-busy={indexBusy === "syncing"}
+              onClick={() => void onRunIndexUpdate("syncing")} type="button">
+              {indexBusy === "syncing" ? "Syncing…" : "Sync now"}
+            </button>
+          </div>
+          <p id="settings-search-action-hint" className="settings-search__hint">{actionHint}</p>
+          <details className="settings-search__maintenance settings-maintenance">
+            <summary>Search maintenance</summary>
+            <div className="settings-search__action">
+              <div><strong>Documents only</strong><small>Refresh document changes without building embeddings.</small></div>
+              <button className="toolbar-button" data-testid="workspace-settings-update-index" disabled={actionsDisabled}
+                aria-describedby="settings-search-action-hint" aria-busy={indexBusy === "updating"}
+                onClick={() => void onRunIndexUpdate("updating")} type="button">
+                {indexBusy === "updating" ? "Updating…" : "Update documents"}
+              </button>
+            </div>
+            <div className="settings-search__action">
+              <div><strong>Embeddings only</strong><small>{lexicalIndex ? "Apply a meaning-based search mode to enable embeddings." : "Build missing embeddings for meaning-based search."}</small></div>
+              <button className="toolbar-button" data-testid="workspace-settings-embed-index" disabled={actionsDisabled || lexicalIndex}
+                aria-describedby="settings-search-action-hint" aria-busy={indexBusy === "embedding"}
+                onClick={() => void onRunIndexUpdate("embedding")} type="button">
+                {indexBusy === "embedding" ? "Building…" : "Build embeddings"}
+              </button>
+            </div>
+            {indexStatus?.recentJobs?.length ? <div className="index-activity" data-testid="workspace-settings-index-activity">
+              <div className="index-activity__title">Recent activity</div>
+              {indexStatus.recentJobs.slice(0, 3).map((job) => <div className="index-activity__row" key={job.id}>
+                <span>{job.kind === "sync" ? "Sync" : job.kind === "embed" ? "Embeddings" : "Documents"}</span>
+                <span>{formatDuration(job.durationMs)}</span><span>{formatRelativeTime(job.completedAt)}</span>
+                <span>{job.status === "failed" ? "Failed" : job.pendingEmbeddings === undefined ? "Complete" : `${job.pendingEmbeddings} embeddings waiting`}</span>
+              </div>)}
+            </div> : null}
+          </details>
+        </section>
+      </> : null}
+    </div>
   );
 }
 
@@ -595,17 +581,95 @@ function TerminalSection({
   );
 }
 
+function GraphSection({
+  settings,
+  setSettings,
+}: Pick<WorkspaceSettingsDialogProps, "settings" | "setSettings">) {
+  return (
+    <div className="dialog-form__grid workspace-settings-graph" data-testid="workspace-settings-graph">
+      <OntologyReviewRow />
+      <label className="dialog-check">
+        <input
+          checked={settings.graphInverseNavigation}
+          data-testid="workspace-settings-graph-inverse-navigation"
+          onChange={(event) => setSettings((current) => current ? {
+            ...current,
+            graphInverseNavigation: event.target.checked,
+            saveStatus: "idle",
+            errorMessage: null,
+          } : current)}
+          type="checkbox"
+        />
+        <span>
+          <strong>Inverse navigation</strong>
+          <small>Reverse orbit direction while dragging.</small>
+        </span>
+      </label>
+      <label className="dialog-check">
+        <input
+          checked={settings.graphShowOverflowLabels}
+          aria-labelledby="graph-overflow-labels-title"
+          aria-describedby="graph-overflow-labels-description"
+          data-testid="workspace-settings-graph-overflow-labels"
+          onChange={(event) => setSettings((current) => current ? {
+            ...current,
+            graphShowOverflowLabels: event.target.checked,
+            saveStatus: "idle",
+            errorMessage: null,
+          } : current)}
+          type="checkbox"
+        />
+        <span>
+          <strong id="graph-overflow-labels-title">Show overflow labels</strong>
+          <small id="graph-overflow-labels-description">Place labels away from their nodes when there is not enough room.</small>
+        </span>
+      </label>
+      <details className="agent-invocation-prompt-disclosure">
+        <summary>Advanced</summary>
+        <AgentInvocationPromptEditor
+          ariaLabel="Ontology design prompt"
+          defaultValue={DEFAULT_ONTOLOGY_DESIGN_PROMPT}
+          hint="Used only when Exograph asks the default agent to propose an Ontology."
+          onSave={(ontologyDiscoveryPrompt) => setSettings((current) => current ? {
+            ...current,
+            ontologyDiscoveryPrompt,
+            saveStatus: "idle",
+            errorMessage: null,
+          } : current)}
+          promptName="ontology prompt"
+          subtitle="Used by Discover structure"
+          testId="workspace-settings-ontology-prompt"
+          title="Ontology prompt"
+          value={settings.ontologyDiscoveryPrompt}
+        />
+      </details>
+    </div>
+  );
+}
+
 function AgentsSection({
   settings,
   setSettings,
 }: Pick<WorkspaceSettingsDialogProps, "settings" | "setSettings">) {
   return (
     <div className="agent-command-list" data-testid="workspace-settings-agents">
+      <DefaultAgentSelector
+        commands={settings.agentCommands}
+        onChange={(defaultAgentCommandId) => setSettings((current) => current ? {
+          ...current,
+          defaultAgentCommandId: defaultAgentCommandId ?? undefined,
+          saveStatus: "idle",
+          errorMessage: null,
+        } : current)}
+        testId="workspace-settings-default-agent"
+        value={settings.defaultAgentCommandId}
+      />
       <AgentCommandConfigurator
         commands={settings.agentCommands}
         onChange={(agentCommands) => setSettings((current) => current ? {
           ...current,
           agentCommands,
+          defaultAgentCommandId: normalizeDefaultAgentCommandId(current.defaultAgentCommandId, agentCommands),
           saveStatus: "idle",
           errorMessage: null,
         } : current)}
@@ -723,4 +787,12 @@ function formatRelativeTime(value: string): string {
     return `${Math.round(elapsedMs / 60_000)}m ago`;
   }
   return `${Math.round(elapsedMs / 3_600_000)}h ago`;
+}
+
+
+export function markdownScopePreset(policy: WorkspaceSettings["contentPolicy"]): "all" | "repository" | "custom" {
+  const exclusions = policy?.excludedPaths ?? [];
+  if (!exclusions.length) return "all";
+  const repository = repositoryWorkspaceContentPolicy().excludedPaths;
+  return exclusions.length === repository.length && repository.every(pattern => exclusions.includes(pattern)) ? "repository" : "custom";
 }

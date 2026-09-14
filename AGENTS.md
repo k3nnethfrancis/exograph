@@ -45,6 +45,17 @@ For a cross-cutting proposal, read `docs/architecture.md` and the two relevant
 owners before adding a new seam. Do not use a broad `App.tsx` change to bypass
 an existing domain owner.
 
+For contributor context, repository structure, developer commands,
+architectural ratchets, or autonomous coding-agent workflows, use
+[`skills/agent-first-software-engineering/SKILL.md`](skills/agent-first-software-engineering/SKILL.md).
+Exograph is the target software in that rubric; the external coding-agent host
+is a separate harness. The canonical conceptual explanation is
+[`artifacts/exograph-agent-contribution-first-principles.html`](artifacts/exograph-agent-contribution-first-principles.html).
+For normal CI/CD, release authority, or promotion policy, read
+[`docs/ci-cd.md`](docs/ci-cd.md) and its owning workflows. Use the agent-first
+Skill only when the question is whether an agent can independently discover,
+run, and interpret the relevant proof.
+
 ## Invariants
 
 - A Workspace has explicit Note Roots. No convenience path may widen filesystem authority.
@@ -68,6 +79,21 @@ run the canonical harness plus one real Electron smoke. Main pushes produce a
 read-only unsigned candidate artifact; only the explicit, version-matched macOS
 release workflow may create a draft release. Run focused owner tests before the
 broad gate and update public documentation for user-visible changes.
+
+## Completion protocol
+
+Before committing or handing off a substantive implementation, bug fix,
+performance pass, or architectural review, use the agent-first engineering
+Skill and report three things:
+
+1. the user-visible or system claim that changed;
+2. the proof that exercised the boundary where that claim is experienced; and
+3. the smallest durable ratchet added, or why no ratchet was justified.
+
+A comment, plan, or instruction is context, not mechanical enforcement. Prefer
+a focused test, type, module boundary, required workflow, or other check that
+fails when the learned constraint is violated. Do not manufacture a ratchet for
+trivial edits or duplicate an invariant already enforced by its owner.
 
 File bugs and feature requests in GitHub Issues. Keep plans, review packets,
 agent logs, and private operational notes outside this repository.

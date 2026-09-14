@@ -87,11 +87,16 @@ describe("CLI installation diagnosis", () => {
     };
 
     await expect(installPackagedCli(packagedCli, { env: { HOME: root, PATH: "/usr/bin:/bin" } }))
-      .resolves.toMatchObject({ state: "current", commandPath: path.join(root, ".local", "bin", "exo") });
+      .resolves.toMatchObject({
+        state: "current",
+        commandPath: path.join(root, ".local", "bin", "exo"),
+        shellPathAvailable: false,
+        shellPathCommand: 'export PATH="$HOME/.local/bin:$PATH"',
+      });
     await expect(inspectCliInstallation({
       env: { HOME: root, PATH: path.join(root, ".local", "bin") },
       packagedCli,
-    })).resolves.toMatchObject({ state: "current" });
+    })).resolves.toMatchObject({ state: "current", shellPathAvailable: true });
   });
 
   it("will not overwrite an unrelated local command", async () => {

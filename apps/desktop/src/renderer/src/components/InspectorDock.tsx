@@ -1,17 +1,15 @@
-import { ArrowUpRight, Bot, ExternalLink, X } from "lucide-react";
+import { ArrowUpRight, ExternalLink, X } from "lucide-react";
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
 import type { NoteDocument, SearchResult, WorkspaceGraphContext } from "@exograph/core";
 import type { InvocationHistoryItem } from "../../../shared/api";
 
 import { buildNoteGraphContext } from "../graphAffordances";
-import { GraphNeighborhoodView } from "./GraphNeighborhoodView";
-import { AgentIcon } from "./AgentIcon";
+import { AgentCommandIcon } from "./AgentCommandIcon";
 
-type ConnectionTab = "outline" | "links" | "graph" | "history";
+type ConnectionTab = "outline" | "links" | "history";
 const CONNECTION_TABS: readonly { id: Exclude<ConnectionTab, "history">; label: string }[] = [
   { id: "outline", label: "Outline" },
   { id: "links", label: "Links" },
-  { id: "graph", label: "Graph" },
 ];
 
 interface InspectorDockProps {
@@ -24,7 +22,7 @@ interface InspectorDockProps {
   onOpenTarget: (target: string) => void;
   onOpenExternal: (target: string) => void;
   onOpenTag: (tag: string) => void;
-  onOpenGraphCanvas?: (focusPath: string) => void;
+  onOpenHeading: (filePath: string, line: number) => void;
   invocationHistory: InvocationHistoryItem[];
   invocationHistoryError?: string | null;
   requestedTab?: { tab: "history"; nonce: number } | null;
@@ -44,7 +42,7 @@ export function InspectorDock(props: InspectorDockProps) {
     onOpenTarget,
     onOpenExternal,
     onOpenTag,
-    onOpenGraphCanvas,
+    onOpenHeading,
     invocationHistory,
     invocationHistoryError = null,
     requestedTab,
@@ -85,10 +83,10 @@ export function InspectorDock(props: InspectorDockProps) {
     <section className="connections-rail" data-testid="inspector-panel">
       <header className="connections-rail__header">
         <div>
-          <div className="connections-rail__title">Connections</div>
+          <div className="connections-rail__title">Note context</div>
           <div className="connections-rail__summary">{backlinks.length} back · {referenceLinks.length + externalLinks.length + artifactLinks.length} links</div>
         </div>
-        <button aria-label="Close Connections" className="connections-rail__close" onClick={onToggle} title="Close Connections" type="button"><X size={15} /></button>
+        <button aria-label="Close note context" className="connections-rail__close" onClick={onToggle} title="Close note context" type="button"><X size={15} /></button>
       </header>
       <div className="connections-rail__content">
       <div className="connections-panel">
@@ -121,11 +119,9 @@ export function InspectorDock(props: InspectorDockProps) {
           tabIndex={0}
         >
           {activeTab === "outline" ? (
-            <OutlineTab isMarkdown={isMarkdown} headings={outline} />
+            <OutlineTab filePath={document?.filePath ?? null} isMarkdown={isMarkdown} headings={outline} onOpenHeading={onOpenHeading} />
           ) : activeTab === "links" ? (
             <LinksTab isMarkdown={isMarkdown} backlinks={backlinks} references={referenceLinks} externalLinks={externalLinks} artifactLinks={artifactLinks} tags={tags} activeTag={activeTag} tagResults={tagResults} onOpenTarget={onOpenTarget} onOpenExternal={onOpenExternal} onOpenTag={onOpenTag} />
-          ) : activeTab === "graph" ? (
-            <GraphNeighborhoodView neighborhood={graphContext?.neighborhood ?? null} onOpenCanvas={onOpenGraphCanvas} onOpenTarget={onOpenTarget} onOpenExternal={onOpenExternal} />
           ) : activeTab === "history" ? (
             <InvocationHistoryTab
               error={invocationHistoryError}
@@ -143,14 +139,20 @@ export function InspectorDock(props: InspectorDockProps) {
 }
 
 function OutlineTab(props: {
+  filePath: string | null;
   isMarkdown: boolean;
-  headings: Array<{ level: number; text: string }>;
+  headings: OutlineHeading[];
+  onOpenHeading: (filePath: string, line: number) => void;
 }) {
   if (!props.isMarkdown) return <div className="footer-empty">No note selected</div>;
   return (
     <section className="connections-panel__section" data-testid="outline-panel">
       <div className="connections-panel__section-title">Headings</div>
-      {props.headings.length ? <ol className="connections-outline">{props.headings.map((heading, index) => <li key={`${heading.level}:${index}`} style={{ paddingInlineStart: `${Math.max(0, heading.level - 1) * 12}px` }}>{heading.text}</li>)}</ol> : <div className="footer-empty">No headings</div>}
+      {props.headings.length ? <ol className="connections-outline">{props.headings.map((heading) => (
+        <li className="connections-outline__item" key={`${heading.line}:${heading.level}`} style={{ paddingInlineStart: `${Math.max(0, heading.level - 1) * 12}px` }}>
+          <button className="connections-outline__link" disabled={!props.filePath} onClick={() => props.filePath && props.onOpenHeading(props.filePath, heading.line)} type="button">{heading.text}</button>
+        </li>
+      ))}</ol> : <div className="footer-empty">No headings</div>}
     </section>
   );
 }
@@ -218,9 +220,7 @@ export function InvocationHistoryTab({ error, items, onOpen, onResume, onRetry }
           {item.changeIds.length > 0 ? <button className="invocation-history__open" onClick={() => onOpen(item)} type="button">
             <span className={`invocation-history__status invocation-history__status--${item.outcome}`} aria-hidden="true" />
             <span className="invocation-history__agent" aria-hidden="true">
-              {item.command.handle === "claude" || item.command.handle === "codex"
-                ? <AgentIcon kind={item.command.handle} size={14} />
-                : <Bot size={14} />}
+              <AgentCommandIcon command={item.command} size={14} />
             </span>
             <span>
               <strong>@{item.command.handle}</strong>
@@ -229,9 +229,7 @@ export function InvocationHistoryTab({ error, items, onOpen, onResume, onRetry }
           </button> : <div className="invocation-history__open invocation-history__open--status">
             <span className={`invocation-history__status invocation-history__status--${item.outcome}`} aria-hidden="true" />
             <span className="invocation-history__agent" aria-hidden="true">
-              {item.command.handle === "claude" || item.command.handle === "codex"
-                ? <AgentIcon kind={item.command.handle} size={14} />
-                : <Bot size={14} />}
+              <AgentCommandIcon command={item.command} size={14} />
             </span>
             <span>
               <strong>@{item.command.handle}</strong>
@@ -255,9 +253,15 @@ export function relativeInvocationTime(iso: string, now = Date.now()): string {
   return `${Math.floor(elapsed / 86_400_000)}d`;
 }
 
-function extractOutline(body: string): Array<{ level: number; text: string }> {
-  return body.split(/\r?\n/u).flatMap((line) => {
+interface OutlineHeading {
+  level: number;
+  text: string;
+  line: number;
+}
+
+export function extractOutline(body: string): OutlineHeading[] {
+  return body.split(/\r?\n/u).flatMap((line, index) => {
     const match = /^(#{1,6})\s+(.+?)\s*#*$/u.exec(line);
-    return match ? [{ level: match[1].length, text: match[2].trim() }] : [];
+    return match ? [{ level: match[1].length, text: match[2].trim(), line: index + 1 }] : [];
   });
 }

@@ -12,6 +12,12 @@ rewrites Notes, executes code, chooses models, or controls presentation. A
 Workspace without an explicitly kept Ontology keeps its ordinary base graph;
 there is simply no additional ontology interpretation.
 
+`ontology.yaml` is the portable semantic contract between a person's files,
+the visual graph, Search, and agent tools. It names which existing fields carry
+meaning without hiding that meaning in an application database or a model
+prompt. The same source can therefore guide human inspection, validation,
+retrieval experiments, and future bounded agent traversal.
+
 ## Start with the base graph
 
 Exograph does not require an Ontology for its knowledge graph to work. In Generic Markdown,
@@ -98,8 +104,10 @@ kept interpreter while the user-owned candidate changes. A missing or invalid
 kept state falls back explicitly to the existing base graph without additional
 Ontology interpretation.
 
-Workspace Settings and Graph expose the same compact selector and review row.
-It reports bounded typed-Concept, Ontology-Relation, and Finding effects. Keep
+Settings → Graph and the Graph toolbar expose the same preview and review controls.
+The active identity is shown separately from the preview selection. The UI labels
+the explicit Keep action **Activate**; selecting a preview never activates it.
+The review reports bounded typed-Concept, Ontology-Relation, and Finding effects. Keep
 and Reject are explicit; stale Candidate, Active, or Markdown revisions require
 a fresh review. Keep atomically persists the exact accepted source and source
 identity, then publishes the already-reviewed graph. Reject preserves Active.
@@ -110,16 +118,20 @@ Candidate edits alone remain inert. Their dedicated watcher notification does
 not invalidate Note caches, refresh Explorer, or replace graph identity. A
 successful Keep emits one ordinary graph-changed event. Authored Links and
 Backlinks remain authored facts; resolved local Ontology Relations appear only
-in the bounded Connections graph neighborhood with their Ontology origin and
-Evidence preserved.
+in the production Graph and bounded Note-context reads with their Ontology
+origin and Evidence preserved.
 
 ## Optional discovery
 
-The sparkle action in Settings or Graph uses the first trusted, enabled Claude
-or Codex Command to inspect a disposable Markdown-only snapshot. The provider
-receives a user-owned `skills/design-workspace-ontology.md`, a schema-bound
-response contract, read-only tools/sandboxing, and no live Workspace write
-authority. Generic Commands are not accepted by this early-access path.
+The sparkle action in Settings or Graph uses the Workspace's explicit default
+Claude or Codex Command to inspect a disposable Markdown-only snapshot. The
+Command must be enabled and trusted before discovery begins. Exograph supplies
+its bundled `ontology-design` prompt, or the user's override from
+**Settings → Graph → Advanced**. Discovery preparation never writes a Skill or
+hidden instruction file into the Note Root. The provider receives the prompt,
+a schema-bound response contract, read-only tools/sandboxing, and no live
+Workspace write authority. Generic Commands are not accepted by this
+early-access path.
 
 The Exograph host validates the returned source, rechecks the exact graph,
 Candidate, and Active identities observed before the run, and is the only
@@ -132,9 +144,11 @@ the chosen Command to use the native
 `find-and-connect-relevant-context` Skill, then opens an ordinary inline
 Invocation prefilled with bounded graph evidence and the exact active Ontology
 identity. Exograph uses the harness's installed copy when available, otherwise
-its bundled, versioned copy; preparing the action never writes a Skill into the
-Note Root. Command+Return runs the existing trust, activity, Changeset, and
-Keep/Reject path. The Skill cannot edit Ontology sources.
+its bundled, versioned copy, with an exact inline fallback when neither delivery
+path is available. Preparing the action never writes this Skill into the Note
+Root. Command+Return runs the existing trust, activity, Changeset, and
+Keep/Reject path. Skill delivery changes instructions only: it grants no
+authority, and the Skill cannot edit Ontology sources.
 
 ## Interpretation contract
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { NoteDocument } from "@exograph/core";
 
-import { InspectorDock, InvocationHistoryTab } from "./InspectorDock";
+import { extractOutline, InspectorDock, InvocationHistoryTab } from "./InspectorDock";
 
 const note: NoteDocument = {
   filePath: "/notes/alpha.md",
@@ -12,7 +12,7 @@ const note: NoteDocument = {
   body: "# Heading\n\n[[Beta]]",
 };
 
-describe("Connections", () => {
+describe("Note context", () => {
   it("keeps note properties in the editor and only reveals History when records exist", () => {
     const html = renderToStaticMarkup(
       <InspectorDock
@@ -28,16 +28,19 @@ describe("Connections", () => {
         onOpenTarget={() => {}}
         onOpenExternal={() => {}}
         onOpenTag={() => {}}
+        onOpenHeading={() => {}}
       />,
     );
 
-    expect(html).toContain("Connections");
+    expect(html).toContain("Note context");
     expect(html).not.toContain("Properties");
     expect(html).toContain('role="tablist"');
     expect(html).toContain("connections-tab-outline");
+    expect(html).not.toContain("connections-tab-graph");
     expect(html).not.toContain("connections-tab-activity");
     expect(html).not.toContain("connections-tab-history");
     expect(html).toContain("Heading");
+    expect(html).toContain("connections-outline__link");
     expect(html).toContain("outline-panel");
   });
 
@@ -56,9 +59,18 @@ describe("Connections", () => {
         onOpenTarget={() => {}}
         onOpenExternal={() => {}}
         onOpenTag={() => {}}
+        onOpenHeading={() => {}}
       />,
     );
     expect(html).toContain("connections-tab-history");
+  });
+
+  it("retains exact source lines for duplicate headings", () => {
+    expect(extractOutline("# One\n\n## Repeated\ntext\n## Repeated")).toEqual([
+      { level: 1, text: "One", line: 1 },
+      { level: 2, text: "Repeated", line: 3 },
+      { level: 2, text: "Repeated", line: 5 },
+    ]);
   });
 
   it("renders failed zero-change History as status with Resume but no dead Open action", () => {

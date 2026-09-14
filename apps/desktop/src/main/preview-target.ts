@@ -1,14 +1,11 @@
 import path from "node:path";
-import { stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import type { WorkspaceSettings } from "@exograph/core";
+import { WorkspaceFiles, type WorkspaceSettings } from "@exograph/core";
+import type { PreviewTarget } from "../shared/api/workspace-filesystem";
 
-export interface PreviewTargetResponse {
-  ok: true;
-  url: string;
-  source: "url" | "file";
-}
+export type PreviewTargetResponse = PreviewTarget & { ok: true };
 
 export async function resolvePreviewTarget(target: string, settings: WorkspaceSettings): Promise<PreviewTargetResponse> {
   const trimmed = target.trim();
@@ -18,7 +15,7 @@ export async function resolvePreviewTarget(target: string, settings: WorkspaceSe
 
   const localhostUrl = parseBareLocalhostUrl(trimmed);
   if (localhostUrl) {
-    return { ok: true, url: localhostUrl.toString(), source: "url" };
+    return { ok: true, url: localhostUrl.toString(), source: "url", kind: "web" };
   }
 
   const parsedUrl = parsePreviewUrl(trimmed);
@@ -27,7 +24,7 @@ export async function resolvePreviewTarget(target: string, settings: WorkspaceSe
       if (!isTrustedLocalhost(parsedUrl.hostname)) {
         throw new Error("Preview URLs are limited to localhost or local files in V1.");
       }
-      return { ok: true, url: parsedUrl.toString(), source: "url" };
+      return { ok: true, url: parsedUrl.toString(), source: "url", kind: "web" };
     }
     if (parsedUrl.protocol === "file:") {
       return resolveLocalPreviewPath(fileURLToPath(parsedUrl), settings);
@@ -48,22 +45,47 @@ function isTrustedLocalhost(hostname: string): boolean {
 
 async function resolveLocalPreviewPath(filePath: string, settings: WorkspaceSettings): Promise<PreviewTargetResponse> {
   const resolvedPath = path.resolve(filePath);
-  const allowedRoots = settings.noteRoots.map((rootPath) => path.resolve(rootPath));
+  const trustedPath = await new WorkspaceFiles(settings.noteRoots).existing(resolvedPath)
+    .catch(() => {
+      throw new Error("Local preview files must be inside a configured Note Root.");
+    });
 
-  if (!allowedRoots.some((rootPath) => isPathWithin(rootPath, resolvedPath))) {
-    throw new Error("Local preview files must be inside a configured Note Root.");
+  const canonicalPath = await realpath(trustedPath);
+  const extension = path.extname(canonicalPath).toLowerCase();
+  if (![".html", ".htm", ".pdf"].includes(extension)) {
+    throw new Error("Local preview files must be .html, .htm, or .pdf files.");
   }
 
-  if (![".html", ".htm"].includes(path.extname(resolvedPath).toLowerCase())) {
-    throw new Error("Local preview files must be .html or .htm files.");
-  }
-
-  const fileStat = await stat(resolvedPath);
+  const fileStat = await stat(canonicalPath);
   if (!fileStat.isFile()) {
     throw new Error("Local preview target must be an existing file.");
   }
 
-  return { ok: true, url: pathToFileURL(resolvedPath).toString(), source: "file" };
+  if (extension === ".pdf") {
+    return { ok: true, url: pathToFileURL(canonicalPath).toString(), source: "file", kind: "pdf", filePath: trustedPath };
+  }
+  return { ok: true, url: pathToFileURL(canonicalPath).toString(), source: "file", kind: "html" };
+}
+
+/**
+ * The renderer gets bytes only through this narrow read path. Rechecking the
+ * canonical target here prevents a caller from turning a Preview path into a
+ * general filesystem read capability.
+ */
+export async function readPdfFile(filePath: string, settings: WorkspaceSettings): Promise<ArrayBuffer> {
+  const canonicalPath = await new WorkspaceFiles(settings.noteRoots).existingIdentity(filePath)
+    .catch(() => {
+      throw new Error("Local PDF files must be inside a configured Note Root.");
+    });
+  if (path.extname(canonicalPath).toLowerCase() !== ".pdf") {
+    throw new Error("Local PDF files must use the .pdf extension.");
+  }
+  const fileStat = await stat(canonicalPath);
+  if (!fileStat.isFile()) {
+    throw new Error("Local PDF target must be an existing file.");
+  }
+  const bytes = await readFile(canonicalPath);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
 function parsePreviewUrl(target: string): URL | null {
@@ -88,9 +110,4 @@ function parseBareLocalhostUrl(target: string): URL | null {
     return null;
   }
   return null;
-}
-
-function isPathWithin(parentPath: string, targetPath: string): boolean {
-  const relative = path.relative(parentPath, targetPath);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }

@@ -14,9 +14,11 @@ export const EXOGRAPH_CLI_COMMANDS: readonly ExographCliCommandHelp[] = [
   { usageToken: "workspaces", syntax: "exo workspaces", label: "List workspaces" },
   { usageToken: "status", syntax: "exo status", label: "Workspace status" },
   { usageToken: "search", syntax: "exo search <query>", label: "Search notes" },
+  { usageToken: "graph traverse", syntax: "exo graph traverse --help", label: "Traverse graph" },
   { usageToken: "index [status|sync]", syntax: "exo index [status|sync]", label: "Index" },
   { usageToken: "open", syntax: "exo open <path>", label: "Open note" },
   { usageToken: "invoke", syntax: "exo invoke @handle <task>", label: "Invoke command" },
+  { usageToken: "terminals", syntax: "exo terminals [list|create|read|write|stop]", label: "Control terminals" },
   { usageToken: "mcp serve", syntax: "exo mcp serve", label: "Serve MCP" },
 ] as const;
 

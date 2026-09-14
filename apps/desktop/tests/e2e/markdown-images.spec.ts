@@ -173,7 +173,7 @@ test("renders every root-relative SVG used by Self-Improving Business Systems", 
 });
 
 function loadedWidth(widget: Locator): Promise<number> {
-  return widget.locator("img").evaluateAll((images) => images[0]?.naturalWidth ?? 0);
+  return widget.locator("img").evaluateAll((images) => (images[0] as HTMLImageElement | undefined)?.naturalWidth ?? 0);
 }
 
 function renderedWidth(widget: Locator): Promise<number> {

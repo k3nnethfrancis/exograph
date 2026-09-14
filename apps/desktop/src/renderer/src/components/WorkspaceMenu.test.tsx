@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { EXOGRAPH_CLI_COMMANDS } from "@exograph/core/operator-help";
 
-import { APP_KEYBINDINGS } from "../shellHelpModel";
+import { workspaceHelpKeybindings } from "../shellHelpModel";
 import { WorkspaceHelpPanel } from "./WorkspaceMenu";
 
 describe("workspace help menu", () => {
@@ -11,7 +11,7 @@ describe("workspace help menu", () => {
 
     expect(html).toContain("Keyboard");
     expect(html).toContain("CLI");
-    for (const shortcut of APP_KEYBINDINGS) {
+    for (const shortcut of workspaceHelpKeybindings(undefined, true)) {
       expect(html).toContain(shortcut.label);
       expect(html).toContain(shortcut.mac);
     }

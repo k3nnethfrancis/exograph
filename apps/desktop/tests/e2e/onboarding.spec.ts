@@ -306,7 +306,7 @@ test("keeps MCP and CLI setup independent without touching real provider state",
   await expect(page.getByText("Choose CLI, MCP, or both.")).toBeVisible();
   // CLI inspection is asynchronous; wait for the deliberately fake packaged
   // command before taking the control snapshot for the MCP-isolation check.
-  await expect(page.locator(".onboarding-cli-installation")).toContainText("CLI ready");
+  await expect(page.locator(".onboarding-cli-installation")).toContainText("CLI installed");
   const cliStateBefore = await page.locator(".onboarding-cli-installation").innerText();
 
   await page.locator(".onboarding-provider-menu__item").filter({ hasText: "Codex" }).click();
@@ -345,7 +345,9 @@ test("installs the bundled CLI before enabling MCP", async () => {
     await expect(page.getByRole("button", { name: "Install MCP" })).toBeDisabled();
 
     await page.getByRole("button", { name: "Install CLI" }).click();
-    await expect(page.locator(".onboarding-cli-installation")).toContainText("CLI ready");
+    await expect(page.locator(".onboarding-cli-installation")).toContainText("CLI installed");
+    await expect(page.locator(".onboarding-cli-installation")).toContainText("Available to Exograph and MCP");
+    await expect(page.locator(".onboarding-cli-shell-path")).toContainText('export PATH="$HOME/.local/bin:$PATH"');
     await expect(readOptional(path.join(homeRoot, ".local", "bin", "exo"))).resolves.toContain("exograph-packaged-cli");
 
     await page.getByRole("button", { name: "Install MCP" }).click();
@@ -620,7 +622,7 @@ test("completes and restarts the real packaged first-run journey", async () => {
   let firstApp;
   let restartedApp;
   try {
-    firstApp = await electron.launch({ executablePath, cwd: "/", env });
+    firstApp = await electron.launch({ executablePath, cwd: "/", env: definedEnvironment(env) });
     const page = firstApp.windows()[0] ?? await firstApp.firstWindow();
     await page.setViewportSize({ width: 700, height: 560 });
     expect(await firstApp.evaluate(({ app }) => app.getPath("exe"))).toBe(executablePath);
@@ -634,7 +636,9 @@ test("completes and restarts the real packaged first-run journey", async () => {
     await expect(page.locator(".onboarding-cli-installation")).toContainText("CLI not installed");
     await page.screenshot({ path: path.join(evidenceRoot, "02-packaged-agent-access.png"), fullPage: true });
     await page.getByRole("button", { name: "Install CLI" }).click();
-    await expect(page.locator(".onboarding-cli-installation")).toContainText("CLI ready");
+    await expect(page.locator(".onboarding-cli-installation")).toContainText("CLI installed");
+    await expect(page.locator(".onboarding-cli-installation")).toContainText("Available to Exograph and MCP");
+    await expect(page.locator(".onboarding-cli-shell-path")).toContainText('export PATH="$HOME/.local/bin:$PATH"');
     await expect(readOptional(path.join(homeRoot, ".local", "bin", "exo"))).resolves.toContain("exograph-packaged-cli");
     await page.locator(".onboarding-provider-menu__item").filter({ hasText: "Codex" }).click();
     await page.getByRole("button", { name: "Install MCP" }).click();
@@ -651,7 +655,7 @@ test("completes and restarts the real packaged first-run journey", async () => {
     await firstApp.close();
     firstApp = undefined;
 
-    restartedApp = await electron.launch({ executablePath, cwd: "/", env });
+    restartedApp = await electron.launch({ executablePath, cwd: "/", env: definedEnvironment(env) });
     const restartedPage = restartedApp.windows()[0] ?? await restartedApp.firstWindow();
     await restartedPage.setViewportSize({ width: 700, height: 560 });
     expect(await restartedApp.evaluate(({ app }) => app.getPath("exe"))).toBe(executablePath);
@@ -689,10 +693,18 @@ function workspaceSettings(noteRoot: string): WorkspaceSettings {
     editorFontSize: 15,
     terminalFontSize: 13,
     explorerScale: 1,
+    graphInverseNavigation: true,
+    graphShowOverflowLabels: true,
     exploreIndexSearchOnEnter: false,
     indexUpdateStrategy: "on-save",
     agentCommands: [createDefaultClaudeAgentCommand(), createDefaultCodexAgentCommand()],
   };
+}
+
+function definedEnvironment(environment: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(environment).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
 }
 
 async function prepareFakeProviderHome(homeRoot: string): Promise<void> {

@@ -317,7 +317,7 @@ function projectionSeed(snapshot: KnowledgeGraphSnapshot): number {
 
 function nodeVisualClass(concept: ConceptNode): number {
   if (concept.resolution === "external") return GraphNodeVisualClass.external;
-  if (concept.resolution === "unresolved") return GraphNodeVisualClass.unresolved;
+  if (concept.resolution === "unresolved" || concept.resolution === "ambiguous") return GraphNodeVisualClass.unresolved;
   return GraphNodeVisualClass.concept;
 }
 

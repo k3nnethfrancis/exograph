@@ -5,6 +5,7 @@ import {
   defaultWorkspaceContentPolicy,
   repositoryWorkspaceContentPolicy,
 } from "@exograph/core/workspace-content-policy";
+import { normalizeDefaultAgentCommandId } from "@exograph/core/agent-command-configuration";
 
 import type { CliInstallationStatus, ProviderMcpSetupResult } from "../../../shared/api";
 import type { OnboardingState } from "../hooks/useWorkspaceBootstrap";
@@ -12,6 +13,7 @@ import { pathLabel } from "../workspaceTree";
 import { AgentCommandConfigurator } from "./AgentCommandConfigurator";
 import { AgentIcon } from "./AgentIcon";
 import { AgentInvocationPromptEditor } from "./AgentInvocationPromptEditor";
+import { DefaultAgentSelector } from "./DefaultAgentSelector";
 import { PathList } from "./PathList";
 
 export interface OnboardingFlowActions {
@@ -62,7 +64,7 @@ export function OnboardingFlow({ actions, onDismiss, onEditState, state }: Onboa
         if (!cancelled) setCliInstallation(status);
       })
       .catch(() => {
-        if (!cancelled) setCliInstallation({ state: "unavailable" });
+        if (!cancelled) setCliInstallation({ state: "unavailable", shellPathAvailable: false });
       });
     return () => {
       cancelled = true;
@@ -343,14 +345,31 @@ export function OnboardingFlow({ actions, onDismiss, onEditState, state }: Onboa
               <p className="onboarding-card__copy">
                 Exograph invokes agents through their installed local CLIs. These commands stay on this computer and can be edited later in Settings.
               </p>
+              <DefaultAgentSelector
+                commands={state.agentCommands}
+                onChange={(defaultAgentCommandId) => void actions.confirmOnboardingChange((current) => ({
+                  ...current,
+                  defaultAgentCommandId,
+                }))}
+                testId="onboarding-default-agent"
+                value={state.defaultAgentCommandId}
+              />
               <AgentCommandConfigurator
                 commands={state.agentCommands}
                 onChange={(agentCommands, change) => {
                   if (change === "confirm") {
-                    void actions.confirmOnboardingChange((current) => ({ ...current, agentCommands }));
+                    void actions.confirmOnboardingChange((current) => ({
+                      ...current,
+                      agentCommands,
+                      defaultAgentCommandId: normalizeDefaultAgentCommandId(current.defaultAgentCommandId, agentCommands) ?? null,
+                    }));
                     return;
                   }
-                  onEditState((current) => ({ ...current, agentCommands }));
+                  onEditState((current) => ({
+                    ...current,
+                    agentCommands,
+                    defaultAgentCommandId: normalizeDefaultAgentCommandId(current.defaultAgentCommandId, agentCommands) ?? null,
+                  }));
                 }}
                 testId="onboarding-agents-config"
               />
@@ -448,10 +467,18 @@ export function OnboardingFlow({ actions, onDismiss, onEditState, state }: Onboa
                   <div className={`onboarding-cli-installation onboarding-cli-installation--${cliInstallation?.state ?? "checking"}`} aria-live="polite">
                     {cliInstallation?.state === "current" ? <Check aria-hidden="true" size={15} strokeWidth={2.2} /> : <SquareTerminal aria-hidden="true" size={15} strokeWidth={1.8} />}
                     <span>
-                      <strong>{cliReady ? "CLI ready" : cliInstallation?.state === "non-exograph" ? "Existing command kept" : "CLI not installed"}</strong>
-                      {cliReady ? <small>exograph is available to shells and MCP hosts</small> : <small>Installs the CLI bundled with this app.</small>}
+                      <strong>{cliReady ? "CLI installed" : cliInstallation?.state === "non-exograph" ? "Existing command kept" : "CLI not installed"}</strong>
+                      {cliReady ? (
+                        <small>{cliInstallation.shellPathAvailable ? "Available to Exograph, MCP, and your shell" : "Available to Exograph and MCP"}</small>
+                      ) : <small>Installs the CLI bundled with this app.</small>}
                     </span>
                   </div>
+                  {cliReady && !cliInstallation.shellPathAvailable && cliInstallation.shellPathCommand ? (
+                    <div className="onboarding-cli-shell-path">
+                      <span>Add to your shell</span>
+                      <code>{cliInstallation.shellPathCommand}</code>
+                    </div>
+                  ) : null}
                   {!cliReady ? (
                     <button
                       className="toolbar-button"

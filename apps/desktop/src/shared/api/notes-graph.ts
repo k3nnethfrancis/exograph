@@ -4,7 +4,8 @@ import type {
   GraphConceptLookupResult,
   GraphConceptSummaryResult,
   GraphTopology,
-  NoteDocument,
+  VersionedNoteDocument,
+  DocumentSaveResult,
   WorkspaceGraphContext,
 } from "@exograph/core";
 
@@ -18,8 +19,9 @@ export interface ResolvedMarkdownImage {
 }
 
 export interface NotesGraphApi {
-  read: (filePath: string) => Promise<NoteDocument>;
-  save: (filePath: string, frontmatter: Record<string, unknown>, body: string) => Promise<void>;
+  read: (filePath: string) => Promise<VersionedNoteDocument>;
+  save: (filePath: string, frontmatter: Record<string, unknown>, body: string, expectedRevision: string) => Promise<DocumentSaveResult>;
+  saveCopy: (filePath: string, frontmatter: Record<string, unknown>, body: string) => Promise<VersionedNoteDocument>;
   stat: (filePath: string) => Promise<FileStatInfo | null>;
   getGraphContext: (filePath: string) => Promise<WorkspaceGraphContext | null>;
   getGraphTopology: () => Promise<GraphTopology>;

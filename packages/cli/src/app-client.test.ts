@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { EXOGRAPH_COMMAND_TOKEN_HEADER, type ExographCommandStatusResponse } from "@exograph/core";
+import { WorkspaceGraph, EXOGRAPH_COMMAND_TOKEN_HEADER, type ExographCommandStatusResponse } from "@exograph/core";
 import {
   AppClient,
   formatAppClientDiscoveryFailure,
@@ -20,9 +20,44 @@ afterEach(async () => {
 });
 
 describe("AppClient", () => {
+  it("decodes actual Core traversal and rejects malformed or cross-workspace transport responses", async () => {
+    const runtimeRoot = await runtimeFixture();
+    const notePath = path.join(runtimeRoot, "a.md");
+    await writeFile(notePath, "# A\n[[b]]"); await writeFile(path.join(runtimeRoot, "b.md"), "# B");
+    const model = { workspaceRoot: runtimeRoot, defaultTerminalCwd: runtimeRoot, noteRoots: [{ id: "notes", label: "Notes", path: runtimeRoot }], indexedRoots: [], indexing: { enabled: false, mode: "off" as const, backend: "qmd" as const } };
+    const request = { workspaceRoot: runtimeRoot, startPath: notePath };
+    const valid = await new WorkspaceGraph(model).traverse(request);
+    let response: unknown = valid;
+    stubCommandServer((url, init) => {
+      if (url.pathname === "/status") return json(statusResponse());
+      expect(url.pathname).toBe("/graph/traverse");
+      expect(JSON.parse(String(init?.body))).toEqual(request);
+      return json(response);
+    });
+    const client = await AppClient.connect(runtimeRoot);
+    await expect(client!.traverseGraph(request)).resolves.toEqual(valid);
+    if (valid.status !== "ok") throw new Error("Expected real graph success");
+    for (const malformed of [
+      { ...valid, request: { ...valid.request, direction: ["both"] } },
+      { ...valid, nodes: [{ ...valid.nodes[0], filePath: 123 }, ...valid.nodes.slice(1)] },
+      { ...valid, execution: { ...valid.execution, visitedCount: 1, returnedOffset: 99 } },
+      { ...valid, request: { ...valid.request, start: "unrelated" } },
+      { ...valid, request: { ...valid.request, maxDepth: 3 } },
+    ]) {
+      response = malformed;
+      await expect(client!.traverseGraph(request)).rejects.toThrow();
+    }
+    response = { ...valid, events: [{ type: "visit", seq: 9, nodeId: "a", depth: 0 }] };
+    await expect(client!.traverseGraph(request)).rejects.toThrow(/valid graph traversal/);
+    response = { ...valid, workspace: { root: "/other", noteRootIds: [] } };
+    await expect(client!.traverseGraph(request)).rejects.toThrow(/workspace/i);
+    response = { schemaVersion: "exograph.graph-traversal.v1", workspace: { root: runtimeRoot, noteRootIds: [] }, snapshotId: "s", status: "error", code: "stale-cursor", message: "Changed" };
+    await expect(client!.traverseGraph(request)).resolves.toMatchObject({ code: "stale-cursor" });
+  });
+
   it("accepts the exact success bodies for every command route through the HTTP seam", async () => {
     const runtimeRoot = await runtimeFixture();
-    stubCommandServer((targetUrl) => {
+    stubCommandServer((targetUrl, init) => {
       if (targetUrl.pathname === "/status") return json(statusResponse());
       if (targetUrl.pathname === "/show" || targetUrl.pathname === "/open") return json({ ok: true });
       if (targetUrl.pathname === "/search") return json(searchResponse(targetUrl.searchParams.get("q") ?? ""));
@@ -35,6 +70,11 @@ describe("AppClient", () => {
         });
       }
       if (targetUrl.pathname === "/agent-commands/spawn") return json(spawnResponse());
+      if (targetUrl.pathname === "/terminals" && (init?.method ?? "GET") === "GET") return json({ terminals: [terminalResponse()] });
+      if (targetUrl.pathname === "/terminals" && init?.method === "POST") return json({ terminal: terminalResponse() });
+      if (targetUrl.pathname === "/terminals/term-1/write") return json({ ok: true, terminal: terminalResponse(), writeId: 7 });
+      if (targetUrl.pathname === "/terminals/term-1/read") return json({ terminal: terminalResponse(), output: "ready", cursor: 5, truncated: false });
+      if (targetUrl.pathname === "/terminals/term-1/stop") return json({ ok: true });
       return json({ error: "not found" }, 404);
     });
 
@@ -47,6 +87,11 @@ describe("AppClient", () => {
     await expect(client?.getIndexStatus()).resolves.toEqual(indexStatusResponse());
     await expect(client?.syncIndex()).resolves.toMatchObject({ phases: [{ name: "update" }] });
     await expect(client?.spawnAgentCommand("@fable", "review the plan")).resolves.toEqual(spawnResponse());
+    await expect(client?.listTerminals()).resolves.toEqual({ terminals: [terminalResponse()] });
+    await expect(client?.createTerminal()).resolves.toEqual({ terminal: terminalResponse() });
+    await expect(client?.writeTerminal("term-1", "echo ready\r")).resolves.toEqual({ ok: true, terminal: terminalResponse(), writeId: 7 });
+    await expect(client?.readTerminal("term-1", 2)).resolves.toEqual({ terminal: terminalResponse(), output: "ready", cursor: 5, truncated: false });
+    await expect(client?.stopTerminal("term-1")).resolves.toBeUndefined();
   });
 
   it("reports a missing runtime root", async () => {
@@ -429,6 +474,10 @@ function spawnResponse() {
     invocation: { id: "inv-1", status: "running", handle: "fable", createdAt: "2026-07-24T00:00:00.000Z" },
     terminal: { id: "term-1", title: "Fable", cwd: "/workspace", kind: "shell", status: "running" },
   };
+}
+
+function terminalResponse() {
+  return { id: "term-1", title: "Shell", cwd: "/workspace", kind: "shell", command: "/bin/zsh", status: "running" };
 }
 
 function authHeader(init: RequestInit | undefined): string | null {

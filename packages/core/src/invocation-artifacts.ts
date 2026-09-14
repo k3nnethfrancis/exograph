@@ -225,8 +225,35 @@ export class InvocationArtifactStore {
     noteRoots: readonly string[],
     options: InvocationManifestCaptureOptions = {},
   ): Promise<InvocationWorkspaceManifest> {
+    return this.captureManifestInternal(invocationId, phase, noteRoots, options);
+  }
+
+  /**
+   * Capture an exact post-command manifest while reusing launch snapshots whose
+   * content is unchanged. Every file is still hashed, so this remains agnostic
+   * to which harness or filesystem tool made the changes.
+   */
+  async captureSettledManifest(
+    invocationId: string,
+    noteRoots: readonly string[],
+    launch: InvocationWorkspaceManifest,
+    options: InvocationManifestCaptureOptions = {},
+  ): Promise<InvocationWorkspaceManifest> {
+    return this.captureManifestInternal(invocationId, "settled", noteRoots, options, launch);
+  }
+
+  private async captureManifestInternal(
+    invocationId: string,
+    phase: InvocationManifestPhase,
+    noteRoots: readonly string[],
+    options: InvocationManifestCaptureOptions,
+    reusable?: InvocationWorkspaceManifest,
+  ): Promise<InvocationWorkspaceManifest> {
     const layout = this.layout(invocationId);
     const roots = await canonicalNoteRoots(noteRoots);
+    if (reusable && !sameStrings(reusable.noteRoots, roots)) {
+      throw new Error("Invocation launch and settled manifests must use the same Note Roots.");
+    }
     const existing = await this.readManifest(invocationId, phase);
     if (existing) {
       if (!sameStrings(existing.noteRoots, roots)) {
@@ -259,7 +286,9 @@ export class InvocationArtifactStore {
         let capturedFiles: Array<CapturedFile | null>;
         capturedFiles = await mapLimited(before.files, maxConcurrency, async (candidate) => {
           try {
-            return await this.captureFile(layout, candidate, budget);
+            return reusable
+              ? await this.captureFileForSettlement(layout, candidate, budget, reusable.files[candidate.path])
+              : await this.captureFile(layout, candidate, budget);
           } catch (error) {
             if (isNodeErrorCode(error, "ENOENT")) return null;
             throw error;
@@ -546,18 +575,21 @@ export class InvocationArtifactStore {
     }));
     const retained = measurements.filter(({ entry }) => retainedHashes.has(entry));
     const stale = measurements.filter(({ entry }) => !retainedHashes.has(entry));
-    let removedObjectCount = 0;
-    let removedBytes = 0;
-    const failures: string[] = [];
-    for (const artifact of stale) {
+    const removals = await mapLimited(stale, MAX_CAPTURE_CONCURRENCY, async (artifact) => {
       try {
         await rm(artifact.target, { force: true });
-        removedObjectCount += 1;
-        removedBytes += artifact.bytes;
+        return { removed: true as const, bytes: artifact.bytes, failure: null };
       } catch (error) {
-        failures.push(`${artifact.entry}: ${error instanceof Error ? error.message : String(error)}`);
+        return {
+          removed: false as const,
+          bytes: 0,
+          failure: `${artifact.entry}: ${error instanceof Error ? error.message : String(error)}`,
+        };
       }
-    }
+    });
+    const removedObjectCount = removals.filter((entry) => entry.removed).length;
+    const removedBytes = removals.reduce((total, entry) => total + entry.bytes, 0);
+    const failures = removals.flatMap((entry) => entry.failure ? [entry.failure] : []);
     if (removedObjectCount > 0) await syncDirectory(layout.objectsDir);
     const report: InvocationArtifactCompactionReport = {
       beforeObjectCount: measurements.length,
@@ -602,6 +634,29 @@ export class InvocationArtifactStore {
       state: { path: candidate.path, ...captured.object, mode: captured.identity.mode & 0o777 },
       identity: captured.identity,
     };
+  }
+
+  private async captureFileForSettlement(
+    layout: InvocationArtifactLayout,
+    candidate: CaptureCandidate,
+    budget: CaptureBudgetState,
+    launchState?: InvocationFileState,
+  ): Promise<CapturedFile> {
+    if (launchState) {
+      const current = await hashFileAtomically(candidate.path, budget);
+      if (
+        current.object.sha256 === launchState.sha256 &&
+        current.object.byteLength === launchState.byteLength &&
+        (current.identity.mode & 0o777) === launchState.mode
+      ) {
+        return { state: launchState, identity: current.identity };
+      }
+      // The settled budget describes the current workspace once. A changed
+      // file must be read again to create its immutable snapshot, so transfer
+      // the bytes charged by the comparison pass to the snapshot pass.
+      budget.totalBytes -= current.object.byteLength;
+    }
+    return this.captureFile(layout, candidate, budget);
   }
 
   private async captureBytes(layout: InvocationArtifactLayout, bytes: Buffer, sourcePath: string): Promise<CapturedObject> {
@@ -761,6 +816,73 @@ async function captureFileAtomically(
     await rename(temporaryPath, objectPath);
     await syncDirectory(objectsDir);
   }
+  return {
+    object: {
+      sha256: sha256Value,
+      byteLength,
+      snapshotRef: snapshotRef(sha256Value),
+      mediaType: classifyMediaType(sourcePath, sample),
+    },
+    identity: fileIdentity(after),
+  };
+}
+
+/** Read and validate a file without creating a second durable snapshot. */
+async function hashFileAtomically(
+  sourcePath: string,
+  budget: CaptureBudgetState,
+): Promise<{ object: CapturedObject; identity: FileIdentity }> {
+  ensureElapsedBudget(budget);
+  const source = await open(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let before: Stats;
+  try {
+    before = await source.stat();
+    if (before.size > budget.maxFileBytes) {
+      throw new InvocationCaptureBudgetError("file-bytes", budget.maxFileBytes, before.size);
+    }
+  } catch (error) {
+    await source.close();
+    throw error;
+  }
+  const input = source.createReadStream({ autoClose: false });
+  const digest = createHash("sha256");
+  let byteLength = 0;
+  let sample = Buffer.alloc(0);
+  try {
+    for await (const rawChunk of input) {
+      ensureElapsedBudget(budget);
+      const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
+      if (byteLength + chunk.byteLength > budget.maxFileBytes) {
+        throw new InvocationCaptureBudgetError("file-bytes", budget.maxFileBytes, byteLength + chunk.byteLength);
+      }
+      if (budget.totalBytes + chunk.byteLength > budget.maxTotalBytes) {
+        throw new InvocationCaptureBudgetError("total-bytes", budget.maxTotalBytes, budget.totalBytes + chunk.byteLength);
+      }
+      digest.update(chunk);
+      byteLength += chunk.byteLength;
+      budget.totalBytes += chunk.byteLength;
+      if (sample.byteLength < 8192) sample = Buffer.concat([sample, chunk.subarray(0, 8192 - sample.byteLength)]);
+    }
+  } catch (error) {
+    input.destroy();
+    await source.close();
+    throw error;
+  }
+
+  let after: Stats;
+  let current: Stats;
+  try {
+    [after, current] = await Promise.all([source.stat(), stat(sourcePath)]);
+  } finally {
+    await source.close();
+  }
+  if (
+    !sameIdentity(fileIdentity(before), fileIdentity(after)) ||
+    !sameIdentity(fileIdentity(after), fileIdentity(current))
+  ) {
+    throw Object.assign(new Error(`File changed during invocation capture: ${sourcePath}`), { code: "EAGAIN" });
+  }
+  const sha256Value = digest.digest("hex");
   return {
     object: {
       sha256: sha256Value,

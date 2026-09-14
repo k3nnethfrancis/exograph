@@ -31,6 +31,17 @@ switch (scenario) {
     await rm(path.join(noteRoot, "deleted.md"));
     await rename(path.join(noteRoot, "rename-before.md"), path.join(noteRoot, "rename-after.md"));
     break;
+  case "proposal-running":
+    process.stdout.write(`${JSON.stringify({
+      type: "system",
+      subtype: "init",
+      session_id: "ce4b9e26-2574-4433-a054-1110cd403792",
+    })}\n`);
+    await appendLinkedResponse("Prepared a proposal while the harness remains active.");
+    await appendFile(taggedNote, "\nFixture proposal content.\n", "utf8");
+    await writeFile(path.join(fixtureDir, "proposal-ready.txt"), "ready", "utf8");
+    await waitForever();
+    break;
   case "partial-failure":
     await appendLinkedResponse("The fixture failed after producing partial work.");
     await writeFile(path.join(noteRoot, "partial.md"), "# Partial invocation result\n", "utf8");

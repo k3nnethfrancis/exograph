@@ -22,6 +22,9 @@ meaning; hybrid uses both.
 If QMD is catching up or recovering, Exograph keeps foreground retrieval available
 through its simple filesystem path and reports that state. Use **Sync documents**
 for the current corpus or **Reconcile documents** when the index may be stale.
+If status reports a native ABI mismatch, do not load the app's Electron-built
+SQLite module from shell Node. Rebuild and reinstall the managed app runtime in
+one step with `./scripts/install-mac-app --with-cli`.
 Read [Search](search.md) before changing a retrieval mode or rebuilding
 embeddings.
 
@@ -53,5 +56,5 @@ MCP and the CLI are independent:
 
 `exo status` and `exo search` can work without the desktop app. `exo show`,
 `exo index`, `exo open`, and `exo invoke` require the resident app. See [CLI and
-MCP](cli.md) for the exact command surface and [MCP onboarding](provider-mcp-onboarding.md)
-for scope and security boundaries.
+MCP](cli.md) for the exact command surface, installation steps, scope, and
+security boundaries.

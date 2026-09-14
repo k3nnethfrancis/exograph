@@ -2,12 +2,14 @@ import type { IndexSearchResponse, IndexStatus, IndexSyncResult, WorkspaceModel 
 
 export const EXOGRAPH_COMMAND_ROUTES = {
   status: "/status",
+  graphTraverse: "/graph/traverse",
   show: "/show",
   search: "/search",
   indexStatus: "/index/status",
   indexSync: "/index/sync",
   open: "/open",
   spawnAgentCommand: "/agent-commands/spawn",
+  terminals: "/terminals",
 } as const;
 
 export const EXOGRAPH_COMMAND_TOKEN_HEADER = "x-exograph-command-token";
@@ -67,6 +69,29 @@ export interface ExographCommandOkResponse {
   ok: true;
 }
 
+/** A bounded, opaque cursor over the live in-memory terminal tail. */
+export interface ExographCommandTerminalReadResponse {
+  terminal: ExographCommandTerminalInfo;
+  output: string;
+  /** Pass this value back to request output produced after this read. */
+  cursor: number;
+  /** True when the requested cursor predates the retained live tail. */
+  truncated: boolean;
+}
+
+export interface ExographCommandTerminalWriteResponse extends ExographCommandOkResponse {
+  terminal: ExographCommandTerminalInfo;
+  writeId: number;
+}
+
+export interface ExographCommandTerminalCreateResponse {
+  terminal: ExographCommandTerminalInfo;
+}
+
+export interface ExographCommandTerminalListResponse {
+  terminals: ExographCommandTerminalInfo[];
+}
+
 export type ExographCommandShowRequest = Record<string, never>;
 export type ExographCommandIndexSyncRequest = Record<string, never>;
 
@@ -92,6 +117,10 @@ export interface ExographSpawnAgentCommandRequest {
   task: string;
 }
 
+export interface ExographCommandTerminalWriteRequest {
+  input: string;
+}
+
 export interface ExographSpawnAgentCommandResponse {
   ok: true;
   invocation: {
@@ -115,3 +144,5 @@ export interface ExographSpawnAgentCommandErrorResponse {
   error: string;
   [key: string]: unknown;
 }
+
+export type { GraphTraversalRequest as ExographCommandGraphTraverseRequest, GraphTraversalResult as ExographCommandGraphTraverseResponse } from "./graph-traversal";

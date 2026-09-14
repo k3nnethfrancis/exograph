@@ -27,7 +27,15 @@ The two tiers are intentional:
 
 Each Workspace keeps its own index. If cross-workspace retrieval earns demand, it will begin as a read-only fan-out projection over existing Workspace indexes. It is never a Workspace, never a write target, never an invocation target, and never a global index by default. Results must carry workspace/root-qualified identity. Wikilinks resolve inside their owning Workspace; any future cross-workspace reference must be explicit.
 
-Commands and their trust decisions remain Workspace-scoped. Skills are user-editable Markdown owned by a writable Note Root and executed only by explicit configured-Command invocation with reviewable observed changes. Do not add global Skill precedence, background maintenance, scheduler lifecycle, or automatic graph updates until a human-triggered Skill has earned them with measured value.
+Commands and their trust decisions remain Workspace-scoped. Skill delivery is
+workflow-specific: ontology discovery uses Workspace-owned Markdown, while
+graph maintenance resolves provider-native installed instructions first, then
+an Exograph-bundled version, then an exact inline fallback. Repository
+contributor Skills are a separate source-owned surface. No delivery path grants
+authority or bypasses explicit configured-Command invocation and reviewable
+observed changes. Do not add implicit global precedence, background
+maintenance, scheduler lifecycle, or automatic graph updates until a
+human-triggered Skill has earned them with measured value.
 
 ## Derived-state and boundary rules
 

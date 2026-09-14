@@ -1,7 +1,7 @@
 import { invocationActivityLabel, type AgentCommandAdapter, type InvocationActivityKind } from "@exograph/core";
 
 export interface ParsedInvocationActivity {
-  kind: InvocationActivityKind;
+  kind: Exclude<InvocationActivityKind, "done" | "stopped" | "failed">;
   label?: string;
 }
 
@@ -11,6 +11,7 @@ export interface ParsedInvocationActivity {
  */
 export class InvocationActivityAdapter {
   private pending = "";
+  private sessionId: string | null = null;
 
   constructor(private readonly adapter: AgentCommandAdapter) {}
 
@@ -28,6 +29,11 @@ export class InvocationActivityAdapter {
     return pending ? this.parseLine(pending) : [];
   }
 
+  /** Provider-issued identity observed in structured output, never inferred. */
+  providerSessionId(): string | null {
+    return this.sessionId;
+  }
+
   private parseLine(line: string): ParsedInvocationActivity[] {
     let event: Record<string, unknown>;
     try {
@@ -37,13 +43,28 @@ export class InvocationActivityAdapter {
     } catch {
       return [];
     }
+    const sessionId = providerSessionId(this.adapter, event);
+    if (sessionId) this.sessionId = sessionId;
     return this.adapter === "claude-code" ? claudeActivity(event) : codexActivity(event);
   }
 }
 
+function providerSessionId(adapter: AgentCommandAdapter, event: Record<string, unknown>): string | null {
+  const candidate = adapter === "claude-code"
+    ? event.session_id
+    : adapter === "codex-cli" && event.type === "thread.started"
+      ? event.thread_id
+      : null;
+  return typeof candidate === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate)
+    ? candidate
+    : null;
+}
+
 function claudeActivity(event: Record<string, unknown>): ParsedInvocationActivity[] {
   if (event.type === "system") return [{ kind: "working" }];
-  if (event.type === "result") return [{ kind: "finishing" }];
+  // Provider completion messages are trace facts, not lifecycle authority.
+  // The configured command's process exit closes every invocation.
+  if (event.type === "result") return [];
   if (event.type !== "assistant") return [];
   const message = record(event.message);
   const content = Array.isArray(message?.content) ? message.content : [];
@@ -56,7 +77,7 @@ function claudeActivity(event: Record<string, unknown>): ParsedInvocationActivit
 
 function codexActivity(event: Record<string, unknown>): ParsedInvocationActivity[] {
   if (event.type === "thread.started" || event.type === "turn.started") return [{ kind: "working" }];
-  if (event.type === "turn.completed") return [{ kind: "finishing" }];
+  if (event.type === "turn.completed") return [];
   if (event.type !== "item.started" && event.type !== "item.completed") return [];
   const item = record(event.item);
   if (!item || typeof item.type !== "string") return [];
@@ -91,7 +112,7 @@ function activityForTool(name: string, input: Record<string, unknown> | null): P
   }
 }
 
-function withLabel(kind: InvocationActivityKind, value: unknown): ParsedInvocationActivity {
+function withLabel(kind: ParsedInvocationActivity["kind"], value: unknown): ParsedInvocationActivity {
   const label = invocationActivityLabel(value);
   return { kind, ...(label ? { label } : {}) };
 }

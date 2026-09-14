@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, CircleHelp, Folder, Keyboard, Settings, SquareTerminal } from "lucide-react";
 import { EXOGRAPH_CLI_COMMANDS } from "@exograph/core/operator-help";
+import type { WorkspaceShortcutBindings } from "@exograph/core";
 
-import { APP_KEYBINDINGS, isMacPlatform } from "../shellHelpModel";
+import { isMacPlatform, workspaceHelpKeybindings } from "../shellHelpModel";
 
 interface WorkspaceMenuProps {
   collapsed: boolean;
   label: string;
+  shortcutBindings?: WorkspaceShortcutBindings;
   onOpenSettings: () => void;
 }
 
-export function WorkspaceMenu({ collapsed, label, onOpenSettings }: WorkspaceMenuProps) {
+export function WorkspaceMenu({ collapsed, label, shortcutBindings, onOpenSettings }: WorkspaceMenuProps) {
   const [open, setOpen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -41,15 +43,15 @@ export function WorkspaceMenu({ collapsed, label, onOpenSettings }: WorkspaceMen
     <div className={`workspace-menu-anchor${collapsed ? " workspace-menu-anchor--collapsed" : ""}`} ref={menuRef}>
       {open ? (
         <div className="workspace-menu" data-testid="workspace-menu-panel">
-          {showHelp ? <WorkspaceHelpPanel onBack={() => setShowHelp(false)} /> : (
+          {showHelp ? <WorkspaceHelpPanel shortcutBindings={shortcutBindings} onBack={() => setShowHelp(false)} /> : (
             <>
               <div className="workspace-menu__header"><Folder size={14} aria-hidden="true" />{label}</div>
               <div className="workspace-menu__footer">
                 <button className="workspace-menu__item" data-testid="workspace-menu-settings" onClick={() => { setOpen(false); onOpenSettings(); }} type="button">
                   <Settings size={14} aria-hidden="true" />Settings
                 </button>
-                <button aria-label="Help" className="workspace-menu__icon" data-testid="workspace-menu-help" onClick={() => setShowHelp(true)} title="Help" type="button">
-                  <CircleHelp size={15} aria-hidden="true" />
+                <button className="workspace-menu__item" data-testid="workspace-menu-help" onClick={() => setShowHelp(true)} type="button">
+                  <CircleHelp size={14} aria-hidden="true" />Help
                 </button>
               </div>
             </>
@@ -75,7 +77,7 @@ export function WorkspaceMenu({ collapsed, label, onOpenSettings }: WorkspaceMen
   );
 }
 
-export function WorkspaceHelpPanel({ isMac = isMacPlatform(), onBack }: { isMac?: boolean; onBack: () => void }) {
+export function WorkspaceHelpPanel({ isMac = isMacPlatform(), shortcutBindings, onBack }: { isMac?: boolean; shortcutBindings?: WorkspaceShortcutBindings; onBack: () => void }) {
   return (
     <section className="workspace-help" data-testid="workspace-help">
       <header className="workspace-help__header">
@@ -85,7 +87,7 @@ export function WorkspaceHelpPanel({ isMac = isMacPlatform(), onBack }: { isMac?
         <strong>Help</strong>
       </header>
       <HelpSection icon={<Keyboard size={14} aria-hidden="true" />} label="Keyboard">
-        {APP_KEYBINDINGS.map((shortcut) => (
+        {workspaceHelpKeybindings(shortcutBindings, isMac).map((shortcut) => (
           <li key={shortcut.id}><span>{shortcut.label}</span><kbd>{isMac ? shortcut.mac : shortcut.other}</kbd></li>
         ))}
       </HelpSection>

@@ -12,7 +12,7 @@ import type {
 } from "@exograph/core";
 import type { WorkspaceContentInspection } from "@exograph/core";
 
-export type WorkspaceSettingsSection = "workspace" | "index" | "appearance" | "terminal" | "agents";
+export type WorkspaceSettingsSection = "workspace" | "index" | "appearance" | "graph" | "terminal" | "shortcuts" | "agents" | "publishing";
 
 export interface WorkspaceSetupState {
   complete: boolean;
@@ -42,12 +42,12 @@ export interface WorkspaceSetupApi {
   listWorkspaces: () => Promise<WorkspaceRegistryEntry[]>;
   activateWorkspace: (input: { workspaceId: string; expectedRevision: WorkspaceSettingsSaveRequest["expectedRevision"] }) => Promise<WorkspaceSettingsSaveOutcome>;
   saveSettings: (request: WorkspaceSettingsSaveRequest) => Promise<WorkspaceSettingsSaveOutcome>;
-  selectFolder: (options?: { title?: string; allowMultiple?: boolean; buttonLabel?: string }) => Promise<string[]>;
+  selectFolder: (options?: { title?: string; allowMultiple?: boolean; buttonLabel?: string; defaultPath?: string }) => Promise<string[]>;
   inspectContentScope: (rootPath: string) => Promise<WorkspaceContentInspection>;
   previewOntology: (sourcePath?: string | null) => Promise<OntologyReviewState>;
   keepOntology: (guard: OntologyReviewGuard) => Promise<OntologyKeepResult>;
   rejectOntology: (guard: OntologyReviewGuard) => Promise<OntologyRejectResult>;
-  resolvePreviewTarget: (target: string) => Promise<{ url: string; source: "url" | "file" }>;
   onCommandOpenFile: (callback: (filePath: string) => void) => () => void;
+  onCommandOpenFolder: (callback: (directoryPath: string) => void) => () => void;
   onCommandOpenSettings: (callback: (event: { section: WorkspaceSettingsSection }) => void) => () => void;
 }

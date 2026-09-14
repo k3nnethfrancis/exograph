@@ -1,10 +1,11 @@
 import { type ChangeSet, type Extension, StateEffect, StateField, type Text, Transaction } from "@codemirror/state";
-import { EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import {
   listContinuationOutdentKeymap,
   listPrefixAtomicRanges,
   listPrefixNavigationKeymap,
   listPrefixSelectionFilter,
+  selectAllMarkdownKeymap,
   toggleTaskCheckboxAt,
   wikilinkExitKeymap,
 } from "./commands";
@@ -15,7 +16,8 @@ import {
   updateMarkdownPreviewMetadataForChanges,
 } from "./metadata";
 import { buildDecorations } from "./decorations";
-import type { MarkdownGraphReferences } from "./widgets";
+import { GraphReferencesWidget, type MarkdownGraphReferences } from "./widgets";
+import { referenceVisibilityExtension } from "../../referenceVisibility";
 export type { MarkdownGraphReferenceItem, MarkdownGraphReferences } from "./widgets";
 
 const toggleFoldEffect = StateEffect.define<number>();
@@ -75,7 +77,11 @@ function remapFoldParentAnchor(anchor: number, tr: Transaction): number | null {
 function isListParentAnchor(doc: Text, anchor: number): boolean {
   if (anchor < 0 || anchor > doc.length) return false;
   const line = doc.lineAt(anchor);
-  return line.from === anchor && listPrefixPattern.test(line.text);
+  return line.from === anchor && (
+    listPrefixPattern.test(line.text)
+    || /^(#{1,6})\s+/.test(line.text)
+    || /^(\s*)#([A-Za-z][\w/-]*)\b/.test(line.text)
+  );
 }
 
 interface MarkdownLivePreviewOptions {
@@ -112,9 +118,24 @@ export function advanceMarkdownPreviewProjection<Result>(
 }
 
 export function markdownLivePreview(options: MarkdownLivePreviewOptions): Extension[] {
-  const decorationOptions = () => ({
+  const graphReferences = () => options.getGraphReferences?.() ?? options.graphReferences;
+  const decorationOptions = {
     ...options,
-    graphReferences: options.getGraphReferences?.() ?? options.graphReferences,
+    onToggleFold: (view: EditorView, anchor: number) => {
+      view.dispatch({ effects: toggleFoldEffect.of(anchor) });
+    },
+  };
+  const graphReferencesField = StateField.define<DecorationSet>({
+    create(state) {
+      return graphReferenceDecorations(state.doc.length, graphReferences());
+    },
+    update(value, transaction) {
+      const refresh = transaction.effects.some((effect) => effect.is(refreshMarkdownPreviewEffect));
+      return transaction.docChanged || refresh
+        ? graphReferenceDecorations(transaction.state.doc.length, graphReferences())
+        : value;
+    },
+    provide: (field) => EditorView.decorations.from(field),
   });
   const plugin = ViewPlugin.fromClass(
     class {
@@ -123,7 +144,7 @@ export function markdownLivePreview(options: MarkdownLivePreviewOptions): Extens
 
       constructor(view: EditorView) {
         this.metadata = markdownPreviewMetadata(view.state.doc);
-        this.decorations = buildDecorations(view, decorationOptions(), this.metadata, view.state.field(foldedListParentAnchorsField));
+        this.decorations = buildDecorations(view, decorationOptions, this.metadata, view.state.field(foldedListParentAnchorsField));
       }
 
       update(update: ViewUpdate) {
@@ -139,7 +160,7 @@ export function markdownLivePreview(options: MarkdownLivePreviewOptions): Extens
               e.is(toggleFoldEffect) || e.is(refreshMarkdownPreviewEffect)
             ))),
         }, this.metadata, (metadata) =>
-          buildDecorations(update.view, decorationOptions(), metadata, update.view.state.field(foldedListParentAnchorsField)));
+          buildDecorations(update.view, decorationOptions, metadata, update.view.state.field(foldedListParentAnchorsField)));
         this.metadata = next.metadata;
         if (next.projection) {
           this.decorations = next.projection;
@@ -151,8 +172,11 @@ export function markdownLivePreview(options: MarkdownLivePreviewOptions): Extens
 
   return [
     foldedListParentAnchorsField,
+    graphReferencesField,
     listPrefixAtomicRanges,
     listPrefixSelectionFilter,
+    selectAllMarkdownKeymap,
+    referenceVisibilityExtension,
     plugin,
     wikilinkExitKeymap,
     listContinuationOutdentKeymap,
@@ -226,6 +250,22 @@ export function markdownLivePreview(options: MarkdownLivePreviewOptions): Extens
       },
     }),
   ];
+}
+
+function graphReferenceDecorations(
+  documentEnd: number,
+  references: MarkdownGraphReferences | null | undefined,
+): DecorationSet {
+  if (!references || (references.backlinks.length === 0 && references.references.length === 0)) {
+    return Decoration.none;
+  }
+  return Decoration.set([
+    Decoration.widget({
+      widget: new GraphReferencesWidget(references),
+      side: 1,
+      block: true,
+    }).range(documentEnd),
+  ]);
 }
 
 // ---------------------------------------------------------------------------

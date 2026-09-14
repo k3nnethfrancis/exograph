@@ -78,6 +78,21 @@ async function launchExographFixtureForJourney(
   const userDataRoot = await mkdtemp(path.join(os.tmpdir(), "exograph-userdata-"));
   const runtimeRoot = path.join(userDataRoot, "runtime");
   const homeRoot = await mkdtemp(path.join(os.tmpdir(), "exograph-home-"));
+  let electronApp: ElectronApplication | null = null;
+  let cleaned = false;
+  const cleanup = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    await electronApp?.close().catch(() => {});
+    await rm(settingsRoot, { recursive: true, force: true });
+    await rm(userDataRoot, { recursive: true, force: true });
+    await rm(homeRoot, { recursive: true, force: true });
+    if (tempRoot) {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  };
+
+  try {
   if (options?.prepareHome) {
     await options.prepareHome(homeRoot);
   }
@@ -130,11 +145,11 @@ async function launchExographFixtureForJourney(
   }
 
   const packagedAppPath = packagedExecutablePath(process.env.EXOGRAPH_PACKAGED_APP_PATH);
-  const electronApp = await electron.launch({
+  electronApp = await electron.launch({
     ...(packagedAppPath ? { executablePath: packagedAppPath } : {}),
     args: packagedAppPath ? [] : [path.join(repoRoot, "apps/desktop/dist/main/index.js")],
     cwd: options?.cwd ?? repoRoot,
-    env: launchEnv,
+    env: definedEnvironment(launchEnv),
   });
   const page = electronApp.windows()[0] ?? await electronApp.firstWindow();
   if (!configured && options?.expectOnboarding !== false) {
@@ -146,15 +161,7 @@ async function launchExographFixtureForJourney(
       settingsPath,
       runtimeRoot,
       homeRoot,
-      cleanup: async () => {
-        await electronApp.close().catch(() => {});
-        await rm(settingsRoot, { recursive: true, force: true });
-        await rm(userDataRoot, { recursive: true, force: true });
-        await rm(homeRoot, { recursive: true, force: true });
-        if (tempRoot) {
-          await rm(tempRoot, { recursive: true, force: true });
-        }
-      },
+      cleanup,
     };
   }
 
@@ -184,16 +191,12 @@ async function launchExographFixtureForJourney(
     settingsPath,
     runtimeRoot,
     homeRoot,
-    cleanup: async () => {
-      await electronApp.close().catch(() => {});
-      await rm(settingsRoot, { recursive: true, force: true });
-      await rm(userDataRoot, { recursive: true, force: true });
-      await rm(homeRoot, { recursive: true, force: true });
-      if (tempRoot) {
-        await rm(tempRoot, { recursive: true, force: true });
-      }
-    },
+    cleanup,
   };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 }
 
 interface RelaunchExographFixtureInput {
@@ -239,6 +242,18 @@ async function relaunchExographFixtureForJourney(
   openTerminalSurface: boolean,
 ): Promise<RelaunchedExographFixture> {
   const userDataRoot = path.dirname(previous.runtimeRoot);
+  let electronApp: ElectronApplication | null = null;
+  let cleaned = false;
+  const cleanup = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    await electronApp?.close().catch(() => {});
+    await rm(path.dirname(previous.settingsPath), { recursive: true, force: true });
+    await rm(userDataRoot, { recursive: true, force: true });
+    await rm(previous.homeRoot, { recursive: true, force: true });
+  };
+
+  try {
   const configured = options?.configured ?? true;
   const launchEnv: NodeJS.ProcessEnv = {
     ...process.env,
@@ -269,11 +284,11 @@ async function relaunchExographFixtureForJourney(
   }
 
   const packagedAppPath = packagedExecutablePath(process.env.EXOGRAPH_PACKAGED_APP_PATH);
-  const electronApp = await electron.launch({
+  electronApp = await electron.launch({
     ...(packagedAppPath ? { executablePath: packagedAppPath } : {}),
     args: packagedAppPath ? [] : [path.join(repoRoot, "apps/desktop/dist/main/index.js")],
     cwd: options?.cwd ?? repoRoot,
-    env: launchEnv,
+    env: definedEnvironment(launchEnv),
   });
   const page = electronApp.windows()[0] ?? await electronApp.firstWindow();
   if (options?.expectOnboarding) {
@@ -281,12 +296,7 @@ async function relaunchExographFixtureForJourney(
     return {
       electronApp,
       page,
-      cleanup: async () => {
-        await electronApp.close().catch(() => {});
-        await rm(path.dirname(previous.settingsPath), { recursive: true, force: true });
-        await rm(userDataRoot, { recursive: true, force: true });
-        await rm(previous.homeRoot, { recursive: true, force: true });
-      },
+      cleanup,
     };
   }
   await expect(page.getByTestId("sidebar")).toBeVisible();
@@ -302,13 +312,18 @@ async function relaunchExographFixtureForJourney(
   return {
     electronApp,
     page,
-    cleanup: async () => {
-      await electronApp.close().catch(() => {});
-      await rm(path.dirname(previous.settingsPath), { recursive: true, force: true });
-      await rm(userDataRoot, { recursive: true, force: true });
-      await rm(previous.homeRoot, { recursive: true, force: true });
-    },
+    cleanup,
   };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+}
+
+function definedEnvironment(environment: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(environment).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
 }
 
 function packagedExecutablePath(appPath: string | undefined): string | undefined {

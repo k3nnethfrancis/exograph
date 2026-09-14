@@ -454,7 +454,15 @@ describe("InvocationRunner readiness parity", () => {
       protocolInvocationId: TEST_PROTOCOL_INVOCATION_ID,
       documentBody,
     });
-    const updated = new Promise<import("@exograph/core").InvocationRecord>((resolve) => runner.once("updated", resolve));
+    const updated = new Promise<import("@exograph/core").InvocationRecord>((resolve) => {
+      const onUpdated = (record: import("@exograph/core").InvocationRecord) => {
+        if (record.status === "process-exited" && record.changeset) {
+          runner.off("updated", onUpdated);
+          resolve(record);
+        }
+      };
+      runner.on("updated", onUpdated);
+    });
 
     await runner.authorizeAndStart(prepared, authorizationFor(prepared));
     activeSettings = settings(workspaceB, command);
@@ -529,6 +537,8 @@ describe("InvocationRunner readiness parity", () => {
     }, { providerSessionId: staleId, sourceInvocationId: "prior-invocation" });
     const processFactory = new FakeInvocationProcessFactory();
     const runner = createRunner(settings(root, command), new FakeTerminalManager(), processFactory);
+    const activity: import("@exograph/core").InvocationActivityEvent[] = [];
+    runner.on("activity", (event) => activity.push(event));
     const updated = new Promise<import("@exograph/core").InvocationRecord>((resolve) => runner.once("updated", resolve));
 
     const prepared = await runner.prepare(invocationRequest(notePath, documentBody));
@@ -536,12 +546,17 @@ describe("InvocationRunner readiness parity", () => {
     processFactory.process.exit(1, "", `No conversation found with session ID: ${staleId}\n`);
     await expect.poll(() => processFactory.processes.length).toBe(2);
     expect(processFactory.inputs.at(-1)?.command).not.toContain("--resume");
+    expect(activity.filter((event) => event.kind === "done" || event.kind === "failed")).toEqual([]);
+    expect(activity.at(-1)).toMatchObject({ kind: "working" });
     processFactory.process.exit(0, JSON.stringify({ session_id: freshId }));
 
     await expect(updated).resolves.toMatchObject({
       providerSessionId: freshId,
       continuity: { policy: "continuous", outcome: "resume-failed-fresh", resumedFromInvocationId: "prior-invocation" },
     });
+    expect(activity.filter((event) => event.kind === "done" || event.kind === "failed")).toEqual([
+      expect.objectContaining({ kind: "done" }),
+    ]);
   });
 
   it("does not launch a fresh fallback after Stop wins a stale-resume race", async () => {
@@ -561,6 +576,8 @@ describe("InvocationRunner readiness parity", () => {
     }, { providerSessionId: staleId, sourceInvocationId: "prior-invocation" });
     const processFactory = new FakeInvocationProcessFactory();
     const runner = createRunner(settings(root, command), new FakeTerminalManager(), processFactory);
+    const activity: import("@exograph/core").InvocationActivityEvent[] = [];
+    runner.on("activity", (event) => activity.push(event));
     const prepared = await runner.prepare(invocationRequest(notePath, body));
     await runner.authorizeAndStart(prepared, authorizationFor(prepared));
 
@@ -570,6 +587,9 @@ describe("InvocationRunner readiness parity", () => {
 
     expect(processFactory.processes).toHaveLength(1);
     await expect(runner.get(prepared.id)).resolves.toMatchObject({ status: "user-ended" });
+    expect(activity.filter((event) => event.kind === "done" || event.kind === "stopped" || event.kind === "failed")).toEqual([
+      expect.objectContaining({ kind: "stopped" }),
+    ]);
   });
 
   it("retains the Note Root lock when fallback prompt delivery and Stop both fail", async () => {
@@ -763,6 +783,8 @@ writeFileSync(${JSON.stringify(notePath)}, ${JSON.stringify(afterBody)});
     };
     const terminalManager = new FakeTerminalManager();
     const runner = createRunner(settings(root, command), terminalManager, new DirectInvocationProcessFactory());
+    const activity: import("@exograph/core").InvocationActivityEvent[] = [];
+    runner.on("activity", (event) => activity.push(event));
     const updated = new Promise<import("@exograph/core").InvocationRecord>((resolve) => runner.once("updated", resolve));
 
     await startPrepared(runner, {
@@ -776,6 +798,9 @@ writeFileSync(${JSON.stringify(notePath)}, ${JSON.stringify(afterBody)});
       exitCode: 17,
       failureReason: "Command exited with code 17.",
     });
+    expect(activity.filter((event) => event.kind === "done" || event.kind === "failed")).toEqual([
+      expect.objectContaining({ kind: "failed" }),
+    ]);
     await expect(runner.listHistoryForNote(notePath)).resolves.toEqual([
       expect.objectContaining({ invocationId: failed.id, outcome: "failed", changedFileCount: 0 }),
     ]);
@@ -837,7 +862,15 @@ process.stdout.write(${JSON.stringify(`${JSON.stringify({ session_id: sessionId 
     };
     const terminalManager = new FakeTerminalManager();
     const runner = createRunner(settings(root, command), terminalManager, new DirectInvocationProcessFactory());
-    const updated = new Promise<import("@exograph/core").InvocationRecord>((resolve) => runner.once("updated", resolve));
+    const updated = new Promise<import("@exograph/core").InvocationRecord>((resolve) => {
+      const onUpdated = (record: import("@exograph/core").InvocationRecord) => {
+        if (record.status === "process-exited" && record.changeset) {
+          runner.off("updated", onUpdated);
+          resolve(record);
+        }
+      };
+      runner.on("updated", onUpdated);
+    });
     await startPrepared(runner, {
       context: "note", handle: "claude", documentPath: notePath, mentionText: "@claude", message: "Update this.", protocolInvocationId: TEST_PROTOCOL_INVOCATION_ID, documentBody,
     });
@@ -854,7 +887,11 @@ process.stdout.write(${JSON.stringify(`${JSON.stringify({ session_id: sessionId 
     expect(rejected.changeset).toMatchObject({ status: "rejected" });
     await expect(readFile(notePath, "utf8")).resolves.toBe(cleanBase);
     await expect(runner.listHistoryForNote(notePath)).resolves.toEqual([
-      expect.objectContaining({ invocationId: completed.id, outcome: "rejected" }),
+      expect.objectContaining({
+        invocationId: completed.id,
+        protocolInvocationId: TEST_PROTOCOL_INVOCATION_ID,
+        outcome: "rejected",
+      }),
     ]);
     await runner.resumeInTerminal(completed.id);
     expect(terminalManager.commands).toContainEqual(expect.objectContaining({ command: expect.stringContaining(`--resume '${sessionId}'`) }));
@@ -1387,6 +1424,57 @@ process.stdout.write(${JSON.stringify(`${JSON.stringify({ session_id: sessionId 
     expect(completed).toMatchObject({ status: "process-exited", changeset: { status: "pending-review" } });
   });
 
+  it("publishes an exact review checkpoint before the harness process exits", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-invocation-proposal-checkpoint-"));
+    temporaryRoots.push(root);
+    const notePath = path.join(root, "note.md");
+    const command = { ...createDefaultClaudeAgentCommand(), command: process.execPath, continuityPolicy: "fresh" as const };
+    const body = protocolNoteBody("# Proposal\n", command.handle, "Write the answer.");
+    await writeFile(notePath, body);
+    const processFactory = new FakeInvocationProcessFactory();
+    const watcher = new FakeWorkspaceWatcher();
+    const runner = new InvocationRunner({
+      getWorkspaceSettings: () => settings(root, command),
+      trustStateRoot: root,
+      terminalManager: new FakeTerminalManager() as unknown as TerminalManager,
+      invocationProcessFactory: processFactory,
+      workspaceWatcherService: watcher as unknown as WorkspaceWatcherService,
+      settlementQuietMs: 15,
+      settlementMaxWaitMs: 500,
+    });
+    const prepared = await runner.prepare(invocationRequest(notePath, body));
+    await runner.authorizeAndStart(prepared, authorizationFor(prepared));
+    const checkpoint = new Promise<import("@exograph/core").InvocationRecord>((resolve) => {
+      const onUpdated = (record: import("@exograph/core").InvocationRecord) => {
+        if (record.id === prepared.id && record.status === "running" && record.changeset) {
+          runner.off("updated", onUpdated);
+          resolve(record);
+        }
+      };
+      runner.on("updated", onUpdated);
+    });
+    await writeFile(notePath, withProtocolResponse(body, command.handle, "Answer on disk."));
+    watcher.emit(root, notePath);
+
+    await expect(checkpoint).resolves.toMatchObject({
+      status: "running",
+      changeset: { status: "pending-review", files: [expect.objectContaining({ operation: "modified" })] },
+    });
+    expect(processFactory.process.stopCalls).toBe(0);
+
+    const completed = new Promise<import("@exograph/core").InvocationRecord>((resolve) => {
+      const onUpdated = (record: import("@exograph/core").InvocationRecord) => {
+        if (record.id === prepared.id && record.status === "process-exited") {
+          runner.off("updated", onUpdated);
+          resolve(record);
+        }
+      };
+      runner.on("updated", onUpdated);
+    });
+    processFactory.process.exit(0, "done");
+    await expect(completed).resolves.toMatchObject({ status: "process-exited", changeset: { status: "pending-review" } });
+  });
+
   it("keeps settlement reviewable and reports artifact cleanup failure after the exact record is durable", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "exograph-invocation-compaction-error-"));
     temporaryRoots.push(root);
@@ -1654,6 +1742,8 @@ function settings(workspaceRoot: string, command: ReturnType<typeof createDefaul
     editorFontSize: 15,
     terminalFontSize: 13,
     explorerScale: 1,
+    graphInverseNavigation: true,
+    graphShowOverflowLabels: true,
     exploreIndexSearchOnEnter: true,
     indexUpdateStrategy: "manual",
   };

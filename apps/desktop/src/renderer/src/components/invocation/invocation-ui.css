@@ -392,18 +392,28 @@
 .invocation-ui-button--primary { background: var(--accent); color: var(--accent-contrast, white); }
 
 .invocation-activity {
-  position: fixed;
+  position: absolute;
   z-index: 80;
-  left: 16px;
-  bottom: 16px;
+  right: 12px;
+  bottom: 12px;
   display: flex;
-  width: min(390px, calc(100vw - 32px));
+  width: max-content;
+  max-width: min(280px, calc(100% - 24px));
   min-height: 44px;
   align-items: center;
   gap: 8px;
   padding: 7px 8px;
   border-radius: 12px;
   transition: opacity 150ms var(--invocation-ease-out), transform 150ms var(--invocation-ease-out);
+}
+
+.invocation-activity[data-positioned="true"] {
+  position: fixed;
+  left: var(--invocation-activity-left);
+  top: var(--invocation-activity-top);
+  right: auto;
+  bottom: auto;
+  transform-origin: var(--invocation-activity-origin);
 }
 
 .invocation-activity--failed { border-color: var(--danger-border); }
@@ -530,7 +540,7 @@
 @media (max-width: 520px) {
   .invocation-authorization-popover__actions { flex-wrap: wrap; }
   .invocation-ui-button--quiet { order: 3; width: 100%; margin-right: 0; }
-  .invocation-activity { left: 10px; bottom: 10px; width: calc(100vw - 20px); }
+  .invocation-activity { right: 10px; bottom: 10px; max-width: calc(100% - 20px); }
   .invocation-review-controls { width: calc(100vw - 20px); }
 }
 

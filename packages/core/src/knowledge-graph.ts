@@ -8,7 +8,7 @@ export type KnowledgeGraphVersion = typeof KNOWLEDGE_GRAPH_VERSION;
 export type GraphPropertyValue = null | boolean | number | string | readonly GraphPropertyValue[] | GraphPropertyObject;
 export interface GraphPropertyObject { readonly [key: string]: GraphPropertyValue }
 
-export type ConceptResolution = "resolved" | "unresolved" | "external";
+export type ConceptResolution = "resolved" | "unresolved" | "ambiguous" | "external";
 export type RelationOrigin = "document" | "ontology" | "inferred";
 export type RelationResolution = "resolved" | "unresolved" | "ambiguous" | "external";
 export type RelationFamily = "link" | "property-reference" | "tag-membership" | "hierarchy" | "semantic";

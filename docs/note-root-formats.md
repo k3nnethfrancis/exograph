@@ -21,6 +21,9 @@ See [[Graph work]].
 This creates one Concept for the Markdown file. The first H1 may supply its
 label, but it is not another Concept. `[[Graph work]]` resolves to the one
 Concept for that target file; every other link to it joins the same target.
+Aliased wikilinks such as `[[nested/Cedar|Cedar alias]]` use the part before
+`|` to resolve the Note and the part after it as the link label. Aliases do not
+create additional Concepts.
 Tags are shared tag Concepts in the semantic graph; the default spatial view
 groups tagged Notes rather than drawing tag hubs. Frontmatter is preserved as Properties. In this
 example `type: project` classifies the same Note; it does not create a

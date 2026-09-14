@@ -25,6 +25,7 @@ import {
   planGraphLabels,
   projectGraphScene,
   reconcileGraphScene,
+  retainGraphSelectionOnResize,
   selectGraphPath,
   zoomGraphCameraAt,
   type GraphCamera,
@@ -103,6 +104,14 @@ export function pruneGraphSnapshotCache<T>(cache: Map<string, T>, sourceSnapshot
 
 export function shouldRefreshGraphForWorkspaceChange(event: { filePath: string | null }): boolean {
   return event.filePath === null || /\.md$/iu.test(event.filePath);
+}
+
+export function shouldRevealGraphScene(input: {
+  initialFramePending: boolean;
+  layoutSettled: boolean;
+  workerAvailable: boolean;
+}): boolean {
+  return !input.initialFramePending || input.layoutSettled || !input.workerAvailable;
 }
 
 /** Coalesces watcher bursts and bounds retries while derived graph state catches up. */
@@ -289,6 +298,8 @@ export class SpatialGraphRuntime {
   private palette: GraphPresentationPalette;
   private summaries = new Map<number, GraphConceptSummary>();
   private transition: CameraTransition | null = null;
+  private cameraFramed = true;
+  private showOverflowLabels = true;
   private dpr: number;
   private externalPendingWork = 0;
   private layoutMessages = 0;
@@ -341,11 +352,8 @@ export class SpatialGraphRuntime {
     const next = sameEpoch && this.scene
       ? { ...this.scene, topology }
       : this.scene ? reconcileGraphScene(this.scene, topology) : createGraphScene(topology, viewport);
-    if (next.projection.viewport.width !== viewport.width || next.projection.viewport.height !== viewport.height) {
-      next.projection = projectGraphScene(next.layout.positions, next.camera, viewport);
-    }
     this.scene = next;
-    this.resizeRenderers(viewport, this.dpr);
+    this.resize(viewport, this.dpr);
     this.scheduler.invalidate("topology");
     return next;
   }
@@ -353,6 +361,17 @@ export class SpatialGraphRuntime {
   resize(viewport: GraphViewport, dpr = this.dpr): void {
     if (!this.scene || this.disposed) return;
     this.dpr = dpr;
+    const previous = this.scene.projection.viewport;
+    if (previous.width !== viewport.width || previous.height !== viewport.height) {
+      this.scene.camera = this.cameraFramed
+        ? frameGraphCamera(this.scene.layout.positions, viewport)
+        : retainGraphSelectionOnResize(this.scene.layout.positions, this.scene.camera, this.scene.interaction.selected, previous, viewport);
+      if (this.transition) {
+        // Continue toward the same focused target in the new viewport.
+        this.transition.from = cloneCamera(this.scene.camera);
+        this.transition.startedAt = null;
+      }
+    }
     this.scene.projection = projectGraphScene(this.scene.layout.positions, this.scene.camera, viewport);
     this.resizeRenderers(viewport, dpr);
     this.scheduler.invalidate("resize");
@@ -361,6 +380,12 @@ export class SpatialGraphRuntime {
   setPalette(palette: GraphPresentationPalette): void {
     this.palette = palette;
     this.scheduler.invalidate("theme");
+  }
+
+  setShowOverflowLabels(show: boolean): void {
+    if (this.showOverflowLabels === show) return;
+    this.showOverflowLabels = show;
+    this.scheduler.invalidate("label-preference");
   }
 
   setSummaries(summaries: readonly GraphConceptSummary[]): void {
@@ -442,6 +467,7 @@ export class SpatialGraphRuntime {
   setCamera(camera: GraphCamera, reason = "camera"): void {
     if (!this.scene) return;
     this.cancelMotion();
+    this.cameraFramed = reason === "frame-all";
     this.scene.camera = cloneCamera(camera);
     this.scene.projection = projectGraphScene(this.scene.layout.positions, this.scene.camera, this.scene.projection.viewport);
     this.scheduler.invalidate(reason);
@@ -454,6 +480,7 @@ export class SpatialGraphRuntime {
 
   focus(index: number, reducedMotion: boolean): void {
     if (!this.scene || index < 0 || index >= this.scene.topology.nodes.seeds.length) return;
+    this.cameraFramed = false;
     const target = focusGraphCamera(this.scene.layout.positions, index, this.scene.projection.viewport);
     if (reducedMotion) {
       this.setCamera(target, "focus");
@@ -516,6 +543,7 @@ export class SpatialGraphRuntime {
   private mutateCamera(update: (camera: GraphCamera) => GraphCamera, reason: string): void {
     if (!this.scene) return;
     this.cancelMotion();
+    this.cameraFramed = false;
     this.scene.camera = update(this.scene.camera);
     this.scene.projection = projectGraphScene(this.scene.layout.positions, this.scene.camera, this.scene.projection.viewport);
     this.scheduler.invalidate(reason);
@@ -533,6 +561,7 @@ export class SpatialGraphRuntime {
     const viewport = this.scene.projection.viewport;
     const labelPlan = planGraphLabels(this.scene.topology, this.scene.projection, this.scene.interaction, candidates, {
       maxLabels: Math.max(6, Math.min(20, Math.floor(viewport.width * viewport.height / 18_000))),
+      showOverflowLabels: this.showOverflowLabels,
     });
     this.labelPlans += 1;
     try {
@@ -647,6 +676,12 @@ export function spatialGraphWheelIntent(input: {
 /** Vertical middle-button drag follows the same dolly direction as the wheel. */
 export function spatialGraphDollyDragScale(deltaY: number): number {
   return Math.exp(clampZoomExponent(-deltaY * 0.008));
+}
+
+/** Applies the persisted orbit-direction preference before camera math. */
+export function spatialGraphOrbitDelta(deltaX: number, deltaY: number, inverse: boolean): { x: number; y: number } {
+  const direction = inverse ? 1 : -1;
+  return { x: deltaX * direction, y: deltaY * direction };
 }
 
 function clampZoomExponent(exponent: number): number {

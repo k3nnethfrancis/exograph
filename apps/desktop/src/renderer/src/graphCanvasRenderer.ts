@@ -104,10 +104,7 @@ export class GraphCanvasRenderer {
     this.dpr = dpr;
     if (this.canvas.width !== physicalWidth) this.canvas.width = physicalWidth;
     if (this.canvas.height !== physicalHeight) this.canvas.height = physicalHeight;
-    if (this.canvas.style) {
-      this.canvas.style.width = `${width}px`;
-      this.canvas.style.height = `${height}px`;
-    }
+    // The host owns CSS geometry; renderers only size the backing store.
   }
 
   render(plan: GraphPresentationPlan): GraphCanvasRenderMeasurement {

@@ -1,12 +1,14 @@
 ---
 name: exograph-cli
-description: Use Exograph's local `exo` CLI to discover workspaces, inspect status, search indexed Markdown, manage indexing, open notes, and invoke configured agents. Use for Exograph workspace context; prefer native filesystem tools for exact file work.
+description: Use Exograph's local `exo` CLI to select a Markdown workspace, inspect retrieval health, search its exocortex, open notes, manage terminals, and invoke configured agents. Use for scoped Exograph context; prefer native filesystem tools for exact file work.
 ---
 
 # Exograph CLI
 
-Exograph is a local-first Markdown editor and knowledge-graph interface. Its
-`exo` CLI supplements native filesystem tools; it does not replace them.
+Exograph is an open-source exocortex over user-owned Markdown, local Search, an
+evidence-aware graph, an optional Ontology, and terminal agents. Its `exo` CLI
+lets an agent address the same Workspace a person sees in the app; it
+supplements native filesystem tools rather than replacing them.
 
 ## Route the task
 
@@ -21,6 +23,8 @@ Exograph is a local-first Markdown editor and knowledge-graph interface. Its
 - Inspect or refresh the derived index: `exo index status` or `exo index sync`
 - Show Exograph or open a note: `exo show` or `exo open <path>`
 - Run a configured Command: `exo invoke @handle "<task>"`
+- List, create, read, write, or stop a live Exograph Terminal:
+  `exo terminals <operation>`
 - See the canonical surface: `exo --help` or `exo <command> --help`
 
 `status` and `search` work without the desktop app. Index maintenance, opening

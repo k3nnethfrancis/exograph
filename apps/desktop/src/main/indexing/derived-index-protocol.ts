@@ -1,3 +1,4 @@
+import type { GraphTraversalRequest, GraphTraversalResult } from "@exograph/core";
 import type {
   IndexSearchOptions,
   IndexStatus,
@@ -28,6 +29,7 @@ export interface DerivedIndexEmbedOptions {
 }
 
 export type DerivedIndexRequest =
+  | { id: number; operation: "graph-traverse"; context: DerivedIndexContext; request: GraphTraversalRequest }
   | { id: number; operation: "status"; context: DerivedIndexContext }
   | { id: number; operation: "search"; context: DerivedIndexContext; query: string; options: IndexSearchOptions }
   | { id: number; operation: "update"; context: DerivedIndexContext; rootIds?: string[] }
@@ -57,7 +59,7 @@ export interface DerivedIndexCancelRequest {
 
 export type DerivedIndexWorkerRequest = DerivedIndexRequest | DerivedIndexCancelRequest;
 
-export type DerivedIndexResult = IndexStatus | IndexSyncResult | WorkspaceIndexSearchResponse | WorkspaceGraphContext | GraphTopology | GraphConceptSummaryResult | GraphConceptLookupResult | GraphConceptDetailByIndexResult | OntologyReviewState | OntologyKeepResult | OntologyRejectResult | null;
+export type DerivedIndexResult = GraphTraversalResult | IndexStatus | IndexSyncResult | WorkspaceIndexSearchResponse | WorkspaceGraphContext | GraphTopology | GraphConceptSummaryResult | GraphConceptLookupResult | GraphConceptDetailByIndexResult | OntologyReviewState | OntologyKeepResult | OntologyRejectResult | null;
 
 export type DerivedIndexResponse =
   | { id: number; ok: true; result: DerivedIndexResult }

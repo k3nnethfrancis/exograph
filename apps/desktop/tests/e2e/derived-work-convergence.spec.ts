@@ -100,7 +100,10 @@ test("converges automatic embeddings without blocking canonical workspace surfac
     expect(baseline.status).toMatchObject({ hasVectorIndex: true, pendingEmbeddings: 0 });
     expect(baseline.status.errors).toEqual([]);
 
-    await fixture.page.evaluate(({ filePath, body }) => window.exograph.notes.save(filePath, {}, body), {
+    await fixture.page.evaluate(async ({ filePath, body }) => {
+      const document = await window.exograph.notes.read(filePath);
+      return window.exograph.notes.save(filePath, {}, body, document.revision);
+    }, {
       filePath: focusPath,
       body: "# Model convergence\n\nConvergence sentinel appears only after the automatic local embedding slice. [[linked]]\n",
     });

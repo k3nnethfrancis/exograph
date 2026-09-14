@@ -1,6 +1,8 @@
 # Using Exograph
 
-Exograph works over a folder of Markdown you control. It does not import that folder into a proprietary database: your files remain usable in any editor.
+Exograph works over Markdown you control. It brings the editor, Ontology,
+Search, visual graph, and terminal agents into one Workspace while keeping the
+files usable in any other editor or shell.
 
 ## Set up a workspace
 
@@ -11,7 +13,7 @@ When the folder resembles a code repository, Exograph asks what should become a 
 - **Markdown notes** is the safe repository default. It keeps documentation in scope while excluding generated and code-oriented paths.
 - **All Markdown** makes every Markdown file under the selected folder a Note.
 
-This is a content decision, not an access-control change. You can change it in **Settings → Workspace**. Local code or attachment links in an in-scope Note remain visible as artifact references; they do not become searchable Notes or graph nodes.
+This is a content decision, not an access-control change. You can change it under **Markdown files** in **Settings → Workspace**: include all Markdown or exclude generated and dependency folders. Custom exclusions remain visible until you choose a preset. Local code or attachment links in an in-scope Note remain visible as artifact references; they do not become searchable Notes or graph nodes. PDFs inside a Note Root appear in Explorer as read-only attachments: open one directly or use a relative link such as `[[research.pdf]]` to read it in Preview, with page, zoom, fit-to-width, and selectable-text controls.
 
 ## Notes, folders, links, and properties
 
@@ -30,27 +32,49 @@ The centered search field is immediate filename/path search. If you choose the Q
 
 Read [Search](search.md) before changing index settings or interpreting embedding status.
 
-## Connections and graph
+## Note context and Graph
 
-Open **Connections** for the active Note to inspect its outline, links, local graph neighborhood, and earned invocation history. Open the Graph pane to explore the workspace-level graph: pan, zoom, select a node, and double-click a Note node to open it.
+Open **Note context** for the active Note's outline, inbound and outbound links, Artifacts, Tags, and earned invocation history. Select an Outline heading to focus the editor and reveal that exact section. Open **Graph** from the utility rail or the editor's Graph action to explore the production workspace graph, with the active Note selected inside an elevated overview of the settled graph. Drag to orbit; right-drag or modified drag to pan; and use the mouse wheel, trackpad scroll, or trackpad pinch to zoom. Panning follows the grabbed content on both axes. Zoom keeps the graph point under the pointer fixed, while keyboard zoom uses the center of the graph viewport. Two-finger touch gestures combine that same pointer-centered zoom with direct pan. Select a node to inspect it, and double-click a Note node to open it. **Settings → Graph** can reverse the drag-orbit direction.
+
+When the Graph canvas has keyboard focus, brackets select the previous or next Note, arrow keys orbit, `+` and `-` zoom, Space or `F` focuses the selection, `O` frames the graph, Enter opens the selection, and Escape returns to the prior editor context. The same controls remain available after Canvas fallback.
+
+A framed graph fits again when the pane changes size. After you pan, orbit, zoom, or focus, resizing preserves your camera direction and target, moving back within the zoom range when needed to keep a previously visible selection in view. Use **Frame graph** to restore the overview.
+
+Turn off **Settings → Graph → Show overflow labels** to hide labels placed away from crowded nodes. Labels that fit beside their nodes remain visible. This preference is saved for the workspace. The selected Note's title and link count stay below the graph; expand **Details** for its type, path, properties, and connection tools.
+
+Choose an ontology in **Settings → Graph** or the Graph toolbar. The active identity stays visible while you preview another source; **Activate** applies the reviewed source. Selecting a preview alone leaves the active graph unchanged.
 
 The graph is evidence-aware. It distinguishes a relation written in Markdown, one interpreted by an active ontology, and a machine-derived signal. It does not silently turn semantic similarity into a durable fact. Read [Knowledge graph](knowledge-graph.md) for the model and [Workspace ontology](workspace-ontology.md) for optional property interpretation.
 
 ## Panes and shortcuts
 
-The Explorer is on the left. The utility rail can show terminals, previews, or Connections; each utility kind keeps its own tabs. Drag a Note, terminal, or preview into the editor canvas when you want a split view.
+Workspace Settings initially focuses Close. Tab and Shift+Tab stay within the dialog; Escape follows the same save checks as Close and returns focus to the opener.
+
+Rename a Markdown Note from its Explorer context menu. The rename dialog shows the resulting filename and preserves `.md` when omitted, including names containing dots (for example, `draft.v2` becomes `draft.v2.md`). Renaming folders does not add a file extension.
+
+Closing a Note tab lets pending saves finish, including edits made while an earlier save was in progress.
+
+The Explorer is on the left. The utility rail switches one destination among Preview, Terminal, Graph, and Note context; Preview and Terminal keep their own tabs. Drag a Note, terminal, or preview into the editor canvas when you want a split view.
 
 | Action | macOS | Other platforms |
 | --- | --- | --- |
 | Toggle Explorer | `⌘ B` | `Ctrl B` |
 | Toggle utility rail | `⌘ ⌥ B` | `Ctrl Alt B` |
-| New daily Note | `⌘ N` | `Ctrl N` |
+| New Note | `⌘ N` | `Ctrl N` |
+| New daily Note | `⌘ ⇧ N` | `Ctrl Shift N` |
 | New terminal | `⌘ T` | `Ctrl T` |
 | Save active Note | `⌘ S` | `Ctrl S` |
 | Send inline agent request | `⌘ Return` | `Ctrl Enter` |
 | Zoom the whole app | `⌘ +`, `⌘ -`, `⌘ 0` | `Ctrl +`, `Ctrl -`, `Ctrl 0` |
 
-The lower workspace menu also has the current keyboard and CLI reference.
+`⌘ N` / `Ctrl N` creates and opens `untitled.md`. If that file already exists,
+Exograph creates `untitled-2.md`, then the next available name; it never
+overwrites an existing Note. The Explorer's New Note flow also starts from
+`untitled.md` but lets you choose a name first.
+
+The lower workspace menu has the current keyboard and CLI reference. Change
+global app shortcuts per Workspace in **Settings → Shortcuts**. Select the displayed shortcut, press a combination, or press Escape to cancel; conflicts name the existing command. **Reset all** restores defaults. System and editor-native combinations remain reserved. Help always
+shows the active bindings.
 
 ## Ask an agent
 
@@ -59,6 +83,9 @@ Codex begin as editable recommended templates; you can disable either, replace
 its executable and arguments, or add one provider-neutral Custom command with
 its own `@` handle. Removing a configuration requires confirmation and does not
 remove that command's existing Invocation History.
+
+Choose a **Default agent** for Exograph-initiated features such as **Discover
+structure**. Inline `@` invocations continue to use the agent named in the Note.
 
 In a Note, type `@`, select an enabled command, write the request inline, then
 press `⌘ Return` / `Ctrl Enter`. Exograph asks for authorization when needed, runs

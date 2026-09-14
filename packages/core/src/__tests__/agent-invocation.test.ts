@@ -27,7 +27,7 @@ describe("agent invocation model", () => {
     expect(command).toMatchObject({
       id: "codex",
       handle: "codex",
-      command: "codex exec --sandbox workspace-write -",
+      command: "codex exec --sandbox workspace-write --skip-git-repo-check -",
       adapter: "codex-cli",
       continuityPolicy: "fresh",
       cwdPolicy: "workspace_root",
@@ -36,6 +36,24 @@ describe("agent invocation model", () => {
     });
     expect(deriveAgentCommandLaunch(command, { kind: "note", workspaceRoot: "/workspace", documentPath: "/workspace/a.md" }))
       .toEqual({ launchable: true, cwd: "/workspace" });
+  });
+
+  it("migrates only the exact persisted v1 Codex template", () => {
+    expect(normalizeAgentCommand({
+      id: "codex", label: "Codex", handle: "codex",
+      command: "codex exec --sandbox workspace-write -", adapter: "codex-cli",
+      continuityPolicy: "fresh", cwdPolicy: "workspace_root", promptDelivery: "stdin",
+      version: 1, enabled: true,
+    })).toMatchObject({
+      command: "codex exec --sandbox workspace-write --skip-git-repo-check -",
+      version: 2,
+    });
+    expect(normalizeAgentCommand({
+      id: "codex", label: "Codex", handle: "codex",
+      command: "codex exec --sandbox read-only -", adapter: "codex-cli",
+      continuityPolicy: "fresh", cwdPolicy: "workspace_root", promptDelivery: "stdin",
+      version: 1, enabled: true,
+    })).toMatchObject({ command: "codex exec --sandbox read-only -", version: 1 });
   });
 
   it("derives one command launch decision for CLI and note contexts", () => {

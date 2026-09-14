@@ -37,9 +37,10 @@ export async function inspectAgentCommandLaunchFacts(
     };
   }
 
-  const [cwdReady, executablePath] = await Promise.all([
+  const [cwdReady, executablePath, gitReady] = await Promise.all([
     directoryExists(derived.cwd),
     resolveExecutable(executableToken(command.command), derived.cwd, commandEnvironment(environment).PATH),
+    codexWorkingFolderReady(command, derived.cwd),
   ]);
   const executable = executableToken(command.command);
   const executableReady = executablePath !== null;
@@ -50,6 +51,8 @@ export async function inspectAgentCommandLaunchFacts(
     ? `Working folder does not exist: ${derived.cwd}`
     : !executableReady
       ? `Executable was not found: ${executable || command.command}`
+      : !gitReady
+        ? "Codex requires a Git repository for this working folder. Add --skip-git-repo-check or restore the recommended Codex command."
       : "Ready to test in a visible terminal.";
 
   return {
@@ -62,10 +65,29 @@ export async function inspectAgentCommandLaunchFacts(
     executable,
     executablePath,
     executableReady,
-    launchable: cwdReady && executableReady,
-    ...(!cwdReady ? { block: "cwd-missing" as const } : !executableReady ? { block: "executable-missing" as const } : {}),
+    launchable: cwdReady && executableReady && gitReady,
+    ...(!cwdReady
+      ? { block: "cwd-missing" as const }
+      : !executableReady
+        ? { block: "executable-missing" as const }
+        : !gitReady
+          ? { block: "workspace-not-git" as const }
+          : {}),
     detail,
   };
+}
+
+async function codexWorkingFolderReady(command: AgentCommand, cwd: string): Promise<boolean> {
+  if (command.adapter !== "codex-cli" || /(?:^|\s)--skip-git-repo-check(?:\s|=|$)/.test(command.command)) {
+    return true;
+  }
+  let candidate = path.resolve(cwd);
+  while (true) {
+    if (await directoryExists(path.join(candidate, ".git"))) return true;
+    const parent = path.dirname(candidate);
+    if (parent === candidate) return false;
+    candidate = parent;
+  }
 }
 
 export function executableToken(command: string): string {

@@ -195,8 +195,8 @@ const ready = setInterval(() => {
     const scriptPath = path.join(root, "stubborn.mjs");
     await writeFile(scriptPath, `
 import { writeFileSync } from "node:fs";
-writeFileSync(${JSON.stringify(readyPath)}, "ready");
 process.on("SIGTERM", () => writeFileSync(${JSON.stringify(termPath)}, "term"));
+writeFileSync(${JSON.stringify(readyPath)}, "ready");
 setInterval(() => {}, 1000);
 `, "utf8");
     const process = launch(

@@ -5,6 +5,8 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import { collectPackageEvidence } from './package-evidence.mjs';
+
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const defaultPackagingTimeoutMs = 20 * 60 * 1000;
 const defaultPackagingIdleTimeoutMs = 5 * 60 * 1000;
@@ -29,6 +31,20 @@ export function cleanMacOutputDirectories(root = repoRoot, { log = () => {} } = 
   }
 
   return directories;
+}
+
+export async function generatePackageEvidence(root = repoRoot) {
+  const releaseDir = path.join(root, 'release');
+  const appPaths = macOutputDirectories(releaseDir)
+    .map((directory) => path.join(directory, 'Exograph.app'))
+    .filter(existsSync);
+  if (appPaths.length === 0) {
+    throw new Error('electron-builder completed without producing Exograph.app');
+  }
+  for (const appPath of appPaths) {
+    const architecture = path.basename(path.dirname(appPath));
+    await collectPackageEvidence(appPath, path.join(releaseDir, 'evidence', architecture));
+  }
 }
 
 export function packagingFailureDiagnostic(output) {
@@ -249,6 +265,7 @@ async function main() {
       timeoutMs: timeouts.timeoutMs,
       idleTimeoutMs: timeouts.idleTimeoutMs,
     }));
+    await generatePackageEvidence(repoRoot);
   } catch (error) {
     cleanMacOutputDirectories(repoRoot, { log: (message) => console.error(`[exograph pack:mac] ${message}`) });
     if (error.packagingTimeout) {

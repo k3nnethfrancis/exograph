@@ -1,3 +1,4 @@
+import { WorkspaceGraph, parseGraphTraversalRequest, type GraphTraversalRequest, type GraphTraversalResult } from "@exograph/core";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -18,6 +19,10 @@ import {
   type ExographCommandSearchResponse,
   type ExographCommandStatusWithControlPlane,
   type ExographSpawnAgentCommandResponse,
+  type ExographCommandTerminalCreateResponse,
+  type ExographCommandTerminalListResponse,
+  type ExographCommandTerminalReadResponse,
+  type ExographCommandTerminalWriteResponse,
   type WorkspaceRegistryEntry,
 } from "@exograph/core";
 import { EXOGRAPH_CLI_USAGE } from "@exograph/core/operator-help";
@@ -35,6 +40,7 @@ import {
 import { workspaceMatches } from "./workspace-match";
 
 interface AppClientLike {
+  traverseGraph?: (request: GraphTraversalRequest) => Promise<GraphTraversalResult>;
   getStatus(): Promise<ExographCommandStatusWithControlPlane>;
   showWindow(): Promise<void>;
   search(query: string, options?: { limit?: number; offset?: number }): Promise<ExographCommandSearchResponse>;
@@ -42,6 +48,11 @@ interface AppClientLike {
   syncIndex(): Promise<ExographCommandIndexSyncResponse>;
   openFile(filePath: string): Promise<void>;
   spawnAgentCommand(handle: string, task: string): Promise<ExographSpawnAgentCommandResponse>;
+  listTerminals(): Promise<ExographCommandTerminalListResponse>;
+  createTerminal(): Promise<ExographCommandTerminalCreateResponse>;
+  writeTerminal(id: string, input: string): Promise<ExographCommandTerminalWriteResponse>;
+  readTerminal(id: string, cursor?: number): Promise<ExographCommandTerminalReadResponse>;
+  stopTerminal(id: string): Promise<void>;
 }
 
 type AppClientConnector = (runtimeRoot: string, env: NodeJS.ProcessEnv) => Promise<AppClientLike | null>;
@@ -83,6 +94,8 @@ const CLI_COMMANDS = new Set([
   "index",
   "open",
   "invoke",
+  "terminals",
+  "graph",
   "mcp",
 ]);
 
@@ -133,6 +146,38 @@ export async function runCli(argv: string[], options: {
     throw new Error(commandHelp("mcp"));
   }
 
+  if (command === "graph") {
+    if (subcommand !== "traverse") throw new Error(commandHelp("graph"));
+    const offline = args.includes("--offline");
+    if (args.filter((item) => item === "--offline").length > 1) throw new Error("Option may be provided only once: --offline");
+    const { positionals, values } = parseOptions(args.filter((item) => item !== "--offline"), new Set(["workspace", "start", "start-path", "direction", "predicate", "max-depth", "max-results", "limit", "cursor"]));
+    assertNoUnexpectedArguments(positionals);
+    if (!values.workspace && !env.EXOGRAPH_WORKSPACE_ROOT) throw new Error("Graph traversal requires --workspace or explicit EXOGRAPH_WORKSPACE_ROOT configuration.");
+    const workspace = await resolveCliWorkspace(env, values.workspace);
+    const request = parseGraphTraversalRequest({
+      workspaceRoot: workspace.model.workspaceRoot,
+      ...(values.start === undefined ? {} : { start: values.start }),
+      ...(values["start-path"] === undefined ? {} : { startPath: path.resolve(values["start-path"]) }),
+      ...(values.direction === undefined ? {} : { direction: values.direction }),
+      ...(values.predicate === undefined ? {} : { predicate: values.predicate }),
+      ...(values["max-depth"] === undefined ? {} : { maxDepth: Number(values["max-depth"]) }),
+      ...(values["max-results"] === undefined ? {} : { maxResults: Number(values["max-results"]) }),
+      ...(values.limit === undefined ? {} : { limit: Number(values.limit) }),
+      ...(values.cursor === undefined ? {} : { cursor: values.cursor }),
+    });
+    let result: GraphTraversalResult;
+    if (offline) {
+      result = await new WorkspaceGraph(workspace.model, { runtimeRoot: await resolveCliRuntimeRoot(env, workspace.model) }).traverse(request);
+    } else {
+      const connection = await connectIfAvailable(env, connect, workspace);
+      if (!connection.client) throw new Error("The selected Workspace app is unavailable. Start it, or pass --offline for an explicit Core filesystem traversal.");
+      if (!connection.client.traverseGraph) throw new Error("This app client does not support graph traversal.");
+      result = await connection.client.traverseGraph(request);
+    }
+    await print(result, stdout);
+    return result.status === "ok" ? 0 : 1;
+  }
+
   if (command === "workspaces") {
     assertNoUnexpectedArguments([subcommand, ...args]);
     return print(listCliWorkspaces(env), stdout);
@@ -148,7 +193,10 @@ export async function runCli(argv: string[], options: {
     const connection = await connectIfAvailable(env, connect, workspace);
     return print(
       connection.client
-        ? connection.status
+        ? {
+          ...connection.status,
+          search: await connection.client.getIndexStatus(),
+        }
         : appOffStatus(workspace, env, connection.diagnostic),
       stdout,
     );
@@ -176,6 +224,17 @@ export async function runCli(argv: string[], options: {
     );
   }
 
+  if (command === "terminals") {
+    const workspace = await resolveCliWorkspace(env);
+    const connection = await connectIfAvailable(env, connect, workspace);
+    if (!connection.client) {
+      if (connection.diagnostic) stderr.write(formatCliRuntimeDiagnostic(connection.diagnostic));
+      else stderr.write(`Exograph is not reachable. Start it with: exo start\nRuntime root: ${await resolveCliRuntimeRoot(env)}\n`);
+      return 1;
+    }
+    return runTerminals(connection.client, subcommand, args, stdout);
+  }
+
   if (command === "show") {
     assertNoUnexpectedArguments([subcommand, ...args]);
   } else if (command === "index") {
@@ -200,7 +259,7 @@ export async function runCli(argv: string[], options: {
   if (command === "show") { await client.showWindow(); return 0; }
   if (command === "index") return runIndex(client, subcommand, stdout);
   if (command === "open") {
-    await client.openFile(subcommand); return 0;
+    await client.openFile(resolveOpenPath(subcommand, workspace.model)); return 0;
   }
   if (command === "invoke") {
     return print(client.spawnAgentCommand(subcommand, args.join(" ")), stdout);
@@ -208,10 +267,88 @@ export async function runCli(argv: string[], options: {
   throw new Error("Unreachable CLI command.");
 }
 
+/** Resolve relative operator paths against the selected Workspace, never a
+ * transient agent cwd. The desktop retains authority for existence, canonical
+ * containment, and whether the target is a file or a folder. */
+function resolveOpenPath(targetPath: string, workspace: WorkspaceModel): string {
+  return path.isAbsolute(targetPath) ? path.resolve(targetPath) : path.resolve(workspace.workspaceRoot, targetPath);
+}
+
 async function runIndex(client: AppClientLike, subcommand: string | undefined, stdout: { write(text: string): void }): Promise<number> {
   if (!subcommand || subcommand === "status") return print(client.getIndexStatus(), stdout);
   if (subcommand === "sync") return print(client.syncIndex(), stdout);
   throw new Error(commandHelp("index").trimEnd());
+}
+
+async function runTerminals(
+  client: AppClientLike,
+  subcommand: string | undefined,
+  args: string[],
+  stdout: { write(text: string): void },
+): Promise<number> {
+  if (!subcommand || subcommand === "list") {
+    assertNoUnexpectedArguments(args);
+    return print(client.listTerminals(), stdout);
+  }
+  if (subcommand === "create") {
+    assertNoUnexpectedArguments(args);
+    return print(client.createTerminal(), stdout);
+  }
+  if (subcommand === "stop") {
+    const [id, ...rest] = args;
+    if (!id) throw new Error(commandHelp("terminals").trimEnd());
+    assertNoUnexpectedArguments(rest);
+    await client.stopTerminal(id);
+    return print({ ok: true, terminal_id: id }, stdout);
+  }
+  if (subcommand === "read") {
+    const [id, ...rest] = args;
+    if (!id) throw new Error(commandHelp("terminals").trimEnd());
+    const { positionals, values } = parseOptions(rest, new Set(["cursor"]));
+    assertNoUnexpectedArguments(positionals);
+    const cursor = values.cursor === undefined ? undefined : parseTerminalCursor(values.cursor);
+    return print(client.readTerminal(id, cursor), stdout);
+  }
+  if (subcommand === "write") {
+    const [id, ...inputArgs] = args;
+    if (!id) throw new Error(commandHelp("terminals").trimEnd());
+    const { input, newline } = parseTerminalWriteInput(inputArgs);
+    if (!input && !newline) throw new Error(commandHelp("terminals").trimEnd());
+    const response = input ? await client.writeTerminal(id, input) : undefined;
+    if (newline) {
+      return print(client.writeTerminal(id, "\r"), stdout);
+    }
+    return print(response!, stdout);
+  }
+  throw new Error(commandHelp("terminals").trimEnd());
+}
+
+function parseTerminalCursor(value: string): number {
+  const cursor = Number(value);
+  if (!Number.isSafeInteger(cursor) || cursor < 0) {
+    throw new Error("Expected --cursor to be a non-negative integer.");
+  }
+  return cursor;
+}
+
+function parseTerminalWriteInput(args: string[]): { input: string; newline: boolean } {
+  const input: string[] = [];
+  let newline = false;
+  let positionalOnly = false;
+  for (const value of args) {
+    if (value === "--" && !positionalOnly) {
+      positionalOnly = true;
+      continue;
+    }
+    if (!positionalOnly && value === "--newline") {
+      if (newline) throw new Error("Option may be provided only once: --newline");
+      newline = true;
+      continue;
+    }
+    if (!positionalOnly && value.startsWith("-")) throw new Error(`Unknown option: ${value}`);
+    input.push(value);
+  }
+  return { input: input.join(" "), newline };
 }
 
 async function connectIfAvailable(
@@ -350,6 +487,11 @@ async function appOffStatus(
 ): Promise<Record<string, unknown>> {
   const { model } = workspace;
   const runtimeRoot = await resolveCliRuntimeRoot(env, model);
+  const search = await filesystemSearchProvider.getStatus(model, runtimeRoot);
+  const qmdConfigured = model.searchEngine !== "filesystem"
+    && model.indexing.enabled
+    && model.indexing.mode !== "off"
+    && model.indexedRoots.length > 0;
   return {
     ok: true,
     app: {
@@ -364,7 +506,21 @@ async function appOffStatus(
       root: model.workspaceRoot,
       noteRoots: model.noteRoots.map((root) => root.path),
     },
-    search: await filesystemSearchProvider.getStatus(model, runtimeRoot),
+    search: {
+      ...search,
+      configured: model.indexing,
+      effective: {
+        provider: "filesystem",
+        mode: "lexical",
+        reason: "desktop-app-unavailable",
+      },
+      ...(qmdConfigured ? {
+        recovery: {
+          command: "exo start",
+          message: "Start Exograph to use QMD in its managed desktop runtime.",
+        },
+      } : {}),
+    },
   };
 }
 
@@ -487,9 +643,11 @@ function commandHelp(command: string): string {
     workspaces: "exo workspaces",
     status: "exo status [--workspace <id|label|path>]",
     search: "exo search <query> [--limit n] [--cursor cursor] [--workspace <id|label|path>]",
+    graph: "exo graph traverse --workspace <id|label|path> (--start <Concept ID> | --start-path <Note path>) [--direction outgoing|incoming|both] [--predicate name] [--max-depth 1..3] [--max-results 1..100] [--limit 1..100] [--cursor cursor] [--offline]",
     index: "exo index [status|sync]",
     open: "exo open <path>",
     invoke: "exo invoke @handle <task>",
+    terminals: "exo terminals [list|create|read <id> [--cursor n]|write <id> [input] [--newline]|stop <id>]",
     mcp: "exo mcp serve",
   }[command];
   return usage ? `Usage: ${usage}\n` : help();
@@ -500,8 +658,9 @@ function help(): string {
     EXOGRAPH_CLI_USAGE,
     "",
     "Workspace selection: exo workspaces; status/search accept --workspace <id|label|path>.",
+    "Graph traversal: exo graph traverse --help (explicit Workspace; --offline for Core filesystem mode).",
     "App-off: status and search use the configured workspace's filesystem roots.",
-    "App-backed: show, index maintenance, open, and invoke require Exograph to be running.",
+    "App-backed: show, index maintenance, open, invoke, and terminal control require Exograph to be running.",
     "Developer source QA: pnpm dev:qa",
     "",
   ].join("\n");

@@ -1,9 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
-import { EXOGRAPH_COMMAND_TOKEN_HEADER, type IndexStatus, type WorkspaceSettings } from "@exograph/core";
+import { WorkspaceGraph, EXOGRAPH_COMMAND_TOKEN_HEADER, type IndexStatus, type WorkspaceSettings } from "@exograph/core";
 
 import { CommandServer, type CommandServerOptions } from "./command-server";
 
@@ -14,6 +16,51 @@ afterEach(async () => {
 });
 
 describe("CommandServer operator contract", () => {
+  it("runs a real CLI child through authenticated HTTP to the Core filesystem graph", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exo-http-traversal-")); tempPaths.push(root);
+    const startPath = path.join(root, "a.md");
+    await writeFile(startPath, "# A\n[[b]] [[b]]"); await writeFile(path.join(root, "b.md"), "# B");
+    const model = { workspaceRoot: root, defaultTerminalCwd: root, noteRoots: [{ id: "note-root-1", label: "Notes", path: root }], indexedRoots: [], indexing: { enabled: false, mode: "off" as const, backend: "qmd" as const } };
+    const graph = new WorkspaceGraph(model);
+    const { server, runtimeRoot } = await startServer({ onGetStatus: () => ({ workspace: model, terminals: [] }), onGraphTraverse: (request) => graph.traverse(request) });
+    await writeFile(path.join(runtimeRoot, "server.json"), JSON.stringify(server.getServerInfo()));
+    try {
+      const repo = path.resolve(import.meta.dirname, "../../../../..");
+      const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", path.join(repo, "packages/cli/src/index.ts"), "graph", "traverse", "--start-path", startPath, "--limit", "1"], {
+        cwd: repo,
+        env: { ...process.env, EXOGRAPH_WORKSPACE_ROOT: root, EXOGRAPH_NOTE_ROOTS: root, EXOGRAPH_RUNTIME_ROOT: runtimeRoot },
+      });
+      const result = JSON.parse(stdout);
+      expect(result.status).toBe("ok");
+      expect(result.workspace.root).toBe(root);
+      expect(result.nodes[0].relativePath).toBe("a.md");
+      expect(result.edges).toHaveLength(2);
+      expect(result.events.filter((event: { type: string }) => event.type === "visit")).toHaveLength(2);
+      expect(result.nextCursor).toEqual(expect.any(String));
+    } finally { await server.stop(); }
+  });
+
+  it("authorizes and validates traversal before invoking the scoped graph owner", async () => {
+    const calls: unknown[] = [];
+    const { server, port, token } = await startServer({ onGraphTraverse: async (request) => {
+      calls.push(request);
+      return { schemaVersion: "exograph.graph-traversal.v1", workspace: { root: request.workspaceRoot, noteRootIds: [] }, snapshotId: "s", status: "error", code: "missing-start", message: "Not found" };
+    } });
+    const body = JSON.stringify({ workspaceRoot: "/workspace", start: "note:a" });
+    try {
+      expect((await fetch(`http://127.0.0.1:${port}/graph/traverse`, { method: "POST", body })).status).toBe(401);
+      for (const request of [{ workspaceRoot: "/workspace", start: "a", maxDepth: 4 }, { workspaceRoot: "/workspace", start: "a", unknown: true }]) {
+        expect((await commandFetch(token, port, "/graph/traverse", { method: "POST", body: JSON.stringify(request) })).status).toBe(400);
+      }
+      expect((await commandFetch(token, port, "/graph/traverse", { method: "POST", body: JSON.stringify({ workspaceRoot: "/elsewhere", start: "a" }) })).status).toBe(409);
+      expect(calls).toHaveLength(0);
+      const response = await commandFetch(token, port, "/graph/traverse", { method: "POST", body });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ status: "error", code: "missing-start" });
+      expect(calls).toEqual([{ workspaceRoot: "/workspace", start: "note:a" }]);
+    } finally { await server.stop(); }
+  });
+
   it("keeps the exact status success body on the wire", async () => {
     const expected = commandStatusResponse();
     const { server, port, token } = await startServer({ onGetStatus: () => expected });
@@ -37,22 +84,41 @@ describe("CommandServer operator contract", () => {
     }
   });
 
-  it("does not expose terminal remote-control routes", async () => {
-    const { server, port, token } = await startServer();
+  it("exposes bounded terminal lifecycle routes through the authenticated command server", async () => {
+    const writes: Array<{ id: string; data: string }> = [];
+    const terminal = { id: "term-1", title: "Shell", cwd: "/workspace", kind: "shell", command: "/bin/zsh", status: "running" };
+    const { server, port, token } = await startServer({
+      onListTerminals: () => [terminal],
+      onCreateTerminal: async () => terminal,
+      onWriteTerminal: async ({ id, data }) => {
+        writes.push({ id, data });
+        return id === terminal.id ? { terminal, writeId: 7 } : { terminal: null };
+      },
+      onReadTerminal: async ({ id, cursor }) => id === terminal.id
+        ? { terminal, output: cursor === 4 ? " next" : "ready next", cursor: 9, truncated: false }
+        : null,
+      onStopTerminal: async (id) => id === terminal.id,
+    });
     try {
-      for (const route of ["/terminals", "/terminals/term-1/tail", "/terminals/term-1/write", "/terminals/term-1/message"]) {
-        const response = await commandFetch(token, port, route);
-        expect(response.status).toBe(404);
-      }
+      await expect(fetchJson(token, port, "/terminals")).resolves.toEqual({ terminals: [terminal] });
+      await expect(fetchJson(token, port, "/terminals", { method: "POST", body: "{}" })).resolves.toEqual({ terminal });
+      await expect(fetchJson(token, port, "/terminals/term-1/write", { method: "POST", body: JSON.stringify({ input: "echo hi\r" }) }))
+        .resolves.toEqual({ ok: true, terminal, writeId: 7 });
+      expect(writes).toEqual([{ id: "term-1", data: "echo hi\r" }]);
+      await expect(fetchJson(token, port, "/terminals/term-1/read", { method: "POST", body: JSON.stringify({ cursor: 4 }) }))
+        .resolves.toEqual({ terminal, output: " next", cursor: 9, truncated: false });
+      await expect(fetchJson(token, port, "/terminals/term-1/stop", { method: "POST", body: "{}" })).resolves.toEqual({ ok: true });
+      const missing = await commandFetch(token, port, "/terminals/missing/read", { method: "POST", body: "{}" });
+      expect(missing.status).toBe(404);
     } finally {
       server.stop();
     }
   });
 
-  it("does not report a file open until the app authorizes it", async () => {
+  it("does not report a path open until the app authorizes it", async () => {
     const opened: string[] = [];
     const { server, port, token } = await startServer({
-      onOpenFile: async (filePath) => {
+      onOpenPath: async (filePath) => {
         if (filePath === "/outside.md") throw new Error("Refusing to access a path outside configured note roots.");
         opened.push(filePath);
       },
@@ -96,7 +162,7 @@ describe("CommandServer operator contract", () => {
   it("rejects a wrong-typed open path before calling the typed handler", async () => {
     let handlerCalled = false;
     const { server, port, token } = await startServer({
-      onOpenFile: async () => {
+      onOpenPath: async () => {
         handlerCalled = true;
       },
     });
@@ -264,7 +330,7 @@ function options(runtimeRoot: string): CommandServerOptions {
     errors: [],
   };
   return {
-    runtimeRoot, onShowWindow: () => {}, onOpenFile: async () => {}, onIndexSearch: async () => ({ mode: "lexical", source: "filesystem", query: "", results: [], warnings: [] }), onIndexStatus: async () => status, onIndexSync: async () => ({ status, phases: [], warnings: [] }), onGetStatus: () => ({ workspace: { workspaceRoot: "/workspace", defaultTerminalCwd: "/workspace", noteRoots: [], indexedRoots: [], indexing: { enabled: true, mode: "hybrid", backend: "qmd" } }, terminals: [] }), onSpawnAgentCommand: async () => { throw new Error("not used"); },
+    runtimeRoot, onShowWindow: () => {}, onOpenPath: async () => {}, onIndexSearch: async () => ({ mode: "lexical", source: "filesystem", query: "", results: [], warnings: [] }), onIndexStatus: async () => status, onIndexSync: async () => ({ status, phases: [], warnings: [] }), onGetStatus: () => ({ workspace: { workspaceRoot: "/workspace", defaultTerminalCwd: "/workspace", noteRoots: [], indexedRoots: [], indexing: { enabled: true, mode: "hybrid", backend: "qmd" } }, terminals: [] }), onSpawnAgentCommand: async () => { throw new Error("not used"); }, onListTerminals: () => [], onCreateTerminal: async () => { throw new Error("not used"); }, onWriteTerminal: async () => ({ terminal: null }), onReadTerminal: async () => null, onStopTerminal: async () => false,
   };
 }
 

@@ -27,6 +27,23 @@ window.addEventListener(
 
 const api: DesktopApi = {
   ...(process.env.EXOGRAPH_TEST === "1" ? { test: { graphHooks: true as const } } : {}),
+  publishing: {
+    getSetupStatus: () => invokeDesktop("publishing:get-setup-status"),
+    startAuth: () => invokeDesktop("publishing:start-auth"),
+    setup: (input) => invokeDesktop("publishing:setup", input),
+    cancelSetup: () => invokeDesktop("publishing:cancel-setup"),
+    revealTheme: () => invokeDesktop("publishing:reveal-theme"),
+    getStatus: () => invokeDesktop("publishing:get-status"),
+    build: (input) => invokeDesktop("publishing:build", input),
+    publish: (input) => invokeDesktop("publishing:publish", input),
+    stop: () => invokeDesktop("publishing:stop"),
+    revealOutput: () => invokeDesktop("publishing:reveal-output"),
+    onStatus: (callback) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: Awaited<ReturnType<DesktopApi["publishing"]["getStatus"]>>) => callback(status);
+      ipcRenderer.on("publishing:status", listener);
+      return () => ipcRenderer.removeListener("publishing:status", listener);
+    },
+  },
   workspace: {
     getModel: () => invokeDesktop("workspace:get-model"),
     getSettings: () => invokeDesktop("workspace:get-settings"),
@@ -44,6 +61,7 @@ const api: DesktopApi = {
     keepOntology: (guard) => invokeDesktop("workspace:ontology-keep", guard),
     rejectOntology: (guard) => invokeDesktop("workspace:ontology-reject", guard),
     resolvePreviewTarget: (target) => invokeDesktop("workspace:resolve-preview-target", target),
+    readPdfFile: (filePath) => invokeDesktop("workspace:read-pdf-file", filePath),
     launchAgentInvocation: (input) => invokeDesktop("workspace:launch-agent-invocation", input),
     getAgentInvocationAuthorization: (input) => invokeDesktop("workspace:get-agent-invocation-authorization", input),
     prepareGraphMaintenanceSkill: (input) => invokeDesktop("workspace:prepare-graph-maintenance-skill", input),
@@ -110,6 +128,11 @@ const api: DesktopApi = {
       ipcRenderer.on("command:open-file", listener);
       return () => ipcRenderer.removeListener("command:open-file", listener);
     },
+    onCommandOpenFolder: (callback) => {
+      const listener = (_event: unknown, directoryPath: string) => callback(directoryPath);
+      ipcRenderer.on("command:open-folder", listener);
+      return () => ipcRenderer.removeListener("command:open-folder", listener);
+    },
     onCommandOpenSettings: (callback) => {
       const listener = (_event: unknown, payload: Parameters<typeof callback>[0]) => callback(payload);
       ipcRenderer.on("command:open-settings", listener);
@@ -118,7 +141,8 @@ const api: DesktopApi = {
   },
   notes: {
     read: (filePath) => invokeDesktop("notes:read", filePath),
-    save: (filePath, frontmatter, body) => invokeDesktop("notes:save", filePath, frontmatter, body),
+    save: (filePath, frontmatter, body, expectedRevision) => invokeDesktop("notes:save", filePath, frontmatter, body, expectedRevision),
+    saveCopy: (filePath, frontmatter, body) => invokeDesktop("notes:save-copy", filePath, frontmatter, body),
     stat: (filePath) => invokeDesktop("notes:stat", filePath),
     getGraphContext: (filePath) => invokeDesktop("notes:get-graph-context", filePath),
     getGraphTopology: () => invokeDesktop("notes:get-graph-topology"),

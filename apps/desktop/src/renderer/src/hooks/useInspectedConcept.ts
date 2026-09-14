@@ -1,7 +1,5 @@
 import { useCallback, useReducer } from "react";
 
-export type InspectionSource = "editor" | "graph" | "connections";
-
 export interface InspectedConcept {
   conceptId?: string;
   filePath?: string;
@@ -14,17 +12,15 @@ export interface GraphFocusRequest {
 
 export interface InspectedConceptState {
   concept: InspectedConcept | null;
-  source: InspectionSource;
   focusRequest: GraphFocusRequest | null;
 }
 
 type InspectedConceptAction =
-  | { type: "inspect"; concept: InspectedConcept | null; source: InspectionSource }
-  | { type: "focus"; concept: InspectedConcept; source: InspectionSource };
+  | { type: "inspect"; concept: InspectedConcept | null }
+  | { type: "focus"; concept: InspectedConcept };
 
 export const EMPTY_INSPECTED_CONCEPT_STATE: InspectedConceptState = {
   concept: null,
-  source: "editor",
   focusRequest: null,
 };
 
@@ -36,12 +32,10 @@ export function reduceInspectedConcept(
     return {
       ...state,
       concept: action.concept,
-      source: action.source,
     };
   }
   return {
     concept: action.concept,
-    source: action.source,
     focusRequest: {
       concept: action.concept,
       sequence: (state.focusRequest?.sequence ?? 0) + 1,
@@ -51,11 +45,11 @@ export function reduceInspectedConcept(
 
 export function useInspectedConcept() {
   const [state, dispatch] = useReducer(reduceInspectedConcept, EMPTY_INSPECTED_CONCEPT_STATE);
-  const inspect = useCallback((concept: InspectedConcept | null, source: InspectionSource) => {
-    dispatch({ type: "inspect", concept, source });
+  const inspect = useCallback((concept: InspectedConcept | null) => {
+    dispatch({ type: "inspect", concept });
   }, []);
-  const focus = useCallback((concept: InspectedConcept, source: InspectionSource) => {
-    dispatch({ type: "focus", concept, source });
+  const focus = useCallback((concept: InspectedConcept) => {
+    dispatch({ type: "focus", concept });
   }, []);
   return { state, inspect, focus };
 }

@@ -698,6 +698,17 @@ describe("workspace settings structural persistence", () => {
     )).toThrow("Command handle @claude is already configured");
   });
 
+  it("persists an explicit overflow-label preference without a structural Apply", () => {
+    const current = workspaceSettings();
+    const next = workspaceSettingsFromDialog(
+      workspaceSettingsDialogFixture({ graphShowOverflowLabels: false }),
+      { includeStructural: false },
+      current,
+    );
+    expect(next.graphShowOverflowLabels).toBe(false);
+    expect(next.noteRoots).toEqual(current.noteRoots);
+  });
+
   it("retains complete existing indexed roots while applying structural settings", () => {
     const root = {
       id: "research-docs",
@@ -839,6 +850,8 @@ function workspaceSettings(): WorkspaceSettings {
     editorFontSize: 15,
     terminalFontSize: 13,
     explorerScale: 1,
+    graphInverseNavigation: true,
+    graphShowOverflowLabels: true,
     exploreIndexSearchOnEnter: false,
     indexUpdateStrategy: "on-save",
   };

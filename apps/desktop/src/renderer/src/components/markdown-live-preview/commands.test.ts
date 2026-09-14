@@ -1,7 +1,7 @@
 import { EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 
-import { clampSelectionToRenderedListText, listEnterEdit, slashDateCommandEdit, wikilinkExitEdit } from "./commands";
+import { clampSelectionToRenderedListText, listEnterEdit, listPrefixSelectionFilter, selectAllMarkdown, slashDateCommandEdit, wikilinkExitEdit } from "./commands";
 
 describe("markdown editor list behavior", () => {
   it("continues unordered lists on Enter", () => {
@@ -51,6 +51,17 @@ describe("markdown editor list behavior", () => {
     const selection = clampSelectionToRenderedListText(state, anchor, 0);
     expect(selection?.anchor).toBe(anchor);
     expect(selection?.head).toBe("100. ".length);
+  });
+
+  it("selects the complete source when the document begins with a rendered list", () => {
+    let state = EditorState.create({ doc: "- first\n- second", extensions: [listPrefixSelectionFilter] });
+    const view = {
+      get state() { return state; },
+      dispatch(spec: Parameters<typeof state.update>[0]) { state = state.update(spec).state; },
+    };
+
+    expect(selectAllMarkdown(view)).toBe(true);
+    expect(state.selection.main).toMatchObject({ from: 0, to: state.doc.length });
   });
 });
 

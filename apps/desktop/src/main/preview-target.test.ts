@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { WorkspaceSettings } from "@exograph/core";
-import { resolvePreviewTarget } from "./preview-target";
+import { readPdfFile, resolvePreviewTarget } from "./preview-target";
 
 const tempPaths: string[] = [];
 
@@ -21,8 +21,9 @@ describe("resolvePreviewTarget", () => {
 
     await expect(resolvePreviewTarget(target, fixture.settings)).resolves.toEqual({
       ok: true,
-      url: pathToFileURL(target).toString(),
+      url: pathToFileURL(await realpath(target)).toString(),
       source: "file",
+      kind: "html",
     });
   });
 
@@ -33,8 +34,9 @@ describe("resolvePreviewTarget", () => {
 
     await expect(resolvePreviewTarget(relativeTarget, fixture.settings)).resolves.toEqual({
       ok: true,
-      url: pathToFileURL(absoluteTarget).toString(),
+      url: pathToFileURL(await realpath(absoluteTarget)).toString(),
       source: "file",
+      kind: "html",
     });
   });
 
@@ -44,8 +46,9 @@ describe("resolvePreviewTarget", () => {
 
     await expect(resolvePreviewTarget(pathToFileURL(target).toString(), fixture.settings)).resolves.toEqual({
       ok: true,
-      url: pathToFileURL(target).toString(),
+      url: pathToFileURL(await realpath(target)).toString(),
       source: "file",
+      kind: "html",
     });
   });
 
@@ -56,11 +59,13 @@ describe("resolvePreviewTarget", () => {
       ok: true,
       url: "https://localhost:4443/report.html",
       source: "url",
+      kind: "web",
     });
     await expect(resolvePreviewTarget("http://127.0.0.1:5173/report.html", fixture.settings)).resolves.toEqual({
       ok: true,
       url: "http://127.0.0.1:5173/report.html",
       source: "url",
+      kind: "web",
     });
   });
 
@@ -71,11 +76,13 @@ describe("resolvePreviewTarget", () => {
       ok: true,
       url: "http://localhost:4321/",
       source: "url",
+      kind: "web",
     });
     await expect(resolvePreviewTarget("127.0.0.1:5173/report.html", fixture.settings)).resolves.toEqual({
       ok: true,
       url: "http://127.0.0.1:5173/report.html",
       source: "url",
+      kind: "web",
     });
   });
 
@@ -110,6 +117,34 @@ describe("resolvePreviewTarget", () => {
     );
   });
 
+  it("rejects a local preview that escapes through an in-root symlink", async () => {
+    const fixture = await previewFixture();
+    const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "exograph-preview-symlink-outside-"));
+    tempPaths.push(outsideRoot);
+    const outsideTarget = path.join(outsideRoot, "report.html");
+    const linkedTarget = path.join(fixture.noteRoot, "artifacts", "linked-report.html");
+    await writeFile(outsideTarget, "<!doctype html><title>Outside</title>", "utf8");
+    await symlink(outsideTarget, linkedTarget);
+
+    await expect(resolvePreviewTarget(linkedTarget, fixture.settings)).rejects.toThrow(
+      "Local preview files must be inside a configured Note Root.",
+    );
+  });
+
+  it("returns the canonical URL for an in-root preview symlink", async () => {
+    const fixture = await previewFixture();
+    const target = path.join(fixture.noteRoot, "artifacts", "preview.html");
+    const linkedTarget = path.join(fixture.noteRoot, "artifacts", "linked-preview.html");
+    await symlink(target, linkedTarget);
+
+    await expect(resolvePreviewTarget(linkedTarget, fixture.settings)).resolves.toEqual({
+      ok: true,
+      url: pathToFileURL(await realpath(target)).toString(),
+      source: "file",
+      kind: "html",
+    });
+  });
+
   it("fails closed for a path that was formerly a Project Root", async () => {
     const fixture = await previewFixture();
     const target = path.join(fixture.projectRoot, "docs", "artifacts", "core-plugin-boundary.html");
@@ -117,6 +152,34 @@ describe("resolvePreviewTarget", () => {
     await expect(resolvePreviewTarget(target, fixture.settings)).rejects.toThrow(
       "Local preview files must be inside a configured Note Root.",
     );
+  });
+
+  it("classifies an in-root PDF explicitly and reads its bytes only after re-authorizing it", async () => {
+    const fixture = await previewFixture();
+    const target = path.join(fixture.noteRoot, "artifacts", "reader.pdf");
+    await writeFile(target, "%PDF-1.4\nfixture", "utf8");
+
+    await expect(resolvePreviewTarget(target, fixture.settings)).resolves.toEqual({
+      ok: true,
+      url: pathToFileURL(await realpath(target)).toString(),
+      source: "file",
+      kind: "pdf",
+      filePath: target,
+    });
+    await expect(readPdfFile(target, fixture.settings)).resolves.toEqual(new Uint8Array(Buffer.from("%PDF-1.4\nfixture")).buffer);
+  });
+
+  it("rejects PDF reads outside a Note Root and through a symlink escape", async () => {
+    const fixture = await previewFixture();
+    const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "exograph-pdf-outside-"));
+    tempPaths.push(outsideRoot);
+    const outsidePdf = path.join(outsideRoot, "outside.pdf");
+    const escapedPdf = path.join(fixture.noteRoot, "artifacts", "escaped.pdf");
+    await writeFile(outsidePdf, "%PDF-1.4\noutside", "utf8");
+    await symlink(outsidePdf, escapedPdf);
+
+    await expect(readPdfFile(outsidePdf, fixture.settings)).rejects.toThrow("Local PDF files must be inside a configured Note Root.");
+    await expect(readPdfFile(escapedPdf, fixture.settings)).rejects.toThrow("Local PDF files must be inside a configured Note Root.");
   });
 });
 
@@ -157,6 +220,8 @@ async function previewFixture(): Promise<{
       editorFontSize: 15,
       terminalFontSize: 13,
       explorerScale: 1,
+      graphInverseNavigation: true,
+      graphShowOverflowLabels: true,
       exploreIndexSearchOnEnter: false,
       indexUpdateStrategy: "manual",
     },

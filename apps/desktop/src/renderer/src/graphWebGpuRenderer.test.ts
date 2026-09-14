@@ -122,7 +122,7 @@ describe("WebGPU graph pixel adapter", () => {
     renderer.resize({ width: 320, height: 180, dpr: 9 });
     const measurement = renderer.render(plan());
 
-    expect(mock.surface).toMatchObject({ width: 960, height: 540, style: { width: "320px", height: "180px" } });
+    expect(mock.surface).toMatchObject({ width: 960, height: 540, style: { width: "", height: "" } });
     expect(mock.context.configurations.at(-1)).toMatchObject({ alphaMode: "premultiplied", colorSpace: "srgb" });
     expect(mock.device.shaderLabels).toEqual(["exograph graph nodes", "exograph graph edges"]);
     expect(mock.device.queue.writes.map((write) => write.size)).toEqual([128, 64, 16]);

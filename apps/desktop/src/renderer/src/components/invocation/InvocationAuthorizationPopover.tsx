@@ -1,4 +1,4 @@
-import { Bot, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import {
   useId,
   useLayoutEffect,
@@ -7,7 +7,8 @@ import {
   type KeyboardEvent,
 } from "react";
 
-import { AgentIcon } from "../AgentIcon";
+import { AgentCommandIcon } from "../AgentCommandIcon";
+import type { AgentCommandAppearance } from "@exograph/core/agent-command-configuration";
 import "./invocation-ui.css";
 
 export type InvocationAuthorizationDecision = "once" | "workspace";
@@ -30,6 +31,7 @@ export interface InvocationPopoverPosition {
 export interface InvocationAuthorizationPopoverProps {
   commandLabel: string;
   commandHandle: string;
+  commandAppearance?: AgentCommandAppearance;
   request: string;
   details: InvocationAuthorizationDetails;
   position?: InvocationPopoverPosition;
@@ -41,6 +43,7 @@ export interface InvocationAuthorizationPopoverProps {
 export function InvocationAuthorizationPopover({
   commandLabel,
   commandHandle,
+  commandAppearance,
   request,
   details,
   position,
@@ -96,7 +99,7 @@ export function InvocationAuthorizationPopover({
     >
       <header className="invocation-authorization-popover__header">
         <span className={`invocation-agent-mark invocation-agent-mark--${agentKind(commandHandle)}`}>
-          <InvocationAgentIcon handle={commandHandle} />
+          <AgentCommandIcon command={{ handle: commandHandle, appearance: commandAppearance }} size={15} />
         </span>
         <div>
           <strong id={titleId}>Run {commandLabel}?</strong>
@@ -150,13 +153,6 @@ export function InvocationAuthorizationPopover({
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return <div><dt>{label}</dt><dd title={value}>{value}</dd></div>;
-}
-
-function InvocationAgentIcon({ handle }: { handle: string }) {
-  const kind = agentKind(handle);
-  return kind === "default"
-    ? <Bot aria-hidden="true" size={15} strokeWidth={1.8} />
-    : <AgentIcon kind={kind} size={15} />;
 }
 
 function agentKind(handle: string): "claude" | "codex" | "default" {

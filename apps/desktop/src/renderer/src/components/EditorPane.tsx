@@ -1,8 +1,8 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 
 import type { AgentCommand, InvocationSkillContext, NoteDocument, WorkspaceGraphContext } from "@exograph/core";
 import type { InvocationFileReviewPayload } from "../../../shared/api";
-import type { InvocationReviewQueueProjection } from "./invocation";
+import type { InvocationReviewPosition, InvocationReviewQueueProjection } from "./invocation";
 import type { DragManager } from "../hooks/useDragManager";
 import type { ExographThemeVariant } from "../theme/types";
 
@@ -16,6 +16,9 @@ import type { InlineAgentDraft } from "./inlineAgentComposer";
 
 interface EditorDocument extends NoteDocument {
   dirty: boolean;
+  saveConflict?: "changed" | "missing";
+  resolvingConflict?: boolean;
+  filesystemState?: "deleted";
 }
 
 export interface EditorPaneState {
@@ -38,7 +41,7 @@ interface EditorPaneProps {
   pane: EditorPaneState;
   documents: Record<string, EditorDocument>;
   graphContextByPath: Record<string, WorkspaceGraphContext>;
-  saveStatuses: Record<string, "idle" | "saving" | "saved" | "error">;
+  saveStatuses: Record<string, "idle" | "saving" | "saved" | "error" | "conflict">;
   isFocused: boolean;
   onFocusPane: () => void;
   onActivateTab: (filePath: string) => void;
@@ -54,6 +57,11 @@ interface EditorPaneProps {
   onUpdateFrontmatter: (key: string, value: unknown) => void;
   onBodyChange: (body: string) => void;
   onSave: () => void;
+  onSaveConflictCopy?: () => void;
+  onDiscardSaveConflict?: () => Promise<void>;
+  onRecoverDeleted: () => void;
+  onSaveDeletedAs: () => void;
+  onShowInExplorer: (filePath: string) => void;
   onOpenTag: (tag: string) => void;
   onOpenTarget: (target: string) => void;
   onSuggestTargets: (query: string) => Promise<Array<{ label: string; target: string; detail?: string }>>;
@@ -75,6 +83,11 @@ interface EditorPaneProps {
   agentComposeRequest?: AgentComposeRequest | null;
   onAgentComposeRequestHandled?: (nonce: number) => void;
   isNoteDocument: (filePath: string) => boolean;
+  invocationActivity?: {
+    protocolInvocationId?: string;
+    render: (position?: InvocationReviewPosition) => ReactNode;
+  };
+  onResumeProtocolInvocation?: (protocolInvocationId: string) => void;
 }
 
 export function EditorPane(props: EditorPaneProps) {
@@ -97,6 +110,11 @@ export function EditorPane(props: EditorPaneProps) {
     onUpdateFrontmatter,
     onBodyChange,
     onSave,
+    onSaveConflictCopy,
+    onDiscardSaveConflict,
+    onRecoverDeleted,
+    onSaveDeletedAs,
+    onShowInExplorer,
     onOpenTag,
     onOpenTarget,
     onSuggestTargets,
@@ -118,11 +136,14 @@ export function EditorPane(props: EditorPaneProps) {
     agentComposeRequest,
     onAgentComposeRequestHandled,
     isNoteDocument,
+    invocationActivity,
+    onResumeProtocolInvocation,
   } = props;
 
   const activeDocument = pane.activePath ? documents[pane.activePath] ?? null : null;
   const activeGraphContext = pane.activePath ? graphContextByPath[pane.activePath] ?? null : null;
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(true);
+  const [tabContextMenu, setTabContextMenu] = useState<{ filePath: string; x: number; y: number } | null>(null);
   const faultContextRef = useRef<EditorFaultContext>({
     notePath: activeDocument?.filePath ?? null,
     mode: activeDocument?.kind === "markdown" ? "markdown-live" : activeDocument ? "code" : "empty",
@@ -160,7 +181,7 @@ export function EditorPane(props: EditorPaneProps) {
             <ChromeTab
               key={document.filePath}
               active={document.filePath === pane.activePath}
-              className="tab-strip__tab"
+              className={`tab-strip__tab${document.filesystemState === "deleted" ? " tab-strip__tab--deleted" : ""}`}
               dropPaneId={pane.id}
               dropKind="editor"
               onClick={() => onActivateTab(document.filePath)}
@@ -171,7 +192,12 @@ export function EditorPane(props: EditorPaneProps) {
                   sourcePaneId: pane.id,
                 });
               }}
-              leading={<span className={document.dirty ? "status-dot status-dot--dirty" : "status-dot"} />}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setTabContextMenu({ filePath: document.filePath, x: event.clientX, y: event.clientY });
+              }}
+              leading={<span className={document.filesystemState === "deleted" ? "status-dot status-dot--deleted" : document.dirty ? "status-dot status-dot--dirty" : "status-dot"} />}
               closeLabel={`Close ${displayTitle}`}
               onClose={(event) => {
                 event.stopPropagation();
@@ -179,7 +205,7 @@ export function EditorPane(props: EditorPaneProps) {
               }}
               closeIcon="×"
             >
-              {displayTitle}
+              {document.filesystemState === "deleted" ? `${displayTitle} · deleted` : displayTitle}
             </ChromeTab>
           );
         })}
@@ -196,6 +222,17 @@ export function EditorPane(props: EditorPaneProps) {
         ) : null}
       </div>
 
+      {tabContextMenu ? (
+        <>
+          <button aria-label="Dismiss tab menu" className="tree-context-menu__backdrop" onClick={() => setTabContextMenu(null)} type="button" />
+          <div className="tree-context-menu" style={{ left: `${tabContextMenu.x}px`, top: `${tabContextMenu.y}px` }}>
+            <button className="tree-context-menu__item" onClick={() => { onShowInExplorer(tabContextMenu.filePath); setTabContextMenu(null); }} type="button">
+              Show in Explorer
+            </button>
+          </div>
+        </>
+      ) : null}
+
       {pane.activeFolderPath ? <FolderOverviewPane directoryPath={pane.activeFolderPath} onOpenFolder={onOpenFolder} onOpenFile={onOpenFile} onClose={() => onCloseFolder(pane.activeFolderPath!)} /> : <EditorFaultBoundary key={pane.activePath ?? "empty"} getContext={() => faultContextRef.current}><NoteEditor
         document={activeDocument}
         graphContext={activeGraphContext}
@@ -206,6 +243,10 @@ export function EditorPane(props: EditorPaneProps) {
         onUpdateFrontmatter={onUpdateFrontmatter}
         onBodyChange={onBodyChange}
         onSave={onSave}
+        onSaveConflictCopy={onSaveConflictCopy}
+        onDiscardSaveConflict={onDiscardSaveConflict}
+        onRecoverDeleted={onRecoverDeleted}
+        onSaveDeletedAs={onSaveDeletedAs}
         onOpenTag={onOpenTag}
         onOpenTarget={onOpenTarget}
         onSuggestTargets={onSuggestTargets}
@@ -229,6 +270,8 @@ export function EditorPane(props: EditorPaneProps) {
         agentComposeRequest={agentComposeRequest?.filePath === activeDocument?.filePath ? agentComposeRequest : null}
         onAgentComposeRequestHandled={onAgentComposeRequestHandled}
         onDiagnosticContext={updateFaultContext}
+        invocationActivity={invocationActivity}
+        onResumeProtocolInvocation={onResumeProtocolInvocation}
       /></EditorFaultBoundary>}
     </div>
   );
@@ -247,4 +290,5 @@ export interface EditorInvocationReview {
   onRefreshConflict: () => void;
   onOpenConflict: () => void;
   onDismiss?: () => void;
+  onResume?: () => void;
 }

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, LoaderCircle, RefreshCw, Sparkles, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { LoaderCircle, RefreshCw, Sparkles, X } from "lucide-react";
 import type { OntologyReviewState } from "@exograph/core";
 
 type BusyState = "preview" | "keep" | "reject" | "discover" | null;
@@ -45,7 +45,7 @@ export function OntologyReviewRow({ compact = false }: { compact?: boolean }) {
       if (operationEpochRef.current !== epoch) return;
       setReview(result.review);
       setReopened(false);
-      setNotice(result.status === "stale" ? "Changed—review again" : "Applied");
+      setNotice(result.status === "stale" ? "Changed—review again" : "Activated");
     } catch {
       if (operationEpochRef.current !== epoch) return;
       setNotice("Could not apply");
@@ -141,7 +141,7 @@ export function OntologyReviewPresentation({
   const rejected = review?.candidate.rejected ?? false;
   const activeUnavailable = review?.active.state === "invalid-state";
   const showActions = pending && !activeUnavailable && (!rejected || reopened);
-  const identity = review ? activeIdentity(review) : "Ontology";
+  const identity = review ? activeIdentity(review) : busy === "preview" ? "Loading…" : "Unavailable";
   const candidateIdentity = review && pending ? pendingIdentity(review) : null;
   const effects = review?.effects;
   const findingCount = effects
@@ -150,17 +150,17 @@ export function OntologyReviewPresentation({
   const relationDelta = effects ? effects.after.ontologyRelations - effects.before.ontologyRelations : 0;
   const firstDiagnostic = review?.diagnostics[0];
 
-  return (
-    <section
-      className={`ontology-review${compact ? " ontology-review--compact" : ""}`}
-      data-testid={compact ? "graph-ontology" : "workspace-settings-ontology"}
-    >
+  const panel = (
+    <section className="ontology-review" data-testid={compact ? "graph-ontology-review" : "workspace-settings-ontology"}>
       <div className="ontology-review__main">
         <div className="ontology-review__identity">
-          {!compact ? <span className="dialog-field__label">Ontology</span> : null}
+          <span className="dialog-field__label">Ontology</span>
+          <span className="ontology-review__active">Active: <strong>{identity}</strong></span>
           {review && onSelect ? (
+            <label className="ontology-review__choice">
+              <span>Preview</span>
             <select
-              aria-label="Choose ontology"
+              aria-label="Preview ontology"
               className="ontology-review__select"
               disabled={Boolean(busy)}
               onChange={(event) => {
@@ -169,7 +169,7 @@ export function OntologyReviewPresentation({
                   ? null
                   : review.library[sourceIndex]?.sourcePath ?? null);
               }}
-              title="Ontology"
+              title="Preview an ontology before activating it"
               value={ontologySelectionValue(review)}
             >
               <option value="__generic__">Generic</option>
@@ -179,10 +179,11 @@ export function OntologyReviewPresentation({
                 </option>
               ))}
             </select>
-          ) : <strong>{identity}</strong>}
-          {candidateIdentity ? <span className="ontology-review__candidate">→ {candidateIdentity}</span> : null}
+            </label>
+          ) : null}
+          {candidateIdentity ? <span className="ontology-review__candidate">Preview: {candidateIdentity}</span> : null}
         </div>
-        <div className="ontology-review__tokens" aria-label="Ontology graph effects">
+        <div className="ontology-review__tokens" aria-label={pending ? "Preview graph effects" : "Active graph effects"}>
           {effects ? <span>{effects.after.typedConcepts} typed</span> : null}
           {effects ? <span>{signedCount(relationDelta)} relations</span> : null}
           {effects ? <span>{findingCount} findings</span> : null}
@@ -206,14 +207,14 @@ export function OntologyReviewPresentation({
         {!busy && showActions ? (
           <>
             <button
-              aria-label="Keep ontology"
-              className="icon-button"
+              aria-label="Activate ontology"
+              className="toolbar-button"
               disabled={review?.candidate.state === "invalid"}
               onClick={onKeep}
-              title="Keep"
+              title={candidateIdentity ? `Activate ${candidateIdentity}` : "Activate ontology"}
               type="button"
             >
-              <Check size={16} aria-hidden="true" />
+              Activate
             </button>
             <button aria-label="Reject ontology" className="icon-button" onClick={onReject} title="Reject" type="button">
               <X size={16} aria-hidden="true" />
@@ -221,6 +222,7 @@ export function OntologyReviewPresentation({
           </>
         ) : null}
       </div>
+      {pending ? <p className="ontology-review__hint">Preview only. Activate makes this ontology active in the graph.</p> : null}
       {firstDiagnostic ? (
         review && review.diagnostics.length + review.omittedDiagnostics > 1 ? (
           <details className="ontology-review__diagnostic">
@@ -231,6 +233,50 @@ export function OntologyReviewPresentation({
         ) : <div className="ontology-review__diagnostic">{firstDiagnostic.message}</div>
       ) : null}
     </section>
+  );
+  return compact ? (
+    <OntologyReviewDisclosure identity={identity}>{panel}</OntologyReviewDisclosure>
+  ) : panel;
+}
+
+function OntologyReviewDisclosure({ identity, children }: { identity: string; children: ReactNode }) {
+  const disclosureRef = useRef<HTMLDetailsElement>(null);
+  const summaryRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const dismissOutside = (event: PointerEvent) => {
+      const disclosure = disclosureRef.current;
+      if (disclosure?.open && event.target instanceof Node && !disclosure.contains(event.target)) disclosure.open = false;
+    };
+    const disclosure = disclosureRef.current;
+    const graph = disclosure?.closest(".spatial-graph");
+    const toolbar = disclosure?.closest(".spatial-graph__toolbar");
+    const measureAvailableHeight = () => {
+      if (!graph || !toolbar || !disclosure) return;
+      const height = Math.max(0, graph.getBoundingClientRect().bottom - toolbar.getBoundingClientRect().bottom - 6);
+      disclosure.style.setProperty("--ontology-review-height", `${height}px`);
+    };
+    const observer = new ResizeObserver(measureAvailableHeight);
+    if (graph) observer.observe(graph);
+    if (toolbar) observer.observe(toolbar);
+    measureAvailableHeight();
+    document.addEventListener("pointerdown", dismissOutside);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("pointerdown", dismissOutside);
+    };
+  }, []);
+  return (
+    <details ref={disclosureRef} className="ontology-review-control" data-testid="graph-ontology"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || event.defaultPrevented || !disclosureRef.current?.open) return;
+        event.preventDefault();
+        event.stopPropagation();
+        disclosureRef.current.open = false;
+        summaryRef.current?.focus();
+      }}>
+      <summary ref={summaryRef} aria-label={`Ontology; active ${identity}`} title={`Ontology · Active: ${identity}`}>Active: {identity}</summary>
+      {children}
+    </details>
   );
 }
 

@@ -1,10 +1,11 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createDefaultCodexAgentCommand } from "@exograph/core";
+import { createDefaultClaudeAgentCommand, createDefaultCodexAgentCommand } from "@exograph/core";
 import {
+  createOntologyDesignPrompt,
   normalizeOntologyDiscoveryResponse,
   OntologyDiscoveryCoordinator,
   runOntologyDiscovery,
@@ -28,6 +29,7 @@ describe("ontology discovery", () => {
     let previewCount = 0;
     const coordinator = new OntologyDiscoveryCoordinator({
       getCommands: () => [createDefaultCodexAgentCommand()],
+      getDefaultCommandId: () => "codex",
       getWorkspace: () => ({
         workspaceRoot: root,
         runtimeRoot: path.join(root, ".exograph"),
@@ -38,13 +40,7 @@ describe("ontology discovery", () => {
         executablePath: "/usr/bin/true",
       }),
       getCommandTrust: async () => ({ trusted: true }),
-      ensureSkill: async () => ({
-        id: "design-workspace-ontology",
-        label: "Design workspace ontology",
-        path: path.join(noteRoot, "skills", "design-workspace-ontology.md"),
-        revision: "a".repeat(64),
-        source: "Inspect without writing.",
-      }),
+      getPrompt: () => createOntologyDesignPrompt("Inspect without writing."),
       invalidateDerivedState: vi.fn(),
       previewOntology: async () => ({
         library: [],
@@ -92,6 +88,7 @@ describe("ontology discovery", () => {
     });
     const coordinator = new OntologyDiscoveryCoordinator({
       getCommands: () => [command],
+      getDefaultCommandId: () => command.id,
       getWorkspace: () => ({
         workspaceRoot: "/workspace",
         runtimeRoot: "/workspace/.exograph",
@@ -102,13 +99,7 @@ describe("ontology discovery", () => {
         executablePath: "/usr/bin/true",
       }),
       getCommandTrust: async () => ({ trusted: true }),
-      ensureSkill: async () => ({
-        id: "design-workspace-ontology",
-        label: "Design workspace ontology",
-        path: "/workspace/notes/skills/design-workspace-ontology.md",
-        revision: "a".repeat(64),
-        source: "Inspect without writing.",
-      }),
+      getPrompt: () => createOntologyDesignPrompt("Inspect without writing."),
       invalidateDerivedState: vi.fn(),
       previewOntology: async () => ({
         library: [],
@@ -146,6 +137,74 @@ describe("ontology discovery", () => {
     await expect(coordinator.discover()).resolves.toMatchObject({ status: "abstained" });
   });
 
+  it("uses the selected default command instead of configuration order", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-ontology-default-command-"));
+    roots.push(root);
+    const claude = createDefaultClaudeAgentCommand();
+    const codex = createDefaultCodexAgentCommand();
+    const runDiscovery = vi.fn(async ({ command, skill }) => ({
+      response: normalizeOntologyDiscoveryResponse(proposal()),
+      command: { id: command.id, handle: command.handle, label: command.label, adapter: command.adapter },
+      skill,
+    }));
+    const coordinator = new OntologyDiscoveryCoordinator({
+      getCommands: () => [claude, codex],
+      getDefaultCommandId: () => codex.id,
+      getWorkspace: () => ({ workspaceRoot: root, runtimeRoot: path.join(root, ".exograph"), noteRoots: [path.join(root, "notes")] }),
+      getCommandLaunchFacts: async (commandId) => ({ launchable: true, executablePath: `/bin/${commandId}` }),
+      getCommandTrust: async () => ({ trusted: true }),
+      getPrompt: () => createOntologyDesignPrompt("Inspect."),
+      invalidateDerivedState: vi.fn(),
+      previewOntology: async () => reviewState(),
+      getGraphTopology: async () => ({ sourceSnapshotId: "graph-snapshot" }),
+      runDiscovery,
+      notifyCandidateChanged: vi.fn(),
+    });
+
+    await coordinator.discover();
+    expect(runDiscovery).toHaveBeenCalledWith(expect.objectContaining({ command: codex, executablePath: "/bin/codex" }));
+  });
+
+  it("reports the exact setup problem for the selected default command", async () => {
+    const codex = createDefaultCodexAgentCommand();
+    const coordinator = new OntologyDiscoveryCoordinator({
+      getCommands: () => [codex],
+      getDefaultCommandId: () => codex.id,
+      getWorkspace: () => ({ workspaceRoot: "/workspace", runtimeRoot: "/workspace/.exograph", noteRoots: ["/workspace/notes"] }),
+      getCommandLaunchFacts: async () => ({ launchable: false, executablePath: null }),
+      getCommandTrust: async () => ({ trusted: true }),
+      getPrompt: () => createOntologyDesignPrompt(),
+      invalidateDerivedState: vi.fn(),
+      previewOntology: vi.fn(),
+      getGraphTopology: vi.fn(),
+      runDiscovery: vi.fn(),
+      notifyCandidateChanged: vi.fn(),
+    });
+
+    await expect(coordinator.discover()).rejects.toThrow("Codex is not available. Check its executable in Settings → Agents.");
+  });
+
+  it("explains how to authorize an untrusted default command", async () => {
+    const codex = createDefaultCodexAgentCommand();
+    const coordinator = new OntologyDiscoveryCoordinator({
+      getCommands: () => [codex],
+      getDefaultCommandId: () => codex.id,
+      getWorkspace: () => ({ workspaceRoot: "/workspace", runtimeRoot: "/workspace/.exograph", noteRoots: ["/workspace/notes"] }),
+      getCommandLaunchFacts: async () => ({ launchable: true, executablePath: "/bin/codex" }),
+      getCommandTrust: async () => ({ trusted: false }),
+      getPrompt: () => createOntologyDesignPrompt(),
+      invalidateDerivedState: vi.fn(),
+      previewOntology: vi.fn(),
+      getGraphTopology: vi.fn(),
+      runDiscovery: vi.fn(),
+      notifyCandidateChanged: vi.fn(),
+    });
+
+    await expect(coordinator.discover()).rejects.toThrow(
+      "Authorize Codex once with @codex, then try Discover structure again.",
+    );
+  });
+
   it("runs a configured provider against a disposable Markdown snapshot", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "exograph-ontology-discovery-test-"));
     roots.push(root);
@@ -169,9 +228,9 @@ await writeFile(process.argv[outputIndex + 1], JSON.stringify(${JSON.stringify(p
       command: createDefaultCodexAgentCommand(),
       executablePath,
       skill: {
-        id: "design-workspace-ontology",
-        label: "Design workspace ontology",
-        path: path.join(root, "skills", "design-workspace-ontology.md"),
+        id: "ontology-design",
+        label: "Ontology design",
+        path: "exograph://settings/graph/ontology-design-prompt",
         revision: "a".repeat(64),
         source: "Inspect without writing.",
       },
@@ -185,6 +244,35 @@ await writeFile(process.argv[outputIndex + 1], JSON.stringify(${JSON.stringify(p
     });
     await expect(readFile(notePath, "utf8")).resolves.toBe("# Note\n");
     await expect(readFile(ignoredPath, "utf8")).resolves.toBe("not copied\n");
+  });
+
+  it("prepares discovery without creating a Skill inside the Note Root", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-ontology-no-skill-write-"));
+    roots.push(root);
+    const noteRoot = path.join(root, "notes");
+    await mkdir(noteRoot);
+    const command = createDefaultCodexAgentCommand();
+    const coordinator = new OntologyDiscoveryCoordinator({
+      getCommands: () => [command],
+      getDefaultCommandId: () => command.id,
+      getWorkspace: () => ({ workspaceRoot: root, runtimeRoot: path.join(root, ".exograph"), noteRoots: [noteRoot] }),
+      getCommandLaunchFacts: async () => ({ launchable: true, executablePath: "/bin/codex" }),
+      getCommandTrust: async () => ({ trusted: true }),
+      getPrompt: () => createOntologyDesignPrompt(),
+      invalidateDerivedState: vi.fn(),
+      previewOntology: async () => reviewState(),
+      getGraphTopology: async () => ({ sourceSnapshotId: "graph-snapshot" }),
+      runDiscovery: async ({ command: selected, skill }) => ({
+        response: normalizeOntologyDiscoveryResponse({ ...proposal(), outcome: "abstain", candidateSource: null }),
+        command: { id: selected.id, handle: selected.handle, label: selected.label, adapter: selected.adapter },
+        skill,
+      }),
+      notifyCandidateChanged: vi.fn(),
+    });
+
+    await coordinator.discover();
+    await expect(readFile(path.join(noteRoot, "skills", "design-workspace-ontology.md"), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects invalid source and absolute evidence before host staging", () => {
@@ -214,5 +302,21 @@ function proposal() {
     evidence: [{ path: "note.md", detail: "Representative note." }],
     conflicts: [],
     question: null,
+  };
+}
+
+function reviewState() {
+  return {
+    library: [],
+    active: { state: "generic" as const },
+    candidate: { state: "absent" as const, sourcePath: null, revision: null, pending: false, rejected: false },
+    guard: {
+      candidateSourcePath: "ontology.yaml",
+      candidateRevision: null,
+      activationRevision: null,
+      baseSnapshotId: "graph-snapshot",
+    },
+    diagnostics: [],
+    omittedDiagnostics: 0,
   };
 }

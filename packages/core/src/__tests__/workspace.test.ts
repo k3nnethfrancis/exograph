@@ -22,6 +22,37 @@ describe("workspace", () => {
     }
   });
 
+  it("refuses to overwrite an existing workspace file", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-workspace-"));
+    const target = path.join(root, "existing.md");
+    try {
+      await writeFile(target, "# Keep this\n", "utf8");
+      await expect(createWorkspaceFile(target)).rejects.toThrow(`Destination already exists: ${target}`);
+      await expect(readFile(target, "utf8")).resolves.toBe("# Keep this\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows exactly one concurrent create and preserves that writer's complete content", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-workspace-"));
+    const target = path.join(root, "new-folder", "shared.md");
+    const contents = ["first writer\n".repeat(1_000), "second writer\n".repeat(1_000)];
+    try {
+      const results = await Promise.allSettled(contents.map((content) => createWorkspaceFile(target, content)));
+      const winners = results.flatMap((result, index) => result.status === "fulfilled" ? [index] : []);
+
+      expect(winners).toHaveLength(1);
+      await expect(readFile(target, "utf8")).resolves.toBe(contents[winners[0]!]);
+      for (const result of results) {
+        if (result.status === "fulfilled") expect(result.value).toBe(target);
+        else expect(result.reason).toEqual(new Error(`Destination already exists: ${target}`));
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("resolves the default workspace model from env", () => {
     const model = resolveWorkspaceModel({
       EXOGRAPH_WORKSPACE_ROOT: fixtureWorkspaceRoot,
@@ -75,6 +106,23 @@ describe("workspace", () => {
   it("lists markdown tree nodes", async () => {
     const nodes = await listRootTree(path.join(fixtureWorkspaceRoot, "notes/test-notes"), { markdownOnly: true });
     expect(nodes.some((node) => node.name === "focus-note.md")).toBe(true);
+  });
+
+  it("can expose PDF artifacts in a deliberately narrow tree without adding them to Markdown enumeration", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-pdf-tree-"));
+    try {
+      await writeFile(path.join(root, "note.md"), "# Note\n", "utf8");
+      await writeFile(path.join(root, "paper.pdf"), "%PDF-1.4\nfixture", "utf8");
+      await writeFile(path.join(root, "ignored.txt"), "not an artifact", "utf8");
+
+      await expect(listRootTree(root, { allowedFileExtensions: [".md", ".pdf"] })).resolves.toEqual([
+        expect.objectContaining({ name: "note.md", kind: "file" }),
+        expect.objectContaining({ name: "paper.pdf", kind: "file" }),
+      ]);
+      await expect(listMarkdownFiles([root])).resolves.toEqual([path.join(root, "note.md")]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("prunes excluded content paths from a Markdown tree", async () => {

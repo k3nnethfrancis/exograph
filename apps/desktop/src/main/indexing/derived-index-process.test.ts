@@ -66,6 +66,20 @@ describe("UtilityDerivedIndexClient", () => {
     worker.emit("message", { id: 1, ok: true, result: { results: [] } });
   });
 
+  it("carries traversal scope and cursor to the worker and cancels abandoned traversal", async () => {
+    const worker = new FakeProcess();
+    const client = new UtilityDerivedIndexClient({ spawn: () => worker, workerPath: "/app/derived-index-worker.js" });
+    const controller = new AbortController();
+    const request = { workspaceRoot: "/workspace", start: "note:notes:a.md", cursor: "opaque", limit: 10 };
+    const pending = client.graphTraverse(model(), "/workspace/.exograph", request, controller.signal);
+    expect(worker.messages.at(-1)).toMatchObject({ id: 1, operation: "graph-traverse", request, context: { runtimeRoot: "/workspace/.exograph" } });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(worker.messages.at(-1)).toEqual({ id: 1, operation: "cancel" });
+    worker.emit("message", { id: 1, ok: true, result: { status: "ok" } });
+    client.dispose();
+  });
+
   it("routes graph context and incremental refresh through the isolated worker", async () => {
     const worker = new FakeProcess();
     const client = new UtilityDerivedIndexClient({ spawn: () => worker, workerPath: "/app/derived-index-worker.js" });

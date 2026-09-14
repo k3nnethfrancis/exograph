@@ -20,6 +20,7 @@ interface ChromeTabProps {
   onClick: MouseEventHandler<HTMLElement>;
   onDoubleClick?: MouseEventHandler<HTMLElement>;
   onMouseDown?: MouseEventHandler<HTMLElement>;
+  onContextMenu?: MouseEventHandler<HTMLElement>;
   leading?: ReactNode;
   trailing?: ReactNode;
   closeLabel?: string;
@@ -57,6 +58,7 @@ export function ChromeTab(props: ChromeTabProps) {
     onClick,
     onDoubleClick,
     onMouseDown,
+    onContextMenu,
     leading,
     trailing,
     closeLabel,
@@ -76,6 +78,7 @@ export function ChromeTab(props: ChromeTabProps) {
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onMouseDown={onMouseDown}
+      onContextMenu={onContextMenu}
       title={title}
       role="button"
       tabIndex={0}

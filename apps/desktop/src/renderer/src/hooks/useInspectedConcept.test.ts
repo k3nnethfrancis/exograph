@@ -10,11 +10,9 @@ describe("inspected Concept ownership", () => {
     const inspected = reduceInspectedConcept(EMPTY_INSPECTED_CONCEPT_STATE, {
       type: "inspect",
       concept: { filePath: "/notes/one.md" },
-      source: "editor",
     });
 
     expect(inspected.concept).toEqual({ filePath: "/notes/one.md" });
-    expect(inspected.source).toBe("editor");
     expect(inspected.focusRequest).toBeNull();
   });
 
@@ -22,12 +20,10 @@ describe("inspected Concept ownership", () => {
     const first = reduceInspectedConcept(EMPTY_INSPECTED_CONCEPT_STATE, {
       type: "focus",
       concept: { filePath: "/notes/one.md" },
-      source: "editor",
     });
     const second = reduceInspectedConcept(first, {
       type: "focus",
       concept: { filePath: "/notes/one.md" },
-      source: "editor",
     });
 
     expect(first.focusRequest?.sequence).toBe(1);

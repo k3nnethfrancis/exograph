@@ -768,18 +768,45 @@ describe("QMD index adapter", () => {
     expect(stores[1].searchLexCalls.map((call) => call.limit)).toEqual([142]);
   });
 
-  it("throws without fallback when a provider stream exhausts its relative refill budget", async () => {
+  it("returns authorized partial results when a provider stream reaches its refill limit", async () => {
     const root = await fixtureRoot();
     const cappedPaths = Array.from({ length: 104 }, (_, index) => path.join(root, "notes", `capped-${index}.md`));
+    await Promise.all(cappedPaths.slice(0, 2).map((filePath) => writeFile(filePath, "# Authorized\n", "utf8")));
     searchLexResultsOverride = cappedPaths.map((filePath, index) => qmdResult(filePath, 1 - index / 1000));
 
-    await expect(qmdSearchProvider.search(indexedModel(root, "lexical"), path.join(root, ".exograph"), "result", {
+    const result = await qmdSearchProvider.search(indexedModel(root, "lexical"), path.join(root, ".exograph"), "result", {
       limit: 2,
-    })).rejects.toThrow(
-      "QMD search exhausted its bounded refill budget of 100 additional results in a provider stream before finding enough authorized results or proving exhaustion.",
-    );
+    });
+
+    expect(result.results.map((entry) => entry.filePath)).toEqual(cappedPaths.slice(0, 2));
+    expect(result.hasMore).toBe(true);
+    expect(result.incomplete).toEqual({
+      reason: "authorization_refill_limit",
+      requested: 2,
+      returned: 2,
+    });
+    expect(result.warnings).toContain("QMD reached its authorization scan limit; returning the authorized results found so far.");
     expect(stores[0].searchLexCalls.map((call) => call.limit)).toEqual([4, 8, 16, 32, 64, 103]);
     expect(readFileMock).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty partial result when the refill limit finds no authorized paths", async () => {
+    const root = await fixtureRoot();
+    const stalePaths = Array.from({ length: 104 }, (_, index) => path.join(root, "notes", `stale-${index}.md`));
+    searchLexResultsOverride = stalePaths.map((filePath, index) => qmdResult(filePath, 1 - index / 1000));
+
+    const result = await qmdSearchProvider.search(indexedModel(root, "lexical"), path.join(root, ".exograph"), "result", {
+      limit: 2,
+    });
+
+    expect(result.results).toEqual([]);
+    expect(result.hasMore).toBe(true);
+    expect(result.incomplete).toEqual({
+      reason: "authorization_refill_limit",
+      requested: 2,
+      returned: 0,
+    });
+    expect(result.warnings).toContain("QMD reached its authorization scan limit; returning the authorized results found so far.");
   });
 
   it("preserves global score ordering while refilling bounded collection streams", async () => {
@@ -970,6 +997,19 @@ describe("QMD index adapter", () => {
     expect(bodyResult.results[0]).toMatchObject({ filePath: notePath, title: "Sigmund Lab", source: "filesystem" });
     expect(bodyResult.results[0].snippet).toContain("Ashby");
     expect(titleResult.results[0]).toMatchObject({ filePath: notePath, title: "Sigmund Lab", snippet: "title: Sigmund Lab" });
+  });
+
+  it("reports an exact managed-runtime recovery when QMD status hits an ABI mismatch", async () => {
+    const root = await fixtureRoot();
+    const model = indexedModel(root, "hybrid");
+    createStoreError = new Error("The module was compiled against a different Node.js version using NODE_MODULE_VERSION 127");
+
+    const status = await qmdSearchProvider.getStatus(model, path.join(root, ".exograph"));
+
+    expect(status.errors[0]).toContain("NODE_MODULE_VERSION 127");
+    expect(status.warnings).toContain(
+      "QMD native ABI mismatch. Reinstall the packaged app from a checkout with `./scripts/install-mac-app --with-cli`; Exograph runs QMD in its managed desktop runtime.",
+    );
   });
 
   it("reports missing vec0 separately when degraded search is used", async () => {

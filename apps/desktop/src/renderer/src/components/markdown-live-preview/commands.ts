@@ -96,6 +96,23 @@ export const listContinuationOutdentKeymap = Prec.highest(keymap.of([
   },
 ]));
 
+export const selectAllMarkdownKeymap = Prec.highest(keymap.of([
+  {
+    key: "Mod-a",
+    run: selectAllMarkdown,
+  },
+]));
+
+export function selectAllMarkdown(view: Pick<EditorView, "state" | "dispatch">): boolean {
+  view.dispatch({
+    selection: EditorSelection.range(0, view.state.doc.length),
+    annotations: allowListPrefixRawSelection.of(true),
+    scrollIntoView: true,
+    userEvent: "select",
+  });
+  return true;
+}
+
 export const wikilinkExitKeymap = Prec.highest(keymap.of([
   {
     key: "Tab",
@@ -200,7 +217,6 @@ export function clampSelectionToRenderedListText(state: EditorState, anchor: num
   if (anchor === head) {
     return null;
   }
-
   const positions = listPrefixPositionsAt(state, head);
   if (!positions || head >= positions.prefixEnd) {
     return null;

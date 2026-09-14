@@ -51,6 +51,19 @@ describe("InvocationReviewControls", () => {
     expect(html).not.toContain("@@");
   });
 
+  it("keeps the provider session handoff inside the same review surface", () => {
+    const html = renderToStaticMarkup(
+      <InvocationReviewControls
+        queue={{ items: [items[0]!], currentIndex: 0 }}
+        onResume={() => {}}
+        {...callbacks}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Open agent session"');
+    expect(html).toContain("lucide-arrow-up-right");
+  });
+
   it("presents a navigable multi-file queue with bulk decisions behind disclosure", () => {
     const html = renderToStaticMarkup(
       <InvocationReviewControls
@@ -90,7 +103,7 @@ describe("InvocationReviewControls", () => {
     );
 
     expect(html).toContain("Deleted");
-    expect(html).toContain("Review changed");
+    expect(html).toContain("File changed");
     expect(html).toContain("The file changed after the agent finished.");
     expect(html).toContain('aria-label="Refresh review"');
     expect(html).toContain('aria-label="Open file"');

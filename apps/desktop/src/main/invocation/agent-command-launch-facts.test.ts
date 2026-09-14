@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createDefaultClaudeAgentCommand } from "@exograph/core";
+import { createDefaultClaudeAgentCommand, createDefaultCodexAgentCommand } from "@exograph/core";
 
 import { bindResolvedExecutable, executableToken, inspectAgentCommandLaunchFacts } from "./agent-command-launch-facts";
 
@@ -46,6 +46,24 @@ describe("agent command launch facts", () => {
       { PATH: "" },
     );
     expect(facts).toMatchObject({ cwdReady: false, executableReady: false, launchable: false, block: "cwd-missing" });
+  });
+
+  it("explains when a customized Codex command cannot run outside Git", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-command-facts-"));
+    temporaryRoots.push(root);
+    const bin = path.join(root, "bin");
+    await mkdir(bin);
+    await writeFile(path.join(bin, "codex"), "#!/bin/sh\nexit 0\n");
+    await chmod(path.join(bin, "codex"), 0o755);
+
+    const facts = await inspectAgentCommandLaunchFacts(
+      { ...createDefaultCodexAgentCommand(), command: "codex exec -", version: 3 },
+      { kind: "cli", workspaceRoot: root },
+      { PATH: bin },
+    );
+
+    expect(facts).toMatchObject({ launchable: false, block: "workspace-not-git" });
+    expect(facts.detail).toContain("--skip-git-repo-check");
   });
 
   it("finds a user-installed command from a minimal packaged-app PATH", async () => {

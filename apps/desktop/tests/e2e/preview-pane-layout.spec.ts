@@ -1,9 +1,11 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { createServer as createViteServer } from "vite";
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 import { launchExographWorkspaceFixture } from "../helpers";
 
@@ -37,6 +39,110 @@ test("renders visible content from a localhost preview", async () => {
   } finally {
     await cleanup();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("reloads the current localhost URL and reports an unreachable server", async () => {
+  let heading = "First response";
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(`<!doctype html><html><body><h1>${heading}</h1></body></html>`);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Preview fixture server did not expose a TCP port");
+  }
+  const url = `http://127.0.0.1:${address.port}/preview`;
+  const { page, cleanup } = await launchExographWorkspaceFixture();
+
+  try {
+    await page.getByTestId("utility-pane-toggle").click();
+    await page.getByTestId("utility-pane-preview").click();
+    await page.getByRole("button", { name: "New preview" }).click();
+    await page.getByTestId("browser-url-input").fill(url);
+    await page.getByTestId("browser-url-input").press("Enter");
+    const frame = page.frameLocator("[data-testid='browser-preview-frame']");
+    await expect(frame.getByRole("heading", { name: "First response" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open preview in default browser" })).toBeVisible();
+
+    heading = "Second response";
+    await page.getByRole("button", { name: "Reload preview" }).click();
+    await expect(frame.getByRole("heading", { name: "Second response" })).toBeVisible();
+
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await page.getByRole("button", { name: "Reload preview" }).click();
+    await expect(page.getByRole("status", { name: "Preview failed" })).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText("Preview unavailable");
+  } finally {
+    await cleanup();
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  }
+});
+
+test("keeps a Vite localhost preview live and interactive across edits and pane changes", async () => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "exograph-preview-vite-"));
+  const scriptPath = path.join(fixtureRoot, "main.js");
+  await writeFile(
+    path.join(fixtureRoot, "index.html"),
+    "<!doctype html><button id='count'>Count 0</button><strong id='version'></strong><script type='module' src='/main.js'></script>",
+    "utf8",
+  );
+  const writeVersion = (version: string) => writeFile(scriptPath, `
+    const count = document.querySelector('#count');
+    const versionNode = document.querySelector('#version');
+    count.addEventListener('click', () => {
+      const next = Number(count.textContent.replace('Count ', '')) + 1;
+      count.textContent = 'Count ' + next;
+    });
+    versionNode.textContent = '${version}';
+    if (import.meta.hot) import.meta.hot.accept(() => location.reload());
+  `, "utf8");
+  await writeVersion("Version 1");
+  const vite = await createViteServer({
+    root: fixtureRoot,
+    logLevel: "silent",
+    server: { host: "127.0.0.1", port: 0, strictPort: true },
+  });
+  await vite.listen();
+  const url = vite.resolvedUrls?.local[0];
+  if (!url) throw new Error("Vite preview fixture did not expose a local URL");
+  const { page, cleanup } = await launchExographWorkspaceFixture();
+
+  try {
+    await page.getByTestId("utility-pane-toggle").click();
+    await page.getByTestId("utility-pane-preview").click();
+    await page.getByRole("button", { name: "New preview" }).click();
+    await page.getByTestId("browser-url-input").fill(url);
+    await page.getByTestId("browser-url-input").press("Enter");
+
+    const frame = page.frameLocator("[data-testid='browser-preview-frame']");
+    await expect(frame.getByText("Version 1")).toBeVisible();
+    await frame.getByRole("button", { name: "Count 0" }).click();
+    await expect(frame.getByRole("button", { name: "Count 1" })).toBeVisible();
+
+    await writeVersion("Version 2");
+    await expect(frame.getByText("Version 2")).toBeVisible();
+
+    await page.getByTestId("utility-pane-context").click();
+    await page.getByTestId("utility-pane-preview").click();
+    await expect(frame.getByText("Version 2")).toBeVisible();
+    await frame.getByRole("button", { name: "Count 0" }).click();
+    await expect(frame.getByRole("button", { name: "Count 1" })).toBeVisible();
+
+    await writeVersion("Version 3");
+    await page.getByRole("button", { name: "Reload preview" }).click();
+    await expect(frame.getByText("Version 3")).toBeVisible();
+  } finally {
+    await cleanup();
+    await vite.close();
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
 
@@ -140,14 +246,15 @@ test("opens absolute local HTML paths in the preview pane", async () => {
   try {
     const firstPath = path.join(workspaceRoot, "notes", "test-notes", "artifacts", "overall-exograph-architecture.html");
     const secondPath = path.join(workspaceRoot, "notes", "test-notes", "artifacts", "core-plugin-boundary.html");
-    const secondUrl = pathToFileURL(secondPath).toString();
+    const firstUrl = pathToFileURL(await realpath(firstPath)).toString();
+    const secondUrl = pathToFileURL(await realpath(secondPath)).toString();
 
     await page.getByTestId("utility-pane-toggle").click();
     await page.getByTestId("utility-pane-preview").click();
     await page.getByRole("button", { name: "New preview" }).click();
     await page.getByTestId("browser-url-input").fill(firstPath);
     await page.getByTestId("browser-load-url").click();
-    await expect(page.getByTestId("browser-preview-frame")).toHaveAttribute("src", pathToFileURL(firstPath).toString());
+    await expect(page.getByTestId("browser-preview-frame")).toHaveAttribute("src", firstUrl);
     await expect.poll(async () => getPreviewLayoutMetrics(page)).toMatchObject({
       title: "Overall",
       bottomMarkerVisibleAtViewportBottom: true,
@@ -163,7 +270,7 @@ test("opens absolute local HTML paths in the preview pane", async () => {
 
     await page.getByTestId("browser-url-input").fill(firstPath);
     await page.getByTestId("browser-load-url").click();
-    await expect(page.getByTestId("browser-preview-frame")).toHaveAttribute("src", pathToFileURL(firstPath).toString());
+    await expect(page.getByTestId("browser-preview-frame")).toHaveAttribute("src", firstUrl);
     await expect.poll(async () => getPreviewLayoutMetrics(page)).toMatchObject({
       title: "Overall",
       bottomMarkerVisibleAtViewportBottom: true,
@@ -277,7 +384,7 @@ test("returns to the Preview empty state after its final tab closes", async () =
   }
 });
 
-test("switches one utility pane between independent Preview, Terminal, and Connections destinations", async () => {
+test("switches one utility pane between independent Preview, Terminal, Graph, and Note context destinations", async () => {
   const { page, cleanup } = await launchExographWorkspaceFixture();
 
   try {
@@ -304,10 +411,16 @@ test("switches one utility pane between independent Preview, Terminal, and Conne
     await expect(page.getByTestId("terminal-tab-shell")).toHaveCount(1);
     await expect.poll(async () => page.evaluate(async () => (await window.exograph.terminals.list()).length)).toBe(1);
 
-    await page.getByTestId("utility-pane-connections").click();
-    await expect(page.getByTestId("utility-pane-connections")).toHaveAttribute("aria-pressed", "true");
+    await page.getByTestId("utility-pane-context").click();
+    await expect(page.getByTestId("utility-pane-context")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("inspector-panel")).toBeVisible();
     await expect(page.getByTestId("browser-pane")).toHaveCount(0);
+    await expect(page.getByTestId("terminal-dock")).toHaveCount(0);
+
+    await page.getByTestId("utility-pane-graph").click();
+    await expect(page.getByTestId("utility-pane-graph")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("graph-pane")).toBeVisible();
+    await expect(page.getByTestId("inspector-panel")).toHaveCount(0);
     await expect(page.getByTestId("terminal-dock")).toHaveCount(0);
 
     await page.getByTestId("utility-pane-preview").click();
@@ -317,6 +430,7 @@ test("switches one utility pane between independent Preview, Terminal, and Conne
     );
     await expect(page.getByTestId("terminal-dock")).toHaveCount(0);
     await expect(page.getByTestId("inspector-panel")).toHaveCount(0);
+    await expect(page.getByTestId("graph-pane")).toHaveCount(0);
 
     await page.getByTestId("utility-pane-terminal").click();
     await expect(page.getByTestId("terminal-tab-shell")).toHaveCount(1);

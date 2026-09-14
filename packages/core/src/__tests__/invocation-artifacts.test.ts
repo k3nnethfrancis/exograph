@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -115,6 +115,78 @@ describe("invocation artifacts", () => {
       .resolves.toEqual(Buffer.from("delete me\n"));
     expect(await readdir(path.join(workspaceRoot, ".exograph", "invocations", invocationId, "files", "objects")))
       .not.toContain(launch.launchManifest.files[canonicalLargeBinary]?.sha256);
+  });
+
+  it("reuses unchanged launch snapshots while capturing the exact settled manifest", async () => {
+    const workspaceRoot = await temporaryRoot();
+    const noteRoot = path.join(workspaceRoot, "notes");
+    const notePath = path.join(noteRoot, "note.md");
+    const unchangedPath = path.join(noteRoot, "unchanged.bin");
+    await mkdir(noteRoot);
+    await Promise.all([
+      writeFile(notePath, "before\n"),
+      writeFile(unchangedPath, Buffer.alloc(2 * 1024 * 1024, 7)),
+    ]);
+    const store = new InvocationStore(workspaceRoot);
+    const launch = await store.captureManifest("reuse-unchanged", "launch", [noteRoot]);
+    await writeFile(notePath, "after\n");
+
+    const settled = await store.captureSettledManifest(
+      "reuse-unchanged",
+      [noteRoot],
+      launch,
+      { maxTotalBytes: 3 * 1024 * 1024 },
+    );
+    const changeset = buildInvocationChangeset(launch, settled);
+
+    expect(changeset.files).toHaveLength(1);
+    expect(changeset.files[0]).toMatchObject({ operation: "modified", after: { path: await realpath(notePath) } });
+    expect(settled.files[await realpath(unchangedPath)]).toEqual(launch.files[await realpath(unchangedPath)]);
+  });
+
+  it("counts each current file once against the settled total-byte budget", async () => {
+    const workspaceRoot = await temporaryRoot();
+    const noteRoot = path.join(workspaceRoot, "notes");
+    const notePath = path.join(noteRoot, "note.md");
+    await mkdir(noteRoot);
+    await writeFile(notePath, "aaaa");
+    const store = new InvocationStore(workspaceRoot);
+    const launch = await store.captureManifest("settled-byte-budget", "launch", [noteRoot]);
+    await writeFile(notePath, "bbbb");
+
+    const settled = await store.captureSettledManifest(
+      "settled-byte-budget",
+      [noteRoot],
+      launch,
+      { maxTotalBytes: 4 },
+    );
+
+    expect(buildInvocationChangeset(launch, settled).files).toEqual([
+      expect.objectContaining({
+        operation: "modified",
+        after: expect.objectContaining({ path: await realpath(notePath), byteLength: 4 }),
+      }),
+    ]);
+  });
+
+  it("does not rewrite unchanged launch objects during settlement", async () => {
+    const workspaceRoot = await temporaryRoot();
+    const noteRoot = path.join(workspaceRoot, "notes");
+    const notePath = path.join(noteRoot, "note.md");
+    await mkdir(noteRoot);
+    await writeFile(notePath, "unchanged\n");
+    const store = new InvocationStore(workspaceRoot);
+    const invocationId = "read-only-reuse";
+    const launch = await store.captureManifest(invocationId, "launch", [noteRoot]);
+    const objectsDir = path.join(workspaceRoot, ".exograph", "invocations", invocationId, "files", "objects");
+    await chmod(objectsDir, 0o555);
+    try {
+      await expect(store.captureSettledManifest(invocationId, [noteRoot], launch)).resolves.toMatchObject({
+        files: launch.files,
+      });
+    } finally {
+      await chmod(objectsDir, 0o755);
+    }
   });
 
   it("leaves duplicate-content moves as create/delete and never follows nested symlinks", async () => {

@@ -11,6 +11,17 @@ export function commandForClaudeResume(command: { command: string }, sessionId: 
   return `${executable} --resume ${shellArgument(sessionId)}`;
 }
 
+/** Build the interactive Codex handoff from a configured headless command. */
+export function commandForCodexResume(command: { command: string }, sessionId: string): string {
+  const executable = firstShellWord(command.command) || "codex";
+  return `${executable} resume ${shellArgument(sessionId)}`;
+}
+
+function firstShellWord(command: string): string {
+  const quoted = command.trim().match(/^("(?:[^"\\]|\\.)*"|'(?:[^']|'"'"')*'|\S+)/)?.[1] ?? "";
+  return quoted;
+}
+
 function shellArgument(value: string): string {
   return `'${value.replace(/'/g, "'\"'\"'")}'`;
 }

@@ -6,10 +6,12 @@ import type {
   InvocationSkillContext,
   WorkspaceModel,
   WorkspaceSettings,
+  WorkspaceShortcutBindings,
 } from "@exograph/core";
 import type { InvocationActivityEvent } from "@exograph/core/invocation-activity";
 
 import type { TerminalSessionInfo } from "../../shared/api";
+import type { PreviewTarget } from "../../shared/api/workspace-filesystem";
 
 import type { AppearanceMode, ResolvedAppearance } from "./appearance";
 import { EditorPane, type AgentComposeRequest, type EditorPaneState } from "./components/EditorPane";
@@ -29,7 +31,7 @@ import { WorkspaceSettingsDialog } from "./components/WorkspaceSettingsDialog";
 import { WorkspaceRuntimeApplyNotice } from "./components/WorkspaceRuntimeApplyNotice";
 import { useAppKeybindings } from "./hooks/useAppKeybindings";
 import { useOpenDocuments, type OpenEditorDocument } from "./hooks/useOpenDocuments";
-import { useInspectedConcept, type InspectedConcept } from "./hooks/useInspectedConcept";
+import { useInspectedConcept } from "./hooks/useInspectedConcept";
 import { usePaneDropOrchestration } from "./hooks/usePaneDropOrchestration";
 import { useShellLayout } from "./hooks/useShellLayout";
 import { useTerminalSessions } from "./hooks/useTerminalSessions";
@@ -57,10 +59,11 @@ import {
   workspaceSettingsStructuralDraftKey,
 } from "./workspaceSettingsModel";
 import { pathLabel } from "./workspaceTree";
-import { getPreviewTitle, markdownPreviewExcerpt, suggestWikilinkTargetsFromTrees } from "./graphAffordances";
+import { getPreviewTitle, markdownPreviewExcerpt } from "./graphAffordances";
 import { workspaceBreadcrumb, type WorkspaceBreadcrumbSegment } from "./workspaceBreadcrumb";
-import { DEFAULT_UTILITY_SURFACE_STATE, isUtilityDestinationActive, reduceUtilitySurface } from "./utilitySurfaceModel";
-import { addPreviewTab, closePreviewTab, EMPTY_PREVIEW_TABS, selectPreviewTab, updatePreviewTabUrl } from "./previewTabsModel";
+import { DEFAULT_UTILITY_SURFACE_STATE, reduceUtilitySurface, type UtilityDestination } from "./utilitySurfaceModel";
+import { addPreviewTab, closePreviewTab, EMPTY_PREVIEW_TABS, selectPreviewTab, updatePreviewTabTarget } from "./previewTabsModel";
+import { routeMarkdownLink } from "./markdownLinkRouting";
 import {
   applyInvocationActivityEvent,
   applyInvocationRecord,
@@ -71,6 +74,7 @@ import {
   failActiveInvocationActivity,
   failInvocationActivity,
   invocationCommandPresentation,
+  resolveInvocationActivityPaneId,
   takeEarlyInvocationActivityEvents,
   type InvocationActivityState,
 } from "./invocationActivityState";
@@ -90,6 +94,7 @@ interface PendingInvocationAuthorization {
   draft: InlineAgentDraft;
   fingerprint: string;
   reason: string;
+  paneId: string;
   skill?: InvocationSkillContext;
 }
 
@@ -98,10 +103,11 @@ export function App() {
   const workspaceTrees = useWorkspaceTrees({ noteTreeMaxDepth: NOTE_TREE_MAX_DEPTH });
   const { noteTrees } = workspaceTrees;
   const [exploreIndexSearchOnEnter, setExploreIndexSearchOnEnter] = useState(false);
+  const [shortcutBindings, setShortcutBindings] = useState<WorkspaceShortcutBindings>({});
   const [qmdSearchSelected, setQmdSearchSelected] = useState(false);
   const workspaceSearch = useWorkspaceSearch({ indexedOnEnter: exploreIndexSearchOnEnter, qmdSelected: qmdSearchSelected });
   const graphInspection = useInspectedConcept();
-  const [revealExplorerPathRequest, setRevealExplorerPathRequest] = useState<{ path: string; nonce: number } | null>(null);
+  const [revealExplorerPathRequest, setRevealExplorerPathRequest] = useState<{ path: string; nonce: number; kind?: "file" | "directory" } | null>(null);
   const [inspectorTabRequest, setInspectorTabRequest] = useState<{ tab: "history"; nonce: number } | null>(null);
   const [pendingInvocationAuthorization, setPendingInvocationAuthorization] = useState<PendingInvocationAuthorization | null>(null);
   const [agentComposeRequest, setAgentComposeRequest] = useState<AgentComposeRequest | null>(null);
@@ -117,6 +123,8 @@ export function App() {
   const [terminalRuntimeScrollbackLines, setTerminalRuntimeScrollbackLines] = useState(DEFAULT_TERMINAL_RUNTIME_SCROLLBACK_LINES);
   const [terminalRuntimeReadTailChars, setTerminalRuntimeReadTailChars] = useState(DEFAULT_TERMINAL_PENDING_HYDRATION_CHARS);
   const [explorerScale, setExplorerScale] = useState(DEFAULT_EXPLORER_SCALE);
+  const [graphInverseNavigation, setGraphInverseNavigation] = useState(true);
+  const [graphShowOverflowLabels, setGraphShowOverflowLabels] = useState(true);
   const [systemPrefersDark, setSystemPrefersDark] = useState(() =>
     window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
@@ -198,6 +206,8 @@ export function App() {
     saveDocument,
     prepareDocumentsForReview,
     discardAndReloadDocument,
+    reconcileOpenDocumentFilesystemState,
+    recoverDeletedDocument,
   } = openDocumentsState;
   const canvasNavigation = useCanvasDocumentNavigation({
     canvasTree,
@@ -210,6 +220,14 @@ export function App() {
     onLastEditorClosed: (openRecoveredFile) => void openOrCreateDailyNote(openRecoveredFile),
   });
   const openEditorPaths = useMemo(() => collectOpenEditorPaths(canvasTree), [canvasTree]);
+  useEffect(() => {
+    const hiddenConflict = Object.entries(openDocuments).find(([filePath, document]) => document.saveConflict && !openEditorPaths.has(filePath));
+    if (hiddenConflict) canvasNavigation.activateEditorDocument(hiddenConflict[0]);
+  }, [openDocuments, openEditorPaths]);
+  useEffect(() => {
+    const request = openDocumentsState.conflictRevealRequest;
+    if (request) canvasNavigation.activateEditorDocument(request.filePath);
+  }, [openDocumentsState.conflictRevealRequest]);
   const inspectedPath = graphInspection.state.concept
     ? graphInspection.state.concept.filePath ?? null
     : activeDocumentPath;
@@ -222,9 +240,11 @@ export function App() {
     reloadTrees,
     openFile: canvasNavigation.openFile,
     remapOpenPaths: canvasNavigation.remapOpenPaths,
+    saveConflictCopy: openDocumentsState.saveConflictCopy,
     removeDeletedPaths: canvasNavigation.removeDeletedPaths,
     revealExplorerPath: (path) => setRevealExplorerPathRequest({ path, nonce: Date.now() }),
     requestGeneratedTitleSelection,
+    recoverDeletedDocument,
   });
   const { dialog: workspaceDialog, setDialog: setWorkspaceDialog } = workspaceMutations;
   const dragManager = usePaneDropOrchestration({
@@ -269,7 +289,7 @@ export function App() {
 
   useEffect(() => {
     if (activeDocumentPath) {
-      graphInspection.inspect({ filePath: activeDocumentPath }, "editor");
+      graphInspection.inspect({ filePath: activeDocumentPath });
     }
   }, [activeDocumentPath, graphInspection.inspect]);
 
@@ -278,7 +298,7 @@ export function App() {
       if (record.workspaceRoot && record.workspaceRoot !== workspaceModel?.workspaceRoot) {
         return;
       }
-      if (record.taggedDocumentPath) {
+      if (record.taggedDocumentPath && (record.changeset || record.status !== "pending" && record.status !== "running")) {
         scheduleOpenDocumentRefresh(record.taggedDocumentPath);
       }
       invocationReviewController.applyRecord(record);
@@ -291,7 +311,7 @@ export function App() {
   useEffect(() => {
     return window.exograph.workspace.onInvocationActivity((event) => {
       setInvocationActivity((current) => {
-        if (current?.invocationId === null && current.kind !== "done" && current.kind !== "failed") {
+        if (current?.invocationId === null && current.kind !== "done" && current.kind !== "stopped" && current.kind !== "failed") {
           bufferEarlyInvocationActivityEvent(invocationActivityEarlyEventsRef.current, event);
           return current;
         }
@@ -341,14 +361,20 @@ export function App() {
   useWorkspaceCommandHandlers({
     workspaceModel,
     openFile: canvasNavigation.openFile,
+    openFolder: canvasNavigation.openFolderOverview,
     openSettings: workspaceSettingsController.openDialog,
     reloadTrees,
+    refreshTreeDirectory: workspaceTrees.refreshTreeDirectory,
     scheduleOpenDocumentRefresh,
+    reconcileOpenDocumentFilesystemState,
   });
 
   useAppKeybindings({
     activeDocumentPath,
+    settingsOpen: Boolean(workspaceSettingsDialog),
+    shortcutBindings,
     saveDocument,
+    createUntitledNote: workspaceMutations.createUntitledNote,
     openOrCreateDailyNote,
     createShellTerminal: async () => {
       await createUtilityTerminal("shell");
@@ -367,7 +393,10 @@ export function App() {
     setTerminalRuntimeScrollbackLines(terminalPolicy.scrollbackLines);
     setTerminalRuntimeReadTailChars(terminalPolicy.readTailChars);
     setExplorerScale(settings.explorerScale);
+    setGraphInverseNavigation(settings.graphInverseNavigation);
+    setGraphShowOverflowLabels(settings.graphShowOverflowLabels);
     setExploreIndexSearchOnEnter(settings.exploreIndexSearchOnEnter);
+    setShortcutBindings(settings.shortcutBindings ?? {});
     setQmdSearchSelected(settings.searchEngine === "qmd");
   }
 
@@ -454,7 +483,7 @@ export function App() {
     return status;
   }
 
-  async function invokeInlineAgent(draft: InlineAgentDraft, documentPath: string) {
+  async function invokeInlineAgent(draft: InlineAgentDraft, documentPath: string, paneId: string) {
     const document = openDocuments[documentPath] ?? null;
     if (!document) {
       return;
@@ -465,7 +494,7 @@ export function App() {
     );
     // The send gesture receives an immediate, honest response before either
     // fingerprint or trust IPC can yield to another frame.
-    setInvocationActivity(acknowledgeInvocationActivity(commandPresentation));
+    setInvocationActivity(acknowledgeInvocationActivity(commandPresentation, paneId, draft.protocolInvocationId));
     // CodeMirror owns the authoritative post-envelope body. Its ordinary
     // React propagation is deliberately deprioritized for typing latency, so
     // publish this exact snapshot to the synchronous document ref before any
@@ -479,12 +508,12 @@ export function App() {
       });
     } catch (error) {
       cancelInlineAgentDraft(draft, () => undefined);
-      setInvocationActivity(failInvocationActivity(commandPresentation, error));
+      setInvocationActivity(failInvocationActivity(commandPresentation, error, paneId));
       return;
     }
     if (!authorization.launchable || !authorization.cwd) {
       cancelInlineAgentDraft(draft, () => undefined);
-      setInvocationActivity(failInvocationActivity(commandPresentation, authorization.detail));
+      setInvocationActivity(failInvocationActivity(commandPresentation, authorization.detail, paneId));
       return;
     }
     const pending = {
@@ -494,6 +523,7 @@ export function App() {
       draft,
       fingerprint: authorization.fingerprint,
       reason: authorization.detail,
+      paneId,
       ...(draft.skill ? { skill: draft.skill } : {}),
     };
     if (!authorization.trusted) {
@@ -512,7 +542,7 @@ export function App() {
     // soon as the decision is made; failures belong to the document status UI.
     setPendingInvocationAuthorization(null);
     invocationActivityEarlyEventsRef.current.clear();
-    setInvocationActivity(beginInvocationActivity(pending.command));
+    setInvocationActivity(beginInvocationActivity(pending.command, pending.paneId, pending.draft.protocolInvocationId));
     try {
       await saveDocument(pending.document.filePath);
       const persisted = await window.exograph.notes.read(pending.document.filePath);
@@ -534,7 +564,7 @@ export function App() {
       const earlyEvents = takeEarlyInvocationActivityEvents(invocationActivityEarlyEventsRef.current, result.invocation.id);
       setInvocationActivity((current) => bindInvocationActivity(current, result.invocation, earlyEvents));
     } catch (error) {
-      setInvocationActivity(failInvocationActivity(pending.command, error));
+      setInvocationActivity(failInvocationActivity(pending.command, error, pending.paneId));
     }
   }
 
@@ -548,9 +578,6 @@ export function App() {
   }
 
   async function stopInlineAgentInvocation(invocationId: string) {
-    setInvocationActivity((current) => current?.invocationId === invocationId
-      ? { ...current, kind: "finishing", label: undefined }
-      : current);
     try {
       const finalized = await window.exograph.workspace.endAgentInvocation(invocationId);
       if (!finalized) return;
@@ -643,8 +670,19 @@ export function App() {
       return;
     }
 
+    const route = routeMarkdownLink(target);
+    if (route.kind === "pdf-preview") {
+      if (!activeDocumentPath) return;
+      const resolved = await window.exograph.notes.resolveTarget(activeDocumentPath, route.target);
+      if (!resolved) return;
+      const previewTarget = await window.exograph.workspace.resolvePreviewTarget(resolved);
+      if (previewTarget.kind !== "pdf") return;
+      createBrowserPane(previewTarget);
+      return;
+    }
+
     if (/^(?:\/|[A-Za-z]:[\\/])/.test(target)) {
-      // Graph and Connections can own focus while navigating. Route an
+      // Graph and Note context can own focus while navigating. Route an
       // absolute Concept path to an editor leaf explicitly instead of treating
       // the currently focused graph/utility surface as the file destination.
       await canvasNavigation.openFile(target, findEditorLeaf(canvasTree)?.id);
@@ -696,11 +734,20 @@ export function App() {
   }
 
   async function suggestNoteTargets(query: string) {
-    return suggestWikilinkTargetsFromTrees(workspaceModel, noteTrees, query);
+    if (!activeDocumentPath) return [];
+    const suggestions = await window.exograph.notes.suggestTargets(activeDocumentPath, query);
+    return suggestions.map((suggestion) => ({
+      label: suggestion.title,
+      target: suggestion.target,
+      detail: suggestion.snippet,
+    }));
   }
 
   async function previewKnowledgeTarget(target: string) {
     if (!activeDocumentPath || /^https?:\/\//.test(target)) {
+      return null;
+    }
+    if (routeMarkdownLink(target).kind === "pdf-preview") {
       return null;
     }
 
@@ -718,12 +765,23 @@ export function App() {
     };
   }
 
-  function createBrowserPane(url = "about:blank") {
+  function createBrowserPane(target: PreviewTarget = { kind: "web", source: "url", url: "about:blank" }) {
     const id = paneId();
     flushSync(() => {
-      setPreviewTabs((current) => addPreviewTab(current, { id, url }));
+      setPreviewTabs((current) => addPreviewTab(current, { id, target }));
       dispatchUtility({ type: "select", destination: "preview" });
     });
+  }
+
+  async function openExplorerFile(filePath: string, line?: number | null) {
+    if (filePath.toLowerCase().endsWith(".pdf")) {
+      const previewTarget = await window.exograph.workspace.resolvePreviewTarget(filePath);
+      if (previewTarget.kind === "pdf") {
+        createBrowserPane(previewTarget);
+        return;
+      }
+    }
+    await canvasNavigation.openFile(filePath, undefined, { line });
   }
 
   async function createUtilityTerminal(kind: "shell", cwd?: string) {
@@ -745,30 +803,16 @@ export function App() {
     dispatchUtility({ type: "toggle" });
   }
 
-  function toggleConnectionsSurface() {
+  function closeNoteContext() {
     dispatchUtility({ type: "close" });
   }
 
-  function openConnectionsSurface() {
-    selectUtilitySurface("connections");
-  }
-
-  function inspectGraphConcept(concept: InspectedConcept) {
-    graphInspection.inspect(concept, "graph");
-    if (concept.filePath && !openDocuments[concept.filePath]) {
-      void ensureDocumentLoaded(concept.filePath);
-    }
-  }
-
-  function focusGraphConcept(concept: InspectedConcept) {
-    graphInspection.focus(concept, "graph");
-    if (concept.filePath && !openDocuments[concept.filePath]) {
-      void ensureDocumentLoaded(concept.filePath);
-    }
+  function openNoteContext() {
+    selectUtilitySurface("context");
   }
 
   function restoreEditorInspection(filePath: string) {
-    graphInspection.inspect({ filePath }, "editor");
+    graphInspection.inspect({ filePath });
   }
 
   function activateOpenGraphTarget(filePath: string) {
@@ -776,26 +820,17 @@ export function App() {
     canvasNavigation.activateEditorDocument(filePath, targetLeaf?.id);
   }
 
-  function openGraphCanvas(focusPath?: string) {
-    if (focusPath) graphInspection.focus({ filePath: focusPath }, "editor");
+  function openGraphUtility(focusPath?: string) {
+    if (focusPath) graphInspection.focus({ filePath: focusPath });
     canvasNavigation.rememberGraphReturnPath(focusPath ?? focusedEditorPath);
-    const existing = collectLeaves(canvasTree).find((leaf) => leaf.content.kind === "graph");
-    if (existing) {
-      canvasNavigation.focusPane(existing.id);
-      return;
-    }
-    const target = findNode(canvasTree, (node) => node.kind === "leaf" && node.id === focusedPaneId) as PaneLeaf | undefined
-      ?? collectLeaves(canvasTree)[0];
-    if (!target) return;
-    const graphLeaf = canvasActions.splitLeaf(target.id, "horizontal", { kind: "graph" }, "after");
-    canvasNavigation.focusPane(graphLeaf.id);
+    selectUtilitySurface("graph");
   }
 
   function focusBrowserPane() {
     selectUtilitySurface("preview");
   }
 
-  function selectUtilitySurface(destination: "terminal" | "preview" | "connections") {
+  function selectUtilitySurface(destination: UtilityDestination) {
     flushSync(() => dispatchUtility({ type: "select", destination }));
   }
 
@@ -901,26 +936,35 @@ export function App() {
 
   const workspaceLabel = workspaceModel ? pathLabel(workspaceModel.workspaceRoot) : "Exograph";
   const titleSegments = activeDocument
-    ? workspaceBreadcrumb(activeDocument.filePath, workspaceModel?.noteRoots.map((root) => root.path) ?? [])
+    ? workspaceBreadcrumb(activeDocument.filePath, workspaceModel?.noteRoots.map((root) => root.path) ?? []).map((segment, index, segments) =>
+      activeDocument.filesystemState === "deleted" && index === segments.length - 1
+        ? { ...segment, label: `${segment.label} · deleted` }
+        : segment,
+    )
     : [{ kind: "folder" as const, label: workspaceLabel, path: workspaceModel?.workspaceRoot ?? "" }];
   const canvasLeaves = collectLeaves(canvasTree);
+  const editorPaneIds = canvasLeaves.flatMap((leaf) => leaf.content.kind === "editor" ? [leaf.id] : []);
+  const invocationActivityPaneId = invocationActivity
+    ? resolveInvocationActivityPaneId(invocationActivity.paneId, editorPaneIds, focusedPaneId)
+    : null;
   const canvasTerminalIds = new Set(canvasLeaves.flatMap((leaf) => leaf.content.kind === "terminal" ? [leaf.content.terminalId] : []));
   const canvasPreviewIds = new Set(canvasLeaves.flatMap((leaf) => leaf.content.kind === "browser" ? [leaf.content.previewId] : []));
   const utilityTerminalSessions = terminalSessions.filter((session) => !canvasTerminalIds.has(session.id));
   const utilityPreviewTabs = previewTabs.tabs.filter((tab) => !canvasPreviewIds.has(tab.id));
   const activePreview = utilityPreviewTabs.find((tab) => tab.id === previewTabs.activeId) ?? utilityPreviewTabs[0] ?? null;
-  const activityCanStop = invocationActivity?.kind !== "done" && invocationActivity?.kind !== "failed";
+  const activityCanStop = invocationActivity?.kind !== "done" && invocationActivity?.kind !== "stopped" && invocationActivity?.kind !== "failed" && invocationActivity?.kind !== "review";
   const utilityContent = utilityState.destination === "preview" && activePreview ? (
     <BrowserPane
       paneId={activePreview.id}
-      url={activePreview.url}
+      target={activePreview.target}
       compact={false}
       onFocus={() => undefined}
       onNavigate={async (target) => {
         const result = await window.exograph.workspace.resolvePreviewTarget(target);
-        setPreviewTabs((current) => updatePreviewTabUrl(current, activePreview.id, result.url));
-        return result.url;
+        setPreviewTabs((current) => updatePreviewTabTarget(current, activePreview.id, result));
+        return result;
       }}
+      onOpenExternal={(target) => window.exograph.shell.openExternal(target)}
       onClosePane={closeBrowserPane}
       tabs={utilityPreviewTabs}
       activeTabId={activePreview.id}
@@ -962,6 +1006,31 @@ export function App() {
       onCreateTerminal={() => void createUtilityTerminal("shell")}
       dragManager={dragManager}
     />
+  ) : utilityState.destination === "graph" ? (
+    <GraphPane
+      inverseNavigation={graphInverseNavigation}
+      showOverflowLabels={graphShowOverflowLabels}
+      inspectedConcept={graphInspection.state.concept}
+      focusRequest={graphInspection.state.focusRequest}
+      graphReturnPath={canvasNavigation.graphReturnPath}
+      isTargetOpen={(target) => openEditorPaths.has(target)}
+      onRestoreEditorConcept={restoreEditorInspection}
+      onActivateOpenTarget={activateOpenGraphTarget}
+      onClose={() => dispatchUtility({ type: "close" })}
+      onFocus={() => undefined}
+      onOpenTarget={(target) => void openKnowledgeTarget(target)}
+      onStartMaintenance={(filePath) => void composeGraphMaintenance(filePath)}
+    />
+  ) : utilityState.destination === "context" ? (
+    <InspectorDock document={inspectedDocument} graphContext={inspectedGraphContext} open activeTag={null} tagResults={[]} invocationHistory={invocationHistory} invocationHistoryError={invocationHistoryError} requestedTab={inspectorTabRequest} onOpenInvocationHistory={(item) => {
+      invocationReviewController.openHistory(item);
+    }} onResumeInvocation={(id) => {
+      const item = invocationHistory.find((candidate) => candidate.invocationId === id);
+      void resumeInvocationInTerminal(id, item?.command);
+    }} onRetryInvocationHistory={invocationReviewController.retryHistory} onToggle={closeNoteContext} onOpenHeading={(filePath, line) => {
+      const editorLeaf = findEditorLeafByPath(canvasTree, filePath) ?? findEditorLeaf(canvasTree);
+      void canvasNavigation.openFile(filePath, editorLeaf?.id, { line });
+    }} onOpenTarget={(target) => void openKnowledgeTarget(target)} onOpenExternal={(target) => void window.exograph.shell.openExternal(target)} onOpenTag={(tag) => void openTag(tag)} />
   ) : null;
 
   return (
@@ -971,6 +1040,7 @@ export function App() {
       onOpenTitleSegment={(segment) => void openTitleSegment(segment)}
       onOpenFolder={(directoryPath) => canvasNavigation.openFolderOverview(directoryPath)}
       workspaceLabel={workspaceLabel}
+      shortcutBindings={shortcutBindings}
       noteSections={noteSections}
       appearanceMode={appearanceMode}
       resolvedAppearance={resolvedAppearance}
@@ -995,16 +1065,18 @@ export function App() {
       onToggleUtility={toggleUtilitySurface}
       onOpenUtilityBrowser={focusBrowserPane}
       onOpenUtilityTerminal={openUtilityTerminal}
+      onOpenUtilityGraph={() => openGraphUtility(inspectedPath ?? activeDocumentPath ?? undefined)}
+      onOpenNoteContext={openNoteContext}
       revealExplorerPathRequest={revealExplorerPathRequest}
       renderLeaf={(leaf, isFocused) => {
         if (leaf.content.kind === "graph") {
           return <GraphPane
+            inverseNavigation={graphInverseNavigation}
+            showOverflowLabels={graphShowOverflowLabels}
             inspectedConcept={graphInspection.state.concept}
             focusRequest={graphInspection.state.focusRequest}
             graphReturnPath={canvasNavigation.graphReturnPath}
             isTargetOpen={(target) => openEditorPaths.has(target)}
-            onInspectConcept={inspectGraphConcept}
-            onFocusConcept={focusGraphConcept}
             onRestoreEditorConcept={restoreEditorInspection}
             onActivateOpenTarget={activateOpenGraphTarget}
             onClose={() => canvasActions.removeLeaf(leaf.id)}
@@ -1056,14 +1128,15 @@ export function App() {
           return (
             <BrowserPane
               paneId={leaf.id}
-              url={tab.url}
+              target={tab.target}
               compact={false}
               onFocus={() => canvasNavigation.focusPane(leaf.id)}
               onNavigate={async (target) => {
                 const result = await window.exograph.workspace.resolvePreviewTarget(target);
-                setPreviewTabs((current) => updatePreviewTabUrl(current, tab.id, result.url));
-                return result.url;
+                setPreviewTabs((current) => updatePreviewTabTarget(current, tab.id, result));
+                return result;
               }}
+              onOpenExternal={(target) => window.exograph.shell.openExternal(target)}
               onClosePane={() => canvasActions.removeLeaf(leaf.id)}
               tabs={[tab]}
               activeTabId={tab.id}
@@ -1098,7 +1171,7 @@ export function App() {
               onOpenFile={(filePath) => void canvasNavigation.openFile(filePath, leaf.id)}
               onClosePane={collectLeaves(canvasTree).length > 1 ? () => canvasActions.removeLeaf(leaf.id) : null}
               dragManager={dragManager}
-              onOpenGraph={() => openGraphCanvas(pane.activePath ?? undefined)}
+              onOpenGraph={() => openGraphUtility(pane.activePath ?? undefined)}
               onUpdateFrontmatter={(key, value) => {
                 if (leaf.content.kind === "editor" && leaf.content.activePath) {
                   updateFrontmatter(leaf.content.activePath, key, value);
@@ -1109,14 +1182,23 @@ export function App() {
                   updateBody(leaf.content.activePath, body);
                 }
               }}
-              onSave={() => void (leaf.content.kind === "editor" && leaf.content.activePath ? saveDocument(leaf.content.activePath) : Promise.resolve())}
+              onSave={() => void (leaf.content.kind === "editor" && leaf.content.activePath ? saveDocument(leaf.content.activePath) : Promise.resolve()).catch(() => {})}
+              onSaveConflictCopy={() => { if (pane.activePath) workspaceMutations.saveConflictCopy(pane.activePath); }}
+              onDiscardSaveConflict={async () => {
+                if (pane.activePath && await openDocumentsState.discardSaveConflict(pane.activePath) === "closed") canvasNavigation.removeDeletedPaths(pane.activePath);
+              }}
+              onRecoverDeleted={() => void (leaf.content.kind === "editor" && leaf.content.activePath ? workspaceMutations.recoverDeletedFile(leaf.content.activePath) : Promise.resolve())}
+              onSaveDeletedAs={() => {
+                if (leaf.content.kind === "editor" && leaf.content.activePath) workspaceMutations.saveDeletedFileAs(leaf.content.activePath);
+              }}
+              onShowInExplorer={(filePath) => setRevealExplorerPathRequest({ path: filePath, kind: "file", nonce: Date.now() })}
               onOpenTag={(tag) => void openTag(tag)}
               onOpenTarget={(target) => void openKnowledgeTarget(target)}
               onSuggestTargets={(query) => suggestNoteTargets(query)}
               onPreviewTarget={(target) => previewKnowledgeTarget(target)}
               agentCommands={workspaceSettingsRef.current?.agentCommands ?? []}
               onInvokeAgent={(draft) => {
-                if (pane.activePath) void invokeInlineAgent(draft, pane.activePath);
+                if (pane.activePath) void invokeInlineAgent(draft, pane.activePath, leaf.id);
               }}
               invocationReview={
                 isFocused && activeReviewEntry && activeReviewPayload && pane.activePath && invocationReviewMatchesPath(activeReviewPayload, pane.activePath, activeReviewEntry.source)
@@ -1138,13 +1220,16 @@ export function App() {
                       onDismiss: activeReviewEntry.source === "history"
                         ? invocationReviewController.dismissHistory
                         : undefined,
+                      onResume: invocationActivity?.providerSessionId && invocationActivity.invocationId === activeReviewEntry.invocationId
+                        ? () => void resumeInvocationInTerminal(activeReviewEntry.invocationId, activeReviewEntry.command)
+                        : undefined,
                     }
                   : null
               }
-              editingFrozen={Boolean(pane.activePath && invocationReviewFrozenPaths.includes(pane.activePath))}
+              editingFrozen={openDocumentsState.transitionPending || Boolean(pane.activePath && (invocationReviewFrozenPaths.includes(pane.activePath) || openDocuments[pane.activePath]?.resolvingConflict))}
               historyAvailable={invocationHistory.length > 0 || Boolean(invocationHistoryError)}
               onOpenHistory={() => {
-                openConnectionsSurface();
+                openNoteContext();
                 setInspectorTabRequest({ tab: "history", nonce: Date.now() });
               }}
               theme={resolvedTheme}
@@ -1162,20 +1247,39 @@ export function App() {
                 setAgentComposeRequest((current) => current?.nonce === nonce ? null : current);
               }}
               isNoteDocument={(filePath) => workspaceModel ? workspaceModel.noteRoots.some((root) => isPathWithin(root.path, filePath)) : true}
+              invocationActivity={invocationActivity && leaf.id === invocationActivityPaneId && invocationActivity.kind !== "review" ? {
+                protocolInvocationId: invocationActivity.protocolInvocationId,
+                render: (position) => (
+                  <InvocationActivitySurface
+                    commandHandle={invocationActivity.commandHandle}
+                    commandAppearance={invocationActivity.commandAppearance}
+                    commandLabel={invocationActivity.commandLabel}
+                    kind={invocationActivity.kind}
+                    label={invocationActivity.label}
+                    errorDetail={invocationActivity.errorDetail}
+                    position={position}
+                    onDismiss={invocationActivity.kind === "done" || invocationActivity.kind === "stopped" || invocationActivity.kind === "failed"
+                      ? () => setInvocationActivity(null)
+                      : undefined}
+                    onResume={invocationActivity.providerSessionId && invocationActivity.invocationId
+                      ? () => void resumeInvocationInTerminal(invocationActivity.invocationId!)
+                      : undefined}
+                    onStop={activityCanStop && invocationActivity.invocationId
+                      ? () => void stopInlineAgentInvocation(invocationActivity.invocationId!)
+                      : undefined}
+                  />
+                ),
+              } : undefined}
+              onResumeProtocolInvocation={(protocolInvocationId) => {
+                const item = invocationHistory.find((candidate) => candidate.protocolInvocationId === protocolInvocationId && candidate.providerSessionId);
+                if (item) void resumeInvocationInTerminal(item.invocationId, item.command);
+              }}
             />
           </>
         );
       }}
-      connections={<InspectorDock document={inspectedDocument} graphContext={inspectedGraphContext} open={isUtilityDestinationActive(utilityState, "connections")} activeTag={null} tagResults={[]} invocationHistory={invocationHistory} invocationHistoryError={invocationHistoryError} requestedTab={inspectorTabRequest} onOpenInvocationHistory={(item) => {
-        invocationReviewController.openHistory(item);
-      }} onResumeInvocation={(id) => {
-        const item = invocationHistory.find((candidate) => candidate.invocationId === id);
-        void resumeInvocationInTerminal(id, item?.command);
-      }} onRetryInvocationHistory={invocationReviewController.retryHistory} onToggle={toggleConnectionsSurface} onOpenGraphCanvas={openGraphCanvas} onOpenTarget={(target) => void openKnowledgeTarget(target)} onOpenExternal={(target) => void window.exograph.shell.openExternal(target)} onOpenTag={(tag) => void openTag(tag)} />}
       onAppearanceModeChange={updateAppearanceMode}
       onOpenWorkspaceSettings={() => void workspaceSettingsController.openDialog()}
-      connectionsOpen={isUtilityDestinationActive(utilityState, "connections")}
-      onOpenConnections={openConnectionsSurface}
       onSearchQueryChange={(value) => {
         workspaceSearch.setQuery(value);
         workspaceSearch.setSubmittedQuery(value.trim());
@@ -1185,7 +1289,7 @@ export function App() {
         workspaceSearch.setQuery("");
         workspaceSearch.setSubmittedQuery("");
       }}
-      onOpenFile={(filePath, line) => void canvasNavigation.openFile(filePath, undefined, { line })}
+      onOpenFile={(filePath, line) => void openExplorerFile(filePath, line)}
       onOpenTerminalSession={(sessionId) => void showUtilityTerminal(sessionId)}
       onOpenTag={(tag) => void openTag(tag)}
       onExpandDirectory={(directoryPath) => void workspaceTrees.expandTreeDirectory(directoryPath)}
@@ -1194,7 +1298,7 @@ export function App() {
       onCreateFile={(directoryPath) => workspaceMutations.createFileInDirectory(directoryPath)}
       onCreateDirectory={(directoryPath) => workspaceMutations.createDirectoryInDirectory(directoryPath)}
       onCreateTerminalInDirectory={(directoryPath) => void createUtilityTerminal("shell", directoryPath)}
-      onRenamePath={(targetPath) => workspaceMutations.renameWorkspacePath(targetPath)}
+      onRenamePath={(targetPath, kind) => workspaceMutations.renameWorkspacePath(targetPath, kind)}
       onDeletePath={(targetPath) => workspaceMutations.deleteWorkspacePath(targetPath)}
     />
 
@@ -1209,6 +1313,7 @@ export function App() {
         <div className="dialog-overlay" data-testid="workspace-dialog-overlay">
           <div className="dialog-card" data-testid="workspace-dialog">
             <div className="dialog-card__title">{workspaceDialog.title}</div>
+            {workspaceMutations.dialogError ? <div role="alert" className="dialog-card__message">{workspaceMutations.dialogError}</div> : null}
             {"message" in workspaceDialog ? <div className="dialog-card__message">{workspaceDialog.message}</div> : null}
             {"value" in workspaceDialog ? (
               <input
@@ -1231,6 +1336,12 @@ export function App() {
                 }}
               />
             ) : null}
+            {workspaceDialog.kind === "save-copy" ? <div className="dialog-card__message">Filename: {workspaceMutations.copyFilename}</div> : null}
+            {workspaceDialog.kind === "rename" && workspaceDialog.preserveMarkdown ? (
+              <div className="dialog-card__message">
+                Filename: {workspaceMutations.renameFilename}
+              </div>
+            ) : null}
             <div className="dialog-card__actions">
               <button className="toolbar-button" onClick={() => setWorkspaceDialog(null)} type="button">
                 Cancel
@@ -1238,6 +1349,7 @@ export function App() {
               <button
                 className={`toolbar-button ${workspaceDialog.kind === "delete" ? "toolbar-button--danger" : ""}`}
                 data-testid="workspace-dialog-confirm"
+                disabled={workspaceMutations.dialogPending}
                 onClick={() => void workspaceMutations.submitDialog()}
                 type="button"
               >
@@ -1256,25 +1368,6 @@ export function App() {
             authorization,
           )}
           onCancel={cancelPendingInlineAgentInvocation}
-        />
-      ) : null}
-
-      {invocationActivity ? (
-        <InvocationActivitySurface
-          commandHandle={invocationActivity.commandHandle}
-          commandLabel={invocationActivity.commandLabel}
-          kind={invocationActivity.kind}
-          label={invocationActivity.label}
-          errorDetail={invocationActivity.errorDetail}
-          onDismiss={invocationActivity.kind === "done" || invocationActivity.kind === "failed"
-            ? () => setInvocationActivity(null)
-            : undefined}
-          onResume={invocationActivity.providerSessionId && invocationActivity.invocationId
-            ? () => void resumeInvocationInTerminal(invocationActivity.invocationId!)
-            : undefined}
-          onStop={activityCanStop && invocationActivity.invocationId
-            ? () => void stopInlineAgentInvocation(invocationActivity.invocationId!)
-            : undefined}
         />
       ) : null}
 

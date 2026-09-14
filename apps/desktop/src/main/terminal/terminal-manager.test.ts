@@ -47,6 +47,20 @@ describe("TerminalManager direct PTY", () => {
     expect(factory.process.writes).toEqual(["hello"]);
   });
 
+  it("supports incremental, bounded live-tail reads without persisting a transcript", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-terminal-manager-"));
+    const factory = new FakeTerminalProcessFactory();
+    const manager = new TerminalManager(root, 1_024, {}, factory);
+    const terminal = await manager.create({ terminalKind: "shell", cwd: root });
+
+    factory.process.emitData("first");
+    expect(manager.readTailSince(terminal.id)).toEqual({ output: "first", cursor: 5, truncated: false });
+    factory.process.emitData(`${"x".repeat(1_024)}-next`);
+    expect(manager.readTailSince(terminal.id, 5)).toEqual({ output: `${"x".repeat(1_019)}-next`, cursor: 1_034, truncated: true });
+    expect(manager.readTailSince(terminal.id, 10)).toEqual({ output: `${"x".repeat(1_019)}-next`, cursor: 1_034, truncated: false });
+    expect(manager.readTailSince("missing", 0)).toBeNull();
+  });
+
   it("uses the immutable invocation Workspace for agent terminal environment", async () => {
     const factory = new FakeTerminalProcessFactory();
     const manager = new TerminalManager("/workspace-b", 1_024, {}, factory);

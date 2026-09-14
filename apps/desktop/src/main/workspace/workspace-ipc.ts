@@ -46,6 +46,7 @@ export interface WorkspaceIpcHandlers {
   reviewInvocationAll: WorkspaceApi["reviewInvocationAll"];
   resumeInvocationInTerminal: WorkspaceApi["resumeInvocationInTerminal"];
   resolvePreviewTarget: WorkspaceApi["resolvePreviewTarget"];
+  readPdfFile: WorkspaceApi["readPdfFile"];
   getGraphContext: NotesApi["getGraphContext"];
   getGraphTopology: NotesApi["getGraphTopology"];
   getGraphConceptSummaries: NotesApi["getGraphConceptSummaries"];
@@ -66,6 +67,7 @@ export interface WorkspaceIpcHandlers {
   resolveTarget: NotesApi["resolveTarget"];
   resolveMarkdownImage: NotesApi["resolveMarkdownImage"];
   saveNote: NotesApi["save"];
+  saveNoteCopy: NotesApi["saveCopy"];
   saveSettings: WorkspaceApi["saveSettings"];
   searchIndex: WorkspaceApi["searchIndex"];
   searchTag: WorkspaceApi["searchTag"];
@@ -101,6 +103,7 @@ export function registerWorkspaceIpcHandlers(handlers: WorkspaceIpcHandlers) {
     return handlers.getFolderOverview(authorizedDirectory);
   });
   handleDesktopInvoke("workspace:resolve-preview-target", async (_event, target) => handlers.resolvePreviewTarget(target));
+  handleDesktopInvoke("workspace:read-pdf-file", async (_event, filePath) => handlers.readPdfFile(filePath));
   handleDesktopInvoke("workspace:launch-agent-invocation", async (_event, input) => {
     const documentPath = await workspaceFiles().existing(input.documentPath);
     return handlers.launchAgentInvocation({ ...input, documentPath });
@@ -158,6 +161,7 @@ export function registerWorkspaceIpcHandlers(handlers: WorkspaceIpcHandlers) {
       const dialogOptions: OpenDialogOptions = {
         title: options?.title,
         buttonLabel: options?.buttonLabel,
+        defaultPath: options?.defaultPath,
         properties: [
           "openDirectory",
           "createDirectory",
@@ -222,9 +226,13 @@ export function registerWorkspaceIpcHandlers(handlers: WorkspaceIpcHandlers) {
     const authorizedPath = await workspaceFiles().existing(filePath);
     return handlers.readNote(authorizedPath);
   });
-  handleDesktopInvoke("notes:save", async (_event, filePath, frontmatter, body) => {
+  handleDesktopInvoke("notes:save", async (_event, filePath, frontmatter, body, expectedRevision) => {
     const authorizedPath = await workspaceFiles().writable(filePath);
-    return handlers.saveNote(authorizedPath, frontmatter, body);
+    return handlers.saveNote(authorizedPath, frontmatter, body, expectedRevision);
+  });
+  handleDesktopInvoke("notes:save-copy", async (_event, filePath, frontmatter, body) => {
+    const authorizedPath = await workspaceFiles().writable(filePath);
+    return handlers.saveNoteCopy(authorizedPath, frontmatter, body);
   });
   handleDesktopInvoke("notes:stat", async (_event, filePath) => {
     const authorizedPath = await workspaceFiles().writable(filePath);
@@ -250,7 +258,18 @@ export function registerWorkspaceIpcHandlers(handlers: WorkspaceIpcHandlers) {
   );
   handleDesktopInvoke("notes:ensure-target", async (_event, sourceFilePath, target) => handlers.ensureTarget(sourceFilePath, target));
   handleDesktopInvoke("notes:suggest-targets", async (_event, sourceFilePath, query) => handlers.suggestTargets(sourceFilePath, query));
-  handleDesktopInvoke("shell:open-external", async (_event, target) => shell.openExternal(target));
+  handleDesktopInvoke("shell:open-external", async (_event, target) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(target);
+    } catch {
+      throw new Error("External links must be valid HTTP or HTTPS URLs.");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("External links must use HTTP or HTTPS.");
+    }
+    await shell.openExternal(parsed.toString());
+  });
   handleDesktopInvoke("shell:focus-window", async () => {
     const window = handlers.getMainWindow();
     window?.focus();

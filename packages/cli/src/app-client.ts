@@ -1,3 +1,4 @@
+import type { GraphTraversalRequest, GraphTraversalResult } from "@exograph/core";
 import { readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -8,6 +9,11 @@ import {
   type ExographCommandIndexSyncResponse,
   type ExographCommandIndexSyncRequest,
   type ExographCommandOkResponse,
+  type ExographCommandTerminalCreateResponse,
+  type ExographCommandTerminalListResponse,
+  type ExographCommandTerminalReadResponse,
+  type ExographCommandTerminalWriteRequest,
+  type ExographCommandTerminalWriteResponse,
   type ExographCommandSearchRequest,
   type ExographCommandSearchResponse,
   type ExographCommandServerInfo,
@@ -181,6 +187,17 @@ export class AppClient {
     return this.get(`${EXOGRAPH_COMMAND_ROUTES.search}?${params.toString()}`, decodeExographIndexSearchResponse, this.searchRequestTimeoutMs);
   }
 
+  async traverseGraph(request: GraphTraversalRequest): Promise<GraphTraversalResult> {
+    const result = await this.post(EXOGRAPH_COMMAND_ROUTES.graphTraverse, request, decodeGraphTraversalResponse, this.searchRequestTimeoutMs);
+    if (result.workspace.root !== request.workspaceRoot) throw protocolShapeError("a traversal for the requested Workspace");
+    if (result.status === "ok") {
+      const query = result.request;
+      if ((request.start !== undefined && query.start !== request.start) || query.direction !== (request.direction ?? "both") || query.maxDepth !== (request.maxDepth ?? 1) || query.maxResults !== (request.maxResults ?? 100) || query.limit !== (request.limit ?? 25) || query.predicate !== request.predicate) throw protocolShapeError("a traversal for the requested query");
+      if (request.startPath !== undefined && result.execution.returnedOffset === 0 && result.nodes[0]?.filePath !== request.startPath) throw protocolShapeError("a traversal for the requested start path");
+    }
+    return result;
+  }
+
   async getIndexStatus(): Promise<ExographCommandIndexStatusResponse> {
     return this.get(EXOGRAPH_COMMAND_ROUTES.indexStatus, decodeExographIndexStatusResponse);
   }
@@ -193,6 +210,31 @@ export class AppClient {
   async spawnAgentCommand(handle: string, task: string): Promise<ExographSpawnAgentCommandResponse> {
     const request: ExographSpawnAgentCommandRequest = { handle, task };
     return this.post(EXOGRAPH_COMMAND_ROUTES.spawnAgentCommand, request, decodeExographSpawnAgentCommandResponse, this.maintenanceRequestTimeoutMs);
+  }
+
+  async listTerminals(): Promise<ExographCommandTerminalListResponse> {
+    return this.get(EXOGRAPH_COMMAND_ROUTES.terminals, decodeExographCommandTerminalListResponse);
+  }
+
+  async createTerminal(): Promise<ExographCommandTerminalCreateResponse> {
+    return this.post(EXOGRAPH_COMMAND_ROUTES.terminals, {}, decodeExographCommandTerminalCreateResponse);
+  }
+
+  async writeTerminal(id: string, input: string): Promise<ExographCommandTerminalWriteResponse> {
+    const request: ExographCommandTerminalWriteRequest = { input };
+    return this.post(`${EXOGRAPH_COMMAND_ROUTES.terminals}/${encodeURIComponent(id)}/write`, request, decodeExographCommandTerminalWriteResponse);
+  }
+
+  async readTerminal(id: string, cursor?: number): Promise<ExographCommandTerminalReadResponse> {
+    return this.post(
+      `${EXOGRAPH_COMMAND_ROUTES.terminals}/${encodeURIComponent(id)}/read`,
+      cursor === undefined ? {} : { cursor },
+      decodeExographCommandTerminalReadResponse,
+    );
+  }
+
+  async stopTerminal(id: string): Promise<void> {
+    await this.post(`${EXOGRAPH_COMMAND_ROUTES.terminals}/${encodeURIComponent(id)}/stop`, {}, decodeExographCommandOkResponse);
   }
 
   private async get<T>(path: string, decode: (value: unknown) => T, timeoutMs = this.requestTimeoutMs): Promise<T> {
@@ -273,6 +315,34 @@ function decodeExographSpawnAgentCommandResponse(value: unknown): ExographSpawnA
   return value;
 }
 
+function decodeExographCommandTerminalListResponse(value: unknown): ExographCommandTerminalListResponse {
+  if (!isRecord(value) || !Array.isArray(value.terminals) || !value.terminals.every(isCommandTerminal)) {
+    throw protocolShapeError("a valid terminal list response");
+  }
+  return value as unknown as ExographCommandTerminalListResponse;
+}
+
+function decodeExographCommandTerminalCreateResponse(value: unknown): ExographCommandTerminalCreateResponse {
+  if (!isRecord(value) || !isCommandTerminal(value.terminal)) {
+    throw protocolShapeError("a valid terminal create response");
+  }
+  return value as unknown as ExographCommandTerminalCreateResponse;
+}
+
+function decodeExographCommandTerminalWriteResponse(value: unknown): ExographCommandTerminalWriteResponse {
+  if (!isRecord(value) || value.ok !== true || !isCommandTerminal(value.terminal) || !Number.isSafeInteger(value.writeId)) {
+    throw protocolShapeError("a valid terminal write response");
+  }
+  return value as unknown as ExographCommandTerminalWriteResponse;
+}
+
+function decodeExographCommandTerminalReadResponse(value: unknown): ExographCommandTerminalReadResponse {
+  if (!isRecord(value) || !isCommandTerminal(value.terminal) || typeof value.output !== "string" || typeof value.cursor !== "number" || !Number.isSafeInteger(value.cursor) || value.cursor < 0 || typeof value.truncated !== "boolean") {
+    throw protocolShapeError("a valid terminal read response");
+  }
+  return value as unknown as ExographCommandTerminalReadResponse;
+}
+
 function decodeSuccessfulResponse<T>(body: string, method: string, targetPath: string, decode: (value: unknown) => T): T {
   let value: unknown;
   try {
@@ -305,7 +375,14 @@ function isExographCommandOkResponse(value: unknown): value is ExographCommandOk
 }
 
 function isIndexSearchResponse(value: unknown): value is IndexSearchResponse {
-  return isRecord(value) && typeof value.query === "string" && isIndexMode(value.mode) && isIndexBackend(value.source) && isStringArray(value.warnings) && Array.isArray(value.results) && value.results.every(isIndexSearchResult) && (value.hasMore === undefined || typeof value.hasMore === "boolean");
+  return isRecord(value) && typeof value.query === "string" && isIndexMode(value.mode) && isIndexBackend(value.source) && isStringArray(value.warnings) && Array.isArray(value.results) && value.results.every(isIndexSearchResult) && (value.hasMore === undefined || typeof value.hasMore === "boolean") && (value.incomplete === undefined || isIndexSearchIncomplete(value.incomplete));
+}
+
+function isIndexSearchIncomplete(value: unknown): boolean {
+  return isRecord(value)
+    && value.reason === "authorization_refill_limit"
+    && typeof value.requested === "number"
+    && typeof value.returned === "number";
 }
 
 function isIndexSyncResult(value: unknown): value is IndexSyncResult {
@@ -502,4 +579,44 @@ async function quarantineStaleDiscoveryFile(serverJsonPath: string): Promise<voi
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function decodeGraphTraversalResponse(value: unknown): GraphTraversalResult {
+  const fail = () => { throw protocolShapeError("a valid graph traversal response"); };
+  if (!isRecord(value) || value.schemaVersion !== "exograph.graph-traversal.v1" || typeof value.snapshotId !== "string" || !isRecord(value.workspace) || typeof value.workspace.root !== "string" || !isStringArray(value.workspace.noteRootIds)) return fail();
+  if (value.status === "error") {
+    if (!["scope-mismatch", "stale-cursor", "invalid-cursor", "missing-start", "invalid-graph", "too-large"].includes(typeof value.code === "string" ? value.code : "") || typeof value.message !== "string") return fail();
+    return value as unknown as GraphTraversalResult;
+  }
+  if (value.status !== "ok" || !isRecord(value.request) || !optionalStrings(value.request, ["predicate"]) || typeof value.request.start !== "string" || !["outgoing", "incoming", "both"].includes(typeof value.request.direction === "string" ? value.request.direction : "") || !Number.isInteger(value.request.maxDepth) || Number(value.request.maxDepth) < 1 || Number(value.request.maxDepth) > 3 || !Number.isInteger(value.request.maxResults) || Number(value.request.maxResults) < 1 || Number(value.request.maxResults) > 100 || !Number.isInteger(value.request.limit) || Number(value.request.limit) < 1 || Number(value.request.limit) > 100) return fail();
+  if (!Array.isArray(value.nodes) || value.nodes.length > Number(value.request.limit) || !value.nodes.every((node) => isRecord(node) && optionalStrings(node, ["noteId", "filePath", "rootId", "relativePath"]) && typeof node.id === "string" && typeof node.label === "string" && node.resolution === "resolved" && isStringArray(node.conceptTypes) && isStringArray(node.tags) && isRecord(node.properties))) return fail();
+  if (!Array.isArray(value.edges) || value.edges.length > 1000 || !value.edges.every((edge) => isRecord(edge) && optionalStrings(edge, ["predicate", "label"]) && (edge.confidence === undefined || typeof edge.confidence === "number") && typeof edge.id === "string" && typeof edge.source === "string" && typeof edge.target === "string" && ["link", "property-reference", "tag-membership", "hierarchy", "semantic"].includes(typeof edge.family === "string" ? edge.family : "") && ["document", "ontology", "inferred"].includes(typeof edge.origin === "string" ? edge.origin : "") && edge.resolution === "resolved" && typeof edge.directed === "boolean" && Array.isArray(edge.evidence) && edge.evidence.every(isTraversalEvidence))) return fail();
+  if (!Array.isArray(value.evidence) || !value.evidence.every((item) => isRecord(item) && optionalStrings(item, ["noteId", "rootId", "relativePath"]) && typeof item.id === "string" && typeof item.edgeId === "string" && Number.isInteger(item.index) && Number(item.index) >= 0 && isTraversalEvidence(item.evidence))) return fail();
+  if (typeof value.traversalId !== "string" || !Array.isArray(value.events) || value.events.length > 1100 || !value.events.every((event, index) => isRecord(event) && optionalStrings(event, ["fromNodeId", "viaEdgeId"]) && event.seq === index && typeof event.nodeId === "string" && Number.isInteger(event.depth) && Number(event.depth) >= 0 && Number(event.depth) <= 3 && (event.type === "visit" || (event.type === "follow" && typeof event.fromNodeId === "string" && typeof event.edgeId === "string" && ["incoming", "outgoing"].includes(typeof event.direction === "string" ? event.direction : ""))))) return fail();
+  if (!isRecord(value.execution) || value.execution.kind !== "deterministic-replay" || !Number.isInteger(value.execution.visitedCount) || Number(value.execution.visitedCount) < 1 || Number(value.execution.visitedCount) > Number(value.request.maxResults) || !Number.isInteger(value.execution.returnedOffset) || Number(value.execution.returnedOffset) < 0 || (value.nextCursor !== null && typeof value.nextCursor !== "string") || !isRecord(value.completion) || !["page-limit", "max-results", "edge-limit", "complete-within-depth"].includes(typeof value.completion.reason === "string" ? value.completion.reason : "") || typeof value.completion.truncated !== "boolean") return fail();
+  const result = value as unknown as Extract<GraphTraversalResult, { status: "ok" }>;
+  const visits = result.events.filter((event) => event.type === "visit");
+  const offset = result.execution.returnedOffset;
+  if (visits.length !== result.execution.visitedCount || visits[0]?.nodeId !== result.request.start || visits[0]?.depth !== 0 || offset >= visits.length || offset % result.request.limit !== 0 || result.nodes.length !== Math.min(result.request.limit, visits.length - offset) || result.nodes.some((node, index) => node.id !== visits[offset + index].nodeId) || (result.nextCursor !== null) !== (offset + result.nodes.length < visits.length)) return fail();
+  if (new Set(visits.map((event) => event.nodeId)).size !== visits.length || new Set(result.edges.map((edge) => edge.id)).size !== result.edges.length) return fail();
+  const edges = new Map(result.edges.map((edge) => [edge.id, edge]));
+  for (const event of result.events) {
+    if (event.type !== "follow") continue;
+    const edge = edges.get(event.edgeId);
+    if (!edge || (event.direction === "outgoing" ? edge.source !== event.fromNodeId || edge.target !== event.nodeId : edge.target !== event.fromNodeId || edge.source !== event.nodeId)) return fail();
+  }
+  return result;
+}
+
+function optionalStrings(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return keys.every((key) => value[key] === undefined || typeof value[key] === "string");
+}
+
+function isTraversalEvidence(value: unknown): boolean {
+  if (!isRecord(value) || !["source-span", "property", "path", "ontology-rule", "model"].includes(typeof value.kind === "string" ? value.kind : "")) return false;
+  if (value.noteId !== undefined && typeof value.noteId !== "string") return false;
+  if (value.property !== undefined && typeof value.property !== "string") return false;
+  if (value.sourceRange !== undefined && (!isRecord(value.sourceRange) || !Number.isInteger(value.sourceRange.from) || Number(value.sourceRange.from) < 0 || !Number.isInteger(value.sourceRange.to) || Number(value.sourceRange.to) < Number(value.sourceRange.from))) return false;
+  if (value.producer !== undefined && (!isRecord(value.producer) || typeof value.producer.id !== "string" || typeof value.producer.version !== "string")) return false;
+  return value.detail === undefined || typeof value.detail === "string";
 }

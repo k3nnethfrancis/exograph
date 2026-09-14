@@ -95,6 +95,7 @@ function draft() {
       indexUpdateStrategy: "on-save" as const,
     },
     agentCommands: [createDefaultClaudeAgentCommand(), createDefaultCodexAgentCommand()],
+    defaultAgentCommandId: "codex",
     agentInvocationPrompt: "Use {{working_note}}.",
     selectedMcpProviders: ["claude", "codex"] as Array<"claude" | "codex">,
   };

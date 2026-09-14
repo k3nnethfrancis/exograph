@@ -24,15 +24,27 @@ export interface WorkspaceModel {
   searchEngine?: SearchEngine;
 }
 
+export interface PublishingSettings {
+  destinationRepository?: string;
+  publicationDirectory: string;
+  engineDirectory: string;
+  siteUrl: string;
+}
+
 export interface WorkspaceSettings {
+  publishing?: PublishingSettings;
   /** Forward-compatible persisted settings are retained except explicit unsupported fields. */
   [key: string]: unknown;
   workspaceRoot: string;
   defaultTerminalCwd: string;
   noteRoots: string[];
   agentCommands?: AgentCommand[];
+  /** Command selected for Exograph-initiated agent features such as Ontology discovery. */
+  defaultAgentCommandId?: string;
   /** Editable provider-neutral prompt template used for note invocations. */
   agentInvocationPrompt?: string;
+  /** Optional override for Exograph's bundled read-only Ontology design prompt. */
+  ontologyDiscoveryPrompt?: string;
   indexedRoots: IndexedRoot[];
   /** Editable content scope. A repository recommendation may populate this during onboarding. */
   contentPolicy?: WorkspaceContentPolicy;
@@ -44,10 +56,26 @@ export interface WorkspaceSettings {
   editorFontSize: number;
   terminalFontSize: number;
   explorerScale: number;
+  /** Reverse pointer-drag orbit direction in the spatial graph. */
+  graphInverseNavigation: boolean;
+  graphShowOverflowLabels: boolean;
+  /** Per-workspace overrides for the global Mod-based shell shortcuts. */
+  shortcutBindings?: WorkspaceShortcutBindings;
   exploreIndexSearchOnEnter: boolean;
   indexUpdateStrategy: IndexUpdateStrategy;
   layout?: WorkspaceLayoutSettings;
 }
+
+export type WorkspaceShortcutId = "explorer" | "utility" | "new-note" | "daily-note" | "terminal" | "save";
+
+/** A Mod-based shortcut; Mod resolves to Command on macOS and Control elsewhere. */
+export interface WorkspaceShortcutBinding {
+  code: string;
+  shift?: boolean;
+  alt?: boolean;
+}
+
+export type WorkspaceShortcutBindings = Partial<Record<WorkspaceShortcutId, WorkspaceShortcutBinding>>;
 
 export type WorkspaceSettingsRevision = string | null;
 
@@ -262,6 +290,11 @@ export interface IndexSearchResponse {
   warnings: string[];
   results: IndexSearchResult[];
   hasMore?: boolean;
+  incomplete?: {
+    reason: "authorization_refill_limit";
+    requested: number;
+    returned: number;
+  };
 }
 
 export interface IndexReadResponse {

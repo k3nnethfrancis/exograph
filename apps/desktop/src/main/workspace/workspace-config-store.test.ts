@@ -66,5 +66,5 @@ describe("WorkspaceConfigStore", () => {
 });
 
 function settings(): WorkspaceSettings {
-  return { workspaceRoot: "/workspace", defaultTerminalCwd: "/workspace", noteRoots: ["/workspace/notes"], indexedRoots: [], indexing: { enabled: false, mode: "off", backend: "qmd" }, appearanceMode: "system", colorThemeId: "exograph-neutral", editorFontSize: 15, terminalFontSize: 13, explorerScale: 1, exploreIndexSearchOnEnter: false, indexUpdateStrategy: "on-save" };
+  return { workspaceRoot: "/workspace", defaultTerminalCwd: "/workspace", noteRoots: ["/workspace/notes"], indexedRoots: [], indexing: { enabled: false, mode: "off", backend: "qmd" }, appearanceMode: "system", colorThemeId: "exograph-neutral", editorFontSize: 15, terminalFontSize: 13, explorerScale: 1, graphInverseNavigation: true, graphShowOverflowLabels: true, exploreIndexSearchOnEnter: false, indexUpdateStrategy: "on-save" };
 }

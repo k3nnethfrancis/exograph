@@ -1,6 +1,8 @@
+import type { PreviewTarget } from "../../shared/api/workspace-filesystem";
+
 export interface PreviewTab {
   id: string;
-  url: string;
+  target: PreviewTarget;
 }
 
 export interface PreviewTabsState {
@@ -24,11 +26,11 @@ export function selectPreviewTab(state: PreviewTabsState, id: string): PreviewTa
   return state.tabs.some((tab) => tab.id === id) ? { ...state, activeId: id } : state;
 }
 
-export function updatePreviewTabUrl(state: PreviewTabsState, id: string, url: string): PreviewTabsState {
+export function updatePreviewTabTarget(state: PreviewTabsState, id: string, target: PreviewTarget): PreviewTabsState {
   if (!state.tabs.some((tab) => tab.id === id)) return state;
   return {
     ...state,
-    tabs: state.tabs.map((tab) => tab.id === id ? { ...tab, url } : tab),
+    tabs: state.tabs.map((tab) => tab.id === id ? { ...tab, target } : tab),
   };
 }
 

@@ -9,8 +9,10 @@ coverage/
 test-results/
 playwright-report/
 *.tsbuildinfo
-# Generated local development output.
-/artifacts/
+# Generated local development output. Keep the canonical agent-first explainer
+# versioned; all other generated artifacts remain local.
+/artifacts/*
+!/artifacts/exograph-agent-contribution-first-principles.html
 .exograph/
 .exograph-dev/
 .env

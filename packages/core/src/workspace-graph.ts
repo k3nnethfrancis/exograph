@@ -1,3 +1,4 @@
+import { traverseKnowledgeGraph, type GraphTraversalRequest, type GraphTraversalResult } from "./graph-traversal";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -199,6 +200,10 @@ export class WorkspaceGraph {
     };
   }
 
+  async traverse(request: GraphTraversalRequest): Promise<GraphTraversalResult> {
+    return traverseKnowledgeGraph(await this.knowledgeSnapshot(), request);
+  }
+
   async contextForNote(filePath: string): Promise<WorkspaceGraphContext | null> {
     const graph = await this.build();
     const epoch = this.resolveEpoch(graph);
@@ -329,15 +334,15 @@ export class WorkspaceGraph {
             label: link.label || link.target,
             conceptTypes: [],
             properties: {},
-            resolution: link.resolution === "external" ? "external" : "unresolved",
+            resolution: link.resolution,
             tags: [],
           });
         }
-        const relationKey = `${entry.note.id}\u0000${targetId}\u0000references\u0000${link.label}`;
+        const relationKey = `relation:link:${encodeURIComponent(entry.note.id)}:${encodeURIComponent(targetId)}`;
         const occurrence = relationCounts.get(relationKey) ?? 0;
         relationCounts.set(relationKey, occurrence + 1);
         const relation: RelationEdge = {
-          id: `relation:link:${encodeURIComponent(entry.note.id)}:${encodeURIComponent(targetId)}:${occurrence}`,
+          id: `${relationKey}:${occurrence}`,
           source: entry.note.id,
           target: targetId,
           family: "link",

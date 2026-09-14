@@ -23,26 +23,26 @@ describe("utility surface model", () => {
       type: "select",
       destination: "preview",
     });
-    const connections = reduceUtilitySurface(preview, {
+    const graph = reduceUtilitySurface(preview, {
       type: "select",
-      destination: "connections",
+      destination: "graph",
     });
 
-    expect(connections).toEqual({ open: true, destination: "connections" });
-    expect(["terminal", "preview", "connections"].filter((destination) =>
-      isUtilityDestinationActive(connections, destination as "terminal" | "preview" | "connections"),
-    )).toEqual(["connections"]);
+    expect(graph).toEqual({ open: true, destination: "graph" });
+    expect(["terminal", "preview", "graph", "context"].filter((destination) =>
+      isUtilityDestinationActive(graph, destination as "terminal" | "preview" | "graph" | "context"),
+    )).toEqual(["graph"]);
   });
 
   it("retains the selected destination while the whole surface is hidden", () => {
     const selected = reduceUtilitySurface(DEFAULT_UTILITY_SURFACE_STATE, {
       type: "select",
-      destination: "connections",
+      destination: "context",
     });
     const hidden = reduceUtilitySurface(selected, { type: "toggle" });
     const reopened = reduceUtilitySurface(hidden, { type: "toggle" });
 
-    expect(hidden).toEqual({ open: false, destination: "connections" });
+    expect(hidden).toEqual({ open: false, destination: "context" });
     expect(reopened).toEqual(selected);
   });
 });

@@ -8,6 +8,7 @@ import {
 
 import {
   WorkspaceSettingsDialog,
+  markdownScopePreset,
   loadAgentCommandContinuityState,
   indexSettingsStatusCopy,
   workspaceSettingsDialogIntroCopy,
@@ -28,7 +29,7 @@ describe("workspace settings footer copy", () => {
   });
 
   it("only mentions Apply when structural changes are pending", () => {
-    expect(workspaceSettingsSavedFooterCopy(true)).toContain("Apply");
+    expect(workspaceSettingsSavedFooterCopy(true)).toBe("Apply to save workspace and search changes. Closing Settings discards unapplied changes.");
     expect(workspaceSettingsSavedFooterCopy(false)).toBe("Settings saved.");
   });
 
@@ -52,6 +53,7 @@ describe("workspace settings footer copy", () => {
         settings={workspaceSettingsDialogFixture({
           section: "agents",
           agentCommands: [createDefaultClaudeAgentCommand(), createDefaultCodexAgentCommand()],
+          defaultAgentCommandId: "codex",
         })}
         setSettings={() => {}}
         structuralDraftKey={workspaceSettingsStructuralDraftKey}
@@ -59,12 +61,44 @@ describe("workspace settings footer copy", () => {
     );
 
     expect(html).toContain("Agents");
+    expect(html).toContain("Default agent");
+    expect(html).toContain('<option value="codex" selected="">Codex</option>');
     expect(html).toContain("@claude");
     expect(workspaceSettingsDialogIntroCopy("agents", false)).toBe("Configure the agents available from @ mentions.");
     expect(html).toContain("claude -p");
     expect(html).toContain("Keep context");
     expect(html).toContain("Fresh each time");
     expect(html).toContain("Add Custom");
+  });
+
+  it("keeps inverse navigation in a dedicated Graph section", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceSettingsDialog
+        indexBusy={null}
+        indexStatus={null}
+        onChooseFolder={() => {}}
+        onClose={() => {}}
+        onOpenWorkspaceSwitcher={() => {}}
+        onRunIndexUpdate={() => {}}
+        onSave={() => {}}
+        settings={workspaceSettingsDialogFixture({ section: "graph", graphInverseNavigation: false })}
+        setSettings={() => {}}
+        structuralDraftKey={workspaceSettingsStructuralDraftKey}
+      />,
+    );
+
+    expect(html).toContain("Show overflow labels");
+    expect(html).toContain("Place labels away from their nodes when there is not enough room.");
+    expect(html).toContain('data-testid="workspace-settings-graph-overflow-labels"');
+    expect(html).toContain("Inverse navigation");
+    expect(html).toContain("Reverse orbit direction while dragging.");
+    expect(html).toContain('data-testid="workspace-settings-graph-inverse-navigation"');
+    expect(html).toContain("Advanced");
+    expect(html).toContain('data-testid="workspace-settings-ontology"');
+    expect(html).toContain("Ontology prompt");
+    expect(html).toContain("Used by Discover structure");
+    expect(html).toContain('data-testid="workspace-settings-ontology-prompt"');
+    expect(workspaceSettingsDialogIntroCopy("graph", false)).toBe("Adjust graph navigation, labels, and ontology.");
   });
 
   it("keeps Markdown scope editable from Workspace settings", () => {
@@ -83,8 +117,9 @@ describe("workspace settings footer copy", () => {
       />,
     );
 
-    expect(html).toContain("Content scope");
-    expect(html).toContain("Repository Markdown");
+    expect(html).toContain("Markdown files");
+    expect(html).not.toContain('data-testid="workspace-settings-ontology"');
+    expect(html).toContain("Exclude generated and dependency folders");
     expect(html).toContain("All Markdown");
   });
 
@@ -190,11 +225,36 @@ describe("workspace settings footer copy", () => {
     expect(html).toContain("3 content embeddings waiting");
     expect(html).toContain("catch up automatically while Exograph is idle");
     expect(html).toContain("Search engine");
-    expect(html).toContain("QMD retrieval");
+    expect(html).toContain("Search mode");
     expect(html).not.toContain("3 pending embeddings");
     expect(html).toContain("Search maintenance");
     expect(html).toContain("QMD");
     expect(html).not.toContain("Press Apply");
+  });
+
+  it("describes maintenance against the applied mode while a different mode is drafted", () => {
+    const html = renderSearchSettings(indexStatusFixture({ mode: "lexical" }));
+    expect(html).toContain("Update indexed documents.");
+    expect(html).toContain("Actions use the applied search settings.");
+    expect(html).toContain("Apply a meaning-based search mode to enable embeddings.");
+    const embed = html.match(/<button[^>]*data-testid="workspace-settings-embed-index"[^>]*>/)?.[0];
+    expect(embed).toContain('disabled=""');
+    expect(html).toContain('<option value="hybrid" selected="">Keywords + meaning</option>');
+  });
+
+  it.each(["syncing", "updating", "embedding"] as const)("disables index actions and identifies the running %s operation", (busy) => {
+    const html = renderSearchSettings(indexStatusFixture(), busy);
+    const buttons = html.match(/<button[^>]*data-testid="workspace-settings-(?:sync|update|embed)-index"[^>]*>/g)!;
+    expect(buttons).toHaveLength(3);
+    expect(buttons.every(button => button.includes('disabled=""'))).toBe(true);
+    expect(buttons.filter(button => button.includes('aria-busy="true"'))).toHaveLength(1);
+  });
+
+  it.each([{ enabled: false, indexedRoots: [] }, { mode: "off" as const }])("explains unavailable index actions without claiming the draft index is ready: %j", (status) => {
+    const html = renderSearchSettings(indexStatusFixture(status));
+    expect(html).toContain("Apply QMD settings to enable index actions.");
+    const buttons = html.match(/<button[^>]*data-testid="workspace-settings-(?:sync|update|embed)-index"[^>]*>/g)!;
+    expect(buttons.every(button => button.includes('disabled=""'))).toBe(true);
   });
 
   it("keeps QMD maintenance out of Simple search settings", () => {
@@ -213,9 +273,9 @@ describe("workspace settings footer copy", () => {
       />,
     );
 
-    expect(html).toContain("Simple search is active");
+    expect(html).toContain("Filenames and paths");
     expect(html).not.toContain("Search maintenance");
-    expect(html).not.toContain("Sync documents");
+    expect(html).not.toContain("Sync now");
   });
 
   it("does not present an embedding backlog as document work in lexical mode", () => {
@@ -234,7 +294,7 @@ describe("workspace settings footer copy", () => {
       />,
     );
 
-    expect(html).toContain("semantic off");
+    expect(html).toContain("Apply a meaning-based search mode to enable embeddings.");
     expect(html).not.toContain("303 content embeddings waiting");
     expect(html).not.toContain("303 notes waiting");
   });
@@ -267,3 +327,19 @@ function indexStatusFixture(overrides: Partial<IndexStatus> = {}): IndexStatus {
     ...overrides,
   };
 }
+
+function renderSearchSettings(status: IndexStatus, busy: "syncing" | "updating" | "embedding" | null = null) {
+  return renderToStaticMarkup(<WorkspaceSettingsDialog
+    indexBusy={busy} indexStatus={status} onChooseFolder={() => {}} onClose={() => {}}
+    onOpenWorkspaceSwitcher={() => {}} onRunIndexUpdate={() => {}} onSave={() => {}}
+    settings={workspaceSettingsDialogFixture({ section: "index", indexMode: "hybrid", searchEngine: "qmd" })}
+    setSettings={() => {}} structuralDraftKey={workspaceSettingsStructuralDraftKey}
+  />);
+}
+
+it("distinguishes custom exclusions from the repository preset without changing them", () => {
+  const policy = { excludedPaths: ["private/**"], sourceVisibility: true };
+  expect(markdownScopePreset(policy)).toBe("custom");
+  expect(policy).toEqual({ excludedPaths: ["private/**"], sourceVisibility: true });
+  expect(markdownScopePreset({ excludedPaths: [], sourceVisibility: false })).toBe("all");
+});

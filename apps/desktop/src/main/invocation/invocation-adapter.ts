@@ -73,7 +73,22 @@ function processFailure(event: InvocationProcessExit): string | null {
   if (event.exitCode === 0 && !event.spawnError) {
     return null;
   }
-  return event.spawnError ?? `Command exited with code ${event.exitCode ?? "unknown"}.`;
+  if (event.spawnError) return event.spawnError;
+  const diagnostic = boundedProcessDiagnostic(event.stderr);
+  if (/not inside a trusted directory|skip-git-repo-check/i.test(diagnostic)) {
+    return "Codex could not run in this non-Git working folder. Restore the recommended Codex command or add --skip-git-repo-check.";
+  }
+  return diagnostic
+    ? `Command exited with code ${event.exitCode ?? "unknown"}: ${diagnostic}`
+    : `Command exited with code ${event.exitCode ?? "unknown"}.`;
+}
+
+function boundedProcessDiagnostic(stderr: string): string {
+  return stderr
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .trim()
+    .slice(-600);
 }
 
 function claudeOutputEvents(stdout: string): Array<Record<string, unknown>> {

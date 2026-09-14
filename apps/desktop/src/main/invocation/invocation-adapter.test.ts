@@ -30,7 +30,7 @@ describe("invocation adapter", () => {
 
   it("requests Codex JSONL without changing generic Commands", () => {
     const codex = createDefaultCodexAgentCommand();
-    expect(commandForHeadlessInvocation(codex)).toBe("codex exec --sandbox workspace-write --json -");
+    expect(commandForHeadlessInvocation(codex)).toBe("codex exec --sandbox workspace-write --skip-git-repo-check --json -");
     expect(commandForHeadlessInvocation({ ...codex, command: "codex exec --json -" })).toBe("codex exec --json -");
     expect(commandForHeadlessInvocation({ ...codex, adapter: "generic", command: "agent -" })).toBe("agent -");
   });
@@ -39,8 +39,18 @@ describe("invocation adapter", () => {
     const codex = createDefaultCodexAgentCommand();
     expect(codex.continuityPolicy).toBe("fresh");
     expect(supportsAutomaticContinuity(codex)).toBe(false);
-    expect(commandForHeadlessInvocation(codex, HEAD)).toBe("codex exec --sandbox workspace-write --json -");
+    expect(commandForHeadlessInvocation(codex, HEAD)).toBe("codex exec --sandbox workspace-write --skip-git-repo-check --json -");
     expect(supportsAutomaticContinuity({ ...createDefaultClaudeAgentCommand(), adapter: "generic", continuityPolicy: "fresh" })).toBe(false);
+  });
+
+  it("preserves a bounded actionable Codex failure diagnostic", () => {
+    expect(inspectInvocationAdapterResult(createDefaultCodexAgentCommand(), {
+      exitCode: 1,
+      stdout: "",
+      stderr: "Not inside a trusted directory and --skip-git-repo-check was not specified.\n",
+    }, null).failureReason).toBe(
+      "Codex could not run in this non-Git working folder. Restore the recommended Codex command or add --skip-git-repo-check.",
+    );
   });
 
   it("extracts only a real structured Claude session id", () => {

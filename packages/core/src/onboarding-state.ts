@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   agentCommandConfigurationError,
   normalizeAgentCommands,
+  normalizeDefaultAgentCommandId,
   normalizeAgentInvocationPrompt,
   type AgentCommand,
 } from "./agent-invocation";
@@ -32,6 +33,7 @@ export interface OnboardingProgressDraft {
     indexUpdateStrategy: IndexUpdateStrategy;
   };
   agentCommands: AgentCommand[];
+  defaultAgentCommandId: string | null;
   agentInvocationPrompt: string;
   selectedMcpProviders: OnboardingMcpProvider[];
 }
@@ -248,6 +250,7 @@ export function validateOnboardingProgressDraft(
     contentPolicyChoice,
     search,
     agentCommands,
+    defaultAgentCommandId: normalizeDefaultAgentCommandId(input.defaultAgentCommandId, agentCommands) ?? null,
     agentInvocationPrompt,
     selectedMcpProviders,
   };

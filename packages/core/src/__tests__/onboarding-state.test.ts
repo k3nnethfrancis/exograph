@@ -261,6 +261,7 @@ function draft(): OnboardingProgressDraft {
       indexUpdateStrategy: "on-save",
     },
     agentCommands: [createDefaultClaudeAgentCommand(), createDefaultCodexAgentCommand()],
+    defaultAgentCommandId: "codex",
     agentInvocationPrompt: "Use {{working_note}} and {{message}}.",
     selectedMcpProviders: ["claude", "codex"],
   };

@@ -1,3 +1,4 @@
+import type { GraphTraversalRequest, GraphTraversalResult } from "@exograph/core";
 import { access, readdir, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
@@ -173,14 +174,24 @@ export class WorkspaceNotesService {
    * claim that Exograph opened it.  This shares the same root and symlink boundary
    * as every other workspace read. */
   async authorizeOpenFile(filePath: string): Promise<string> {
-    const scope = this.scope;
-    const authorizedPath = await this.workspaceFiles(scope).existing(filePath);
-    const fileStat = await stat(authorizedPath);
-    this.assertCurrentScope(scope);
-    if (!fileStat.isFile()) {
+    const target = await this.authorizeOpenPath(filePath);
+    if (target.kind !== "file") {
       throw new Error("Exograph can only open an existing file inside the active wiki.");
     }
-    return authorizedPath;
+    return target.path;
+  }
+
+  /** Authorizes an exact operator-requested file or folder for presentation.
+   * The command surface never performs fuzzy resolution and retains the same
+   * containment and symlink checks as ordinary workspace reads. */
+  async authorizeOpenPath(targetPath: string): Promise<{ path: string; kind: "file" | "directory" }> {
+    const scope = this.scope;
+    const authorizedPath = await this.workspaceFiles(scope).existing(targetPath);
+    const targetStat = await stat(authorizedPath);
+    this.assertCurrentScope(scope);
+    if (targetStat.isFile()) return { path: authorizedPath, kind: "file" };
+    if (targetStat.isDirectory()) return { path: authorizedPath, kind: "directory" };
+    throw new Error("Exograph can only open an existing file or folder inside the active wiki.");
   }
 
   async searchFilenames(query: string): Promise<WorkspaceSearchResults> {
@@ -266,7 +277,10 @@ export class WorkspaceNotesService {
       return null;
     }
 
-    const relativeCandidate = target.endsWith(".md")
+    const isPdfTarget = target.toLowerCase().endsWith(".pdf");
+    const relativeCandidate = isPdfTarget
+      ? path.resolve(path.dirname(sourceFilePath), target)
+      : target.endsWith(".md")
       ? path.resolve(path.dirname(sourceFilePath), target)
       : path.resolve(path.dirname(sourceFilePath), `${target}.md`);
     await files.writable(relativeCandidate);
@@ -274,8 +288,10 @@ export class WorkspaceNotesService {
 
     if (await fileExists(relativeCandidate)) {
       this.assertCurrentScope(scope);
-      return relativeCandidate;
+      return isPdfTarget ? await files.existing(relativeCandidate) : relativeCandidate;
     }
+
+    if (isPdfTarget) return null;
 
     const normalizedTarget = path.basename(target, ".md").toLowerCase();
     const noteFiles = await listMarkdownFiles(
@@ -315,6 +331,9 @@ export class WorkspaceNotesService {
     if (resolved) {
       return resolved;
     }
+    if (target.toLowerCase().endsWith(".pdf")) {
+      throw new Error("PDF link targets must be an existing file inside the active wiki.");
+    }
 
     const noteRoot = scope.model.noteRoots.find((root) => isPathWithin(root.path, sourceFilePath));
     const normalizedTarget = target.replace(/\.md$/i, "");
@@ -345,7 +364,6 @@ export class WorkspaceNotesService {
     }
 
     const model = scope.model;
-    const sourceRoot = model.noteRoots.find((root) => isPathWithin(root.path, sourceFilePath));
     const noteFiles = await listMarkdownFiles(
       this.noteRootPaths(scope),
       normalizeWorkspaceContentPolicy(model.contentPolicy),
@@ -353,9 +371,13 @@ export class WorkspaceNotesService {
     this.assertCurrentScope(scope);
     const suggestions = noteFiles
       .map((filePath) => {
-        const rootPath = model.noteRoots.find((root) => isPathWithin(root.path, filePath))?.path ?? sourceRoot?.path;
+        const rootPath = model.noteRoots.find((root) => isPathWithin(root.path, filePath))?.path;
         const relativePath = rootPath ? path.relative(rootPath, filePath) : path.basename(filePath);
         const relativeWithoutExtension = relativePath.replace(/\.md$/i, "");
+        const target = path.relative(path.dirname(sourceFilePath), filePath)
+          .replace(/\.md$/i, "")
+          .split(path.sep)
+          .join("/");
         const title = path.basename(filePath, ".md");
         const haystack = `${title}\n${relativeWithoutExtension}`.toLowerCase();
         if (!haystack.includes(trimmedQuery)) {
@@ -365,7 +387,7 @@ export class WorkspaceNotesService {
         return {
           filePath,
           title,
-          target: relativeWithoutExtension,
+          target,
           snippet: relativeWithoutExtension,
         };
       })
@@ -398,6 +420,16 @@ export class WorkspaceNotesService {
       ));
     }
     return this.awaitCurrentScope(scope, this.workspaceGraph(scope).contextForNote(authorizedPath));
+  }
+
+  async traverseGraph(request: GraphTraversalRequest): Promise<GraphTraversalResult> {
+    const scope = this.scope;
+    if (request.workspaceRoot !== scope.model.workspaceRoot) throw new Error("Traversal Workspace does not match the active Workspace.");
+    const derivedIndex = this.derivedIndex;
+    if (derivedIndex && scope.runtimeRoot) {
+      return this.awaitCurrentScope(scope, derivedIndex.graphTraverse(scope.model, scope.runtimeRoot, request, scope.controller.signal));
+    }
+    return this.awaitCurrentScope(scope, this.workspaceGraph(scope).traverse(request));
   }
 
   async getGraphTopology(): Promise<GraphTopology> {

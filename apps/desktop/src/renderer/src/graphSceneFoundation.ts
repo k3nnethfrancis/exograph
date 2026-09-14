@@ -132,6 +132,7 @@ export interface GraphLabelPlan {
 
 export interface GraphLabelPlanOptions {
   maxLabels: number;
+  showOverflowLabels?: boolean;
   edgeInset?: number;
   collisionGap?: number;
 }
@@ -159,7 +160,7 @@ export type GraphKeyboardIntent =
 
 export const DEFAULT_SCENE_CAMERA: GraphCamera = {
   yaw: -0.42,
-  pitch: 0.24,
+  pitch: 0.46,
   distance: 760,
   target: [0, 0, 0],
   fov: Math.PI / 4.2,
@@ -559,7 +560,9 @@ export function planGraphLabels(
     const anchors = graphLabelAnchors(nodeX, nodeY, radius, candidate.width, candidate.height);
     const anchored = anchors.find((placement) => labelFits(placement.box, projection.viewport, inset)
       && occupied.every((box) => !boxesOverlap(placement.box, box, gap)));
-    const fallback = anchored ?? findFreeLabelCell(candidate, projection.viewport, occupied, inset, gap);
+    const fallback = anchored ?? (options.showOverflowLabels === false
+      ? null
+      : findFreeLabelCell(candidate, projection.viewport, occupied, inset, gap));
     if (!fallback) {
       if (entry.required) omittedRequired.push(candidate.index);
       continue;
@@ -578,13 +581,38 @@ export function planGraphLabels(
 
 export function frameGraphCamera(positions: Float32Array, viewport: GraphViewport): GraphCamera {
   const bounds = graphSphereBounds(positions);
-  const aspect = Math.max(0.45, viewport.width / Math.max(1, viewport.height));
+  const aspect = Math.max(1, viewport.width) / Math.max(1, viewport.height);
+  const halfAngle = Math.atan(Math.tan(DEFAULT_SCENE_CAMERA.fov / 2) * Math.min(1, aspect));
   const distance = clamp(
-    (bounds.radius / Math.sin(DEFAULT_SCENE_CAMERA.fov / 2)) * (aspect < 1 ? 1 / aspect : 1) * 1.08,
+    (bounds.radius / Math.sin(halfAngle)) * 1.18,
     90,
     DEFAULT_MAXIMUM_DISTANCE,
   );
   return { ...DEFAULT_SCENE_CAMERA, distance, target: [...bounds.center] };
+}
+
+/** Preserve manual framing, only dollying out if a visible selection would be lost. */
+export function retainGraphSelectionOnResize(
+  positions: Float32Array,
+  camera: GraphCamera,
+  selected: number,
+  previous: GraphViewport,
+  viewport: GraphViewport,
+): GraphCamera {
+  if (!validIndex(selected, positions.length / 3)) return camera;
+  const point = positions.slice(selected * 3, selected * 3 + 3);
+  const before = projectGraphScene(point, camera, previous).nodes;
+  if (before[3] !== 1 || before[0] < 0 || before[0] > previous.width || before[1] < 0 || before[1] > previous.height) return camera;
+  const after = projectGraphScene(point, camera, viewport).nodes;
+  const inset = Math.min(12, viewport.width / 4, viewport.height / 4);
+  if (after[3] === 1 && after[0] >= inset && after[0] <= viewport.width - inset && after[1] >= inset && after[1] <= viewport.height - inset) return camera;
+  const offset = subtract3([point[0], point[1], point[2]], camera.target);
+  const { right, up, forward } = cameraBasis(camera);
+  const tangent = Math.tan(camera.fov / 2);
+  const horizontal = tangent * viewport.width / Math.max(1, viewport.height) * (1 - 2 * inset / viewport.width);
+  const vertical = tangent * (1 - 2 * inset / viewport.height);
+  const requiredDepth = Math.max(Math.abs(dot3(offset, right)) / horizontal, Math.abs(dot3(offset, up)) / vertical);
+  return { ...camera, target: [...camera.target], distance: Math.max(camera.distance, Math.min(DEFAULT_MAXIMUM_DISTANCE, requiredDepth - dot3(offset, forward))) };
 }
 
 export function focusGraphCamera(

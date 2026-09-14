@@ -4,7 +4,9 @@ export const INVOCATION_ACTIVITY_KINDS = [
   "searching",
   "editing",
   "running",
-  "finishing",
+  "done",
+  "stopped",
+  "failed",
 ] as const;
 
 export type InvocationActivityKind = (typeof INVOCATION_ACTIVITY_KINDS)[number];

@@ -51,3 +51,9 @@ pnpm --filter @exograph/core check:unused
 For graph changes, read `../../docs/architecture.md`,
 `../../docs/note-root-formats.md`, and `../../docs/workspace-ontology.md`
 before editing.
+
+Editor persistence is owned by `src/document-persistence.ts`: exact-byte read
+revisions, serialized revision-checked saves and exclusive copies. It relies on
+callers to enforce `WorkspaceFiles` containment. Its queue covers editor saves;
+external and invocation writers remain outside it. Do not claim filesystem CAS
+or durable dirty-buffer recovery. Test `src/document-persistence.test.ts`.

@@ -243,7 +243,7 @@ test("preserves newer human work when rejecting a drifted proposal", async () =>
       expect.objectContaining({ invocationId: record.id, pendingFileCount: 1 }),
     ]);
 
-    await expect(review).toContainText("Review changed");
+    await expect(review).toContainText("File changed");
     await review.getByRole("button", { name: "Keep current" }).click();
     record = await waitForInvocation(
       fixture.workspaceRoot,
@@ -260,13 +260,30 @@ test("preserves newer human work when rejecting a drifted proposal", async () =>
 test("Stop terminates the complete deterministic process tree", async () => {
   const fixture = await launchInvocationFixture("stop-tree");
   try {
-    await launchInvocation(fixture.page);
+    await launchInvocation(fixture.page, fixture.paths.tagged);
     const running = await waitForInvocation(fixture.workspaceRoot, (record) => record.status === "running");
     const parentPid = await waitForPid(path.join(fixture.controlRoot, "parent.pid"));
     const childPid = await waitForPid(path.join(fixture.controlRoot, "child.pid"));
 
-    await expect(fixture.page.getByRole("button", { name: "Stop" })).toBeVisible();
-    await fixture.page.getByRole("button", { name: "Stop" }).click();
+    const activity = fixture.page.getByTestId("invocation-activity");
+    const stop = activity.getByRole("button", { name: "Stop" });
+    await expect(stop).toBeVisible();
+    await expect(stop.locator(".lucide-circle-stop")).toBeVisible();
+    await expect(stop.locator(".lucide-square")).toHaveCount(0);
+    await expect(activity).toHaveCount(1);
+    await expect(activity).toHaveAttribute("data-positioned", "true");
+    const [activityBox, editorBox] = await Promise.all([
+      activity.boundingBox(),
+      fixture.page.locator(".editor-pane").first().boundingBox(),
+    ]);
+    expect(activityBox).not.toBeNull();
+    expect(editorBox).not.toBeNull();
+    expect(activityBox!.width).toBeLessThanOrEqual(280);
+    expect(activityBox!.x).toBeGreaterThanOrEqual(editorBox!.x);
+    expect(activityBox!.x + activityBox!.width).toBeLessThanOrEqual(editorBox!.x + editorBox!.width);
+    expect(activityBox!.y).toBeGreaterThanOrEqual(editorBox!.y);
+    expect(activityBox!.y + activityBox!.height).toBeLessThanOrEqual(editorBox!.y + editorBox!.height);
+    await stop.click();
     const stopped = await waitForInvocation(
       fixture.workspaceRoot,
       (record) => record.id === running.id && record.status === "user-ended",
@@ -276,6 +293,54 @@ test("Stop terminates the complete deterministic process tree", async () => {
     await expect.poll(() => processExists(parentPid)).toBe(false);
     await expect.poll(() => processExists(childPid)).toBe(false);
     await expect(readFile(path.join(fixture.controlRoot, "signal.txt"), "utf8")).resolves.toBe("SIGTERM");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("offers review and session handoff as soon as the proposal settles while the harness keeps running", async () => {
+  const fixture = await launchInvocationFixture("proposal-running", { adapter: "claude-code" });
+  try {
+    await launchInvocation(fixture.page);
+    const running = await waitForInvocation(
+      fixture.workspaceRoot,
+      (record) => record.status === "running" && record.changeset?.status === "pending-review",
+    );
+    expect(running.providerSessionId).toBe("ce4b9e26-2574-4433-a054-1110cd403792");
+    await expect(readFile(path.join(fixture.controlRoot, "proposal-ready.txt"), "utf8")).resolves.toBe("ready");
+
+    const activity = fixture.page.getByTestId("invocation-activity");
+    await expect(activity).toHaveCount(0);
+    const review = fixture.page.locator('section[aria-label="Review invocation changes"]');
+    await expect(review).toBeVisible();
+    await expect(review.getByRole("button", { name: "Keep", exact: true })).toBeVisible();
+    await expect(review.getByRole("button", { name: "Reject", exact: true })).toBeVisible();
+    await review.getByRole("button", { name: "Open agent session" }).click();
+    await expect.poll(() => fixture.page.evaluate(() => window.exograph.terminals.list()))
+      .toContainEqual(expect.objectContaining({
+        command: expect.stringContaining(`--resume '${running.providerSessionId}'`),
+      }));
+    await expect(fixture.page.getByTestId("utility-pane-terminal")).toHaveAttribute("aria-pressed", "true");
+
+    await review.getByRole("button", { name: "Keep", exact: true }).click();
+    await waitForInvocation(
+      fixture.workspaceRoot,
+      (record) => record.id === running.id && record.changeset?.status === "kept",
+    );
+    await expect(activity).toHaveCount(0, { timeout: 5_000 });
+    const persistentResume = fixture.page.locator(".inline-agent-response__resume");
+    await persistentResume.hover();
+    await expect(persistentResume).toHaveCSS("opacity", "1");
+    const terminalCount = (await fixture.page.evaluate(() => window.exograph.terminals.list())).length;
+    await persistentResume.click();
+    await expect.poll(async () => (await fixture.page.evaluate(() => window.exograph.terminals.list())).length)
+      .toBe(terminalCount + 1);
+
+    await fixture.page.evaluate((invocationId) => window.exograph.workspace.endAgentInvocation(invocationId), running.id);
+    await waitForInvocation(
+      fixture.workspaceRoot,
+      (record) => record.id === running.id && record.status === "user-ended",
+    );
   } finally {
     await fixture.cleanup();
   }
