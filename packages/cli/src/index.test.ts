@@ -113,16 +113,19 @@ describe("minimal Exograph operator CLI", () => {
 
   it("routes the compact search/index/open/invoke contract", async () => {
     let output = "";
+    const openedPaths: string[] = [];
+    const openingClient = { ...client, openFile: async (filePath: string) => { openedPaths.push(filePath); } };
     const options = {
       env: matchingClientEnv,
       stdout: { write: (text: string) => { output += text; } },
       stderr: { write: () => {} },
-      connectAppClient: connect,
+      connectAppClient: async () => openingClient,
     };
     expect(await runCli(["node", "exograph", "search", "hello"], options)).toBe(0);
     expect(await runCli(["node", "exograph", "index", "sync"], options)).toBe(0);
     expect(await runCli(["node", "exograph", "open", "note.md"], options)).toBe(0);
     expect(await runCli(["node", "exograph", "invoke", "@review", "check", "this"], options)).toBe(0);
+    expect(openedPaths).toEqual(["/workspace/note.md"]);
     expect(output).toContain("exograph.search.v1");
   });
 

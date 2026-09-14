@@ -2,6 +2,7 @@ import { WidgetType, type EditorView } from "@codemirror/view";
 
 import { LIST_GEOMETRY } from "../listGeometry";
 import type { TableContext } from "./metadata";
+import { wikilinkPresentation } from "./wikilinks";
 
 type ResolveImage = (target: string, options?: { lookupByFilename?: boolean }) => Promise<{ url: string }>;
 
@@ -47,6 +48,116 @@ export interface MarkdownGraphReferenceItem {
 export interface MarkdownGraphReferences {
   backlinks: MarkdownGraphReferenceItem[];
   references: MarkdownGraphReferenceItem[];
+}
+
+export type TableCellInlineContent =
+  | { kind: "text"; value: string }
+  | { kind: "wikilink"; label: string; target: string }
+  | { kind: "markdown-link"; label: string; target: string }
+  | { kind: "strong" | "emphasis" | "strike" | "code"; value: string }
+  | { kind: "tag"; value: string; target: string };
+
+const tableCellInlinePattern = /(?<wikilink>(?<!!)\[\[(?<wikilinkTarget>[^\]|]+)(?:\|(?<wikilinkAlias>[^\]]+))?\]\])|(?<markdownLink>\[(?<markdownLinkLabel>[^\]]+)\]\((?<markdownLinkTarget>[^)]+)\))|(?<strong>\*\*(?<strongValue>.+?)\*\*)|(?<emphasis>(?<!\*)\*(?<emphasisValue>[^*]+)\*(?!\*))|(?<strike>~~(?<strikeValue>.+?)~~)|(?<code>`(?<codeValue>[^`\n]+)`)|(?<tag>(?<tagPrefix>^|[\s(])#(?<tagTarget>[A-Za-z][\w/-]*))/g;
+
+/**
+ * Tables are replacement widgets, so their cells do not pass through the
+ * line-level Markdown decorations. Parse wikilinks here to preserve the same
+ * visible label and click contract as links in ordinary Markdown text.
+ */
+export function tableCellInlineContent(value: string): TableCellInlineContent[] {
+  const content: TableCellInlineContent[] = [];
+  const appendText = (text: string) => {
+    if (!text) return;
+    const previous = content.at(-1);
+    if (previous?.kind === "text") previous.value += text;
+    else content.push({ kind: "text", value: text });
+  };
+  let cursor = 0;
+  for (const match of value.matchAll(tableCellInlinePattern)) {
+    const start = match.index ?? 0;
+    if (start > cursor) appendText(value.slice(cursor, start));
+    const groups = match.groups ?? {};
+    if (groups.wikilink) {
+      const target = groups.wikilinkTarget?.trim() ?? "";
+      const { label } = wikilinkPresentation(target, groups.wikilinkAlias);
+      if (target && label) content.push({ kind: "wikilink", target, label });
+      else appendText(match[0]);
+    } else if (groups.markdownLink) {
+      content.push({ kind: "markdown-link", label: groups.markdownLinkLabel ?? "", target: groups.markdownLinkTarget?.trim() ?? "" });
+    } else if (groups.strong) {
+      content.push({ kind: "strong", value: groups.strongValue ?? "" });
+    } else if (groups.emphasis) {
+      content.push({ kind: "emphasis", value: groups.emphasisValue ?? "" });
+    } else if (groups.strike) {
+      content.push({ kind: "strike", value: groups.strikeValue ?? "" });
+    } else if (groups.code) {
+      content.push({ kind: "code", value: groups.codeValue ?? "" });
+    } else if (groups.tag) {
+      const prefix = groups.tagPrefix ?? "";
+      appendText(prefix);
+      const target = groups.tagTarget ?? "";
+      content.push({ kind: "tag", value: `#${target}`, target });
+    }
+    cursor = start + match[0].length;
+  }
+  if (cursor < value.length || content.length === 0) appendText(value.slice(cursor));
+  return content;
+}
+
+function appendTableCellContent(cell: HTMLElement, value: string) {
+  for (const part of tableCellInlineContent(value)) {
+    if (part.kind === "text") {
+      cell.append(document.createTextNode(part.value));
+      continue;
+    }
+    if (part.kind === "wikilink" || part.kind === "markdown-link") {
+      const link = document.createElement("span");
+      link.className = "exograph-md-link";
+      link.dataset.exographLinkTarget = part.target;
+      if (part.kind === "wikilink") link.dataset.exographLinkKind = "wikilink";
+      link.textContent = part.label;
+      cell.append(link);
+      continue;
+    }
+    if (part.kind === "tag") {
+      const tag = document.createElement("span");
+      tag.className = "exograph-md-tag";
+      tag.dataset.exographTag = part.target;
+      tag.textContent = part.value;
+      cell.append(tag);
+      continue;
+    }
+    const element = document.createElement(part.kind === "strong" ? "strong" : part.kind === "emphasis" ? "em" : part.kind === "strike" ? "s" : "code");
+    element.className = `exograph-md-${part.kind === "strong" ? "strong" : part.kind === "emphasis" ? "emphasis" : part.kind === "strike" ? "strike" : "inline-code"}`;
+    element.textContent = part.value;
+    cell.append(element);
+  }
+}
+
+export class WikilinkWidget extends WidgetType {
+  constructor(
+    private readonly target: string,
+    private readonly label: string,
+  ) {
+    super();
+  }
+
+  toDOM() {
+    const link = document.createElement("span");
+    link.className = "exograph-md-link";
+    link.dataset.exographLinkTarget = this.target;
+    link.dataset.exographLinkKind = "wikilink";
+    link.textContent = this.label;
+    return link;
+  }
+
+  eq(other: WikilinkWidget) {
+    return other.target === this.target && other.label === this.label;
+  }
+
+  ignoreEvent(event: Event) {
+    return event.type !== "click" && event.type !== "mousedown";
+  }
 }
 
 export class GraphReferencesWidget extends WidgetType {
@@ -280,7 +391,7 @@ export class TableWidget extends WidgetType {
     const headerRow = document.createElement("tr");
     this.ctx.headers.forEach((cell, idx) => {
       const th = document.createElement("th");
-      th.textContent = cell;
+      appendTableCellContent(th, cell);
       const align = this.ctx.alignments[idx] ?? "left";
       th.style.textAlign = align;
       headerRow.appendChild(th);
@@ -293,7 +404,7 @@ export class TableWidget extends WidgetType {
       const tr = document.createElement("tr");
       row.forEach((cell, idx) => {
         const td = document.createElement("td");
-        td.textContent = cell;
+        appendTableCellContent(td, cell);
         const align = this.ctx.alignments[idx] ?? "left";
         td.style.textAlign = align;
         tr.appendChild(td);

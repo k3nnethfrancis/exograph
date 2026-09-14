@@ -40,6 +40,14 @@ export type WorkspaceDialogState =
       title: string;
       message: string;
       confirmLabel: string;
+    }
+  | {
+      kind: "recover-as";
+      sourcePath: string;
+      targetPath: string;
+      value: string;
+      title: string;
+      confirmLabel: string;
     };
 
 interface UseWorkspaceMutationsOptions {
@@ -53,6 +61,7 @@ interface UseWorkspaceMutationsOptions {
   removeDeletedPaths: (targetPath: string) => void;
   revealExplorerPath: (path: string) => void;
   requestGeneratedTitleSelection: (filePath: string) => void;
+  recoverDeletedDocument: (sourcePath: string, destinationPath: string) => Promise<void>;
 }
 
 export function useWorkspaceMutations(options: UseWorkspaceMutationsOptions) {
@@ -213,6 +222,26 @@ export function useWorkspaceMutations(options: UseWorkspaceMutationsOptions) {
     await options.reloadTrees();
   }
 
+  async function recoverDeletedFile(sourcePath: string) {
+    await options.recoverDeletedDocument(sourcePath, sourcePath);
+    await options.reloadTrees();
+    options.revealExplorerPath(sourcePath);
+  }
+
+  function saveDeletedFileAs(sourcePath: string) {
+    const filename = sourcePath.split("/").at(-1) ?? "recovered.md";
+    const extension = filename.toLowerCase().endsWith(".md") ? ".md" : "";
+    const stem = extension ? filename.slice(0, -extension.length) : filename;
+    setDialog({
+      kind: "recover-as",
+      sourcePath,
+      targetPath: directoryOf(sourcePath),
+      value: `${stem}-recovered${extension}`,
+      title: "Save recovered file as",
+      confirmLabel: "Save copy",
+    });
+  }
+
   async function submitDialog() {
     if (!dialog) {
       return;
@@ -246,6 +275,12 @@ export function useWorkspaceMutations(options: UseWorkspaceMutationsOptions) {
       await commitCreateFile(dialog.targetPath, value);
     } else if (dialog.kind === "create-directory") {
       await commitCreateDirectory(dialog.targetPath, value);
+    } else if (dialog.kind === "recover-as") {
+      const nextPath = joinPath(dialog.targetPath, value);
+      await options.recoverDeletedDocument(dialog.sourcePath, nextPath);
+      options.remapOpenPaths(dialog.sourcePath, nextPath);
+      await options.reloadTrees();
+      options.revealExplorerPath(nextPath);
     } else {
       await commitRenameWorkspacePath(dialog.targetPath, markdownRenameFilename(value, dialog.preserveMarkdown));
     }
@@ -275,6 +310,8 @@ export function useWorkspaceMutations(options: UseWorkspaceMutationsOptions) {
       catch (error) { setDialogError(error instanceof Error ? error.message : String(error)); }
       finally { setDialogPending(false); }
     },
+    recoverDeletedFile,
+    saveDeletedFileAs,
   };
 }
 

@@ -456,7 +456,33 @@ const tableSeparatorPattern = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$
 
 function parseTableRow(text: string): string[] {
   const trimmed = text.trim().replace(/^\|/, "").replace(/\|$/, "");
-  return trimmed.split("|").map((cell) => cell.trim());
+  const cells: string[] = [];
+  let cell = "";
+  let wikilinkDepth = 0;
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const character = trimmed[index]!;
+    const next = trimmed[index + 1];
+    if (character === "[" && next === "[") {
+      wikilinkDepth += 1;
+      cell += "[[";
+      index += 1;
+      continue;
+    }
+    if (character === "]" && next === "]" && wikilinkDepth > 0) {
+      wikilinkDepth -= 1;
+      cell += "]]";
+      index += 1;
+      continue;
+    }
+    if (character === "|" && wikilinkDepth === 0) {
+      cells.push(cell.trim());
+      cell = "";
+      continue;
+    }
+    cell += character;
+  }
+  cells.push(cell.trim());
+  return cells;
 }
 
 function parseAlignments(separatorText: string): ColumnAlign[] {

@@ -115,10 +115,10 @@ describe("CommandServer operator contract", () => {
     }
   });
 
-  it("does not report a file open until the app authorizes it", async () => {
+  it("does not report a path open until the app authorizes it", async () => {
     const opened: string[] = [];
     const { server, port, token } = await startServer({
-      onOpenFile: async (filePath) => {
+      onOpenPath: async (filePath) => {
         if (filePath === "/outside.md") throw new Error("Refusing to access a path outside configured note roots.");
         opened.push(filePath);
       },
@@ -162,7 +162,7 @@ describe("CommandServer operator contract", () => {
   it("rejects a wrong-typed open path before calling the typed handler", async () => {
     let handlerCalled = false;
     const { server, port, token } = await startServer({
-      onOpenFile: async () => {
+      onOpenPath: async () => {
         handlerCalled = true;
       },
     });
@@ -330,7 +330,7 @@ function options(runtimeRoot: string): CommandServerOptions {
     errors: [],
   };
   return {
-    runtimeRoot, onShowWindow: () => {}, onOpenFile: async () => {}, onIndexSearch: async () => ({ mode: "lexical", source: "filesystem", query: "", results: [], warnings: [] }), onIndexStatus: async () => status, onIndexSync: async () => ({ status, phases: [], warnings: [] }), onGetStatus: () => ({ workspace: { workspaceRoot: "/workspace", defaultTerminalCwd: "/workspace", noteRoots: [], indexedRoots: [], indexing: { enabled: true, mode: "hybrid", backend: "qmd" } }, terminals: [] }), onSpawnAgentCommand: async () => { throw new Error("not used"); }, onListTerminals: () => [], onCreateTerminal: async () => { throw new Error("not used"); }, onWriteTerminal: async () => ({ terminal: null }), onReadTerminal: async () => null, onStopTerminal: async () => false,
+    runtimeRoot, onShowWindow: () => {}, onOpenPath: async () => {}, onIndexSearch: async () => ({ mode: "lexical", source: "filesystem", query: "", results: [], warnings: [] }), onIndexStatus: async () => status, onIndexSync: async () => ({ status, phases: [], warnings: [] }), onGetStatus: () => ({ workspace: { workspaceRoot: "/workspace", defaultTerminalCwd: "/workspace", noteRoots: [], indexedRoots: [], indexing: { enabled: true, mode: "hybrid", backend: "qmd" } }, terminals: [] }), onSpawnAgentCommand: async () => { throw new Error("not used"); }, onListTerminals: () => [], onCreateTerminal: async () => { throw new Error("not used"); }, onWriteTerminal: async () => ({ terminal: null }), onReadTerminal: async () => null, onStopTerminal: async () => false,
   };
 }
 

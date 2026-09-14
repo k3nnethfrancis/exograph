@@ -3,6 +3,7 @@ import type { TreeNode, WorkspaceModel } from "@exograph/core";
 
 import {
   replaceTreeChildrenInRoots,
+  mergeTreeRootsWithMaterializedBranches,
   treeDirectoryHasChildrenInRoots,
   treeLoadKey,
 } from "../workspaceTree";
@@ -21,7 +22,7 @@ export function useWorkspaceTrees(options: UseWorkspaceTreesOptions) {
     nextNoteTrees: Record<string, TreeNode[]>,
   ): void {
     excludedPathsRef.current = model.contentPolicy?.excludedPaths ?? [];
-    setNoteTrees(nextNoteTrees);
+    setNoteTrees((current) => mergeTreeRootsWithMaterializedBranches(current, nextNoteTrees));
     loadedTreeDirectoriesRef.current = loadedRootKeys(model);
   }
 
@@ -49,11 +50,22 @@ export function useWorkspaceTrees(options: UseWorkspaceTreesOptions) {
     setNoteTrees((current) => replaceTreeChildrenInRoots(current, directoryPath, children));
   }
 
+  async function refreshTreeDirectory(directoryPath: string): Promise<void> {
+    const children = await window.exograph.workspace.listTree(directoryPath, {
+      allowedFileExtensions: [".md", ".pdf"],
+      maxDepth: 1,
+      excludedPaths: excludedPathsRef.current,
+    });
+    loadedTreeDirectoriesRef.current.add(treeLoadKey("notes", directoryPath));
+    setNoteTrees((current) => replaceTreeChildrenInRoots(current, directoryPath, children));
+  }
+
   return {
     noteTrees,
     replaceTreesForModel,
     reloadTreesForModel,
     expandTreeDirectory,
+    refreshTreeDirectory,
   };
 }
 

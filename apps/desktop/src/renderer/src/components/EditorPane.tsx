@@ -18,6 +18,7 @@ interface EditorDocument extends NoteDocument {
   dirty: boolean;
   saveConflict?: "changed" | "missing";
   resolvingConflict?: boolean;
+  filesystemState?: "deleted";
 }
 
 export interface EditorPaneState {
@@ -58,6 +59,9 @@ interface EditorPaneProps {
   onSave: () => void;
   onSaveConflictCopy?: () => void;
   onDiscardSaveConflict?: () => Promise<void>;
+  onRecoverDeleted: () => void;
+  onSaveDeletedAs: () => void;
+  onShowInExplorer: (filePath: string) => void;
   onOpenTag: (tag: string) => void;
   onOpenTarget: (target: string) => void;
   onSuggestTargets: (query: string) => Promise<Array<{ label: string; target: string; detail?: string }>>;
@@ -108,6 +112,9 @@ export function EditorPane(props: EditorPaneProps) {
     onSave,
     onSaveConflictCopy,
     onDiscardSaveConflict,
+    onRecoverDeleted,
+    onSaveDeletedAs,
+    onShowInExplorer,
     onOpenTag,
     onOpenTarget,
     onSuggestTargets,
@@ -136,6 +143,7 @@ export function EditorPane(props: EditorPaneProps) {
   const activeDocument = pane.activePath ? documents[pane.activePath] ?? null : null;
   const activeGraphContext = pane.activePath ? graphContextByPath[pane.activePath] ?? null : null;
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(true);
+  const [tabContextMenu, setTabContextMenu] = useState<{ filePath: string; x: number; y: number } | null>(null);
   const faultContextRef = useRef<EditorFaultContext>({
     notePath: activeDocument?.filePath ?? null,
     mode: activeDocument?.kind === "markdown" ? "markdown-live" : activeDocument ? "code" : "empty",
@@ -173,7 +181,7 @@ export function EditorPane(props: EditorPaneProps) {
             <ChromeTab
               key={document.filePath}
               active={document.filePath === pane.activePath}
-              className="tab-strip__tab"
+              className={`tab-strip__tab${document.filesystemState === "deleted" ? " tab-strip__tab--deleted" : ""}`}
               dropPaneId={pane.id}
               dropKind="editor"
               onClick={() => onActivateTab(document.filePath)}
@@ -184,7 +192,12 @@ export function EditorPane(props: EditorPaneProps) {
                   sourcePaneId: pane.id,
                 });
               }}
-              leading={<span className={document.dirty ? "status-dot status-dot--dirty" : "status-dot"} />}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setTabContextMenu({ filePath: document.filePath, x: event.clientX, y: event.clientY });
+              }}
+              leading={<span className={document.filesystemState === "deleted" ? "status-dot status-dot--deleted" : document.dirty ? "status-dot status-dot--dirty" : "status-dot"} />}
               closeLabel={`Close ${displayTitle}`}
               onClose={(event) => {
                 event.stopPropagation();
@@ -192,7 +205,7 @@ export function EditorPane(props: EditorPaneProps) {
               }}
               closeIcon="×"
             >
-              {displayTitle}
+              {document.filesystemState === "deleted" ? `${displayTitle} · deleted` : displayTitle}
             </ChromeTab>
           );
         })}
@@ -209,6 +222,17 @@ export function EditorPane(props: EditorPaneProps) {
         ) : null}
       </div>
 
+      {tabContextMenu ? (
+        <>
+          <button aria-label="Dismiss tab menu" className="tree-context-menu__backdrop" onClick={() => setTabContextMenu(null)} type="button" />
+          <div className="tree-context-menu" style={{ left: `${tabContextMenu.x}px`, top: `${tabContextMenu.y}px` }}>
+            <button className="tree-context-menu__item" onClick={() => { onShowInExplorer(tabContextMenu.filePath); setTabContextMenu(null); }} type="button">
+              Show in Explorer
+            </button>
+          </div>
+        </>
+      ) : null}
+
       {pane.activeFolderPath ? <FolderOverviewPane directoryPath={pane.activeFolderPath} onOpenFolder={onOpenFolder} onOpenFile={onOpenFile} onClose={() => onCloseFolder(pane.activeFolderPath!)} /> : <EditorFaultBoundary key={pane.activePath ?? "empty"} getContext={() => faultContextRef.current}><NoteEditor
         document={activeDocument}
         graphContext={activeGraphContext}
@@ -221,6 +245,8 @@ export function EditorPane(props: EditorPaneProps) {
         onSave={onSave}
         onSaveConflictCopy={onSaveConflictCopy}
         onDiscardSaveConflict={onDiscardSaveConflict}
+        onRecoverDeleted={onRecoverDeleted}
+        onSaveDeletedAs={onSaveDeletedAs}
         onOpenTag={onOpenTag}
         onOpenTarget={onOpenTarget}
         onSuggestTargets={onSuggestTargets}

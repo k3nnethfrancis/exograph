@@ -37,6 +37,15 @@ describe("WorkspaceNotesService", () => {
     await expect(service.authorizeOpenFile(noteRoot)).rejects.toThrow("only open an existing file");
   });
 
+  it("authorizes exact existing folders for operator reveal without weakening file-only opens", async () => {
+    const { service, noteRoot } = await workspaceNotesService();
+    const folderPath = path.join(noteRoot, "project");
+    await mkdir(folderPath);
+
+    await expect(service.authorizeOpenPath(folderPath)).resolves.toEqual({ path: folderPath, kind: "directory" });
+    await expect(service.authorizeOpenFile(folderPath)).rejects.toThrow("only open an existing file");
+  });
+
   it("searches body and frontmatter tags across note roots", async () => {
     const { service, noteRoot } = await workspaceNotesService();
     await writeFile(path.join(noteRoot, "focus.md"), "---\ntags: [research]\n---\n# Focus\n\n#daily\n", "utf8");

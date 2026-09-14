@@ -39,7 +39,7 @@ interface FileTreeProps {
   onRenamePath: (targetPath: string, kind: "file" | "directory") => void;
   onDeletePath: (targetPath: string) => void;
   mirrored?: boolean;
-  revealPathRequest?: { path: string; nonce: number } | null;
+  revealPathRequest?: { path: string; nonce: number; kind?: "file" | "directory" } | null;
 }
 
 export type ExplorerRootKind = "notes";
@@ -65,6 +65,7 @@ export function FileTree(props: FileTreeProps) {
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(null);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [rootAction, setRootAction] = useState<"file" | "directory" | null>(null);
+  const [revealedPath, setRevealedPath] = useState<string | null>(null);
   const processedRevealNonceRef = useRef<number | null>(null);
 
   const defaultExpandedPaths = useMemo(() => {
@@ -95,17 +96,29 @@ export function FileTree(props: FileTreeProps) {
     processedRevealNonceRef.current = revealPathRequest.nonce;
 
     const rootKind = rootKindForPath(revealPathRequest.path, noteRoots);
+    const directories = revealDirectoriesForPath(revealPathRequest.path, noteRoots, revealPathRequest.kind ?? "directory");
     setExpandedPaths((current) => {
       const next = new Set(current);
-      next.add(revealPathRequest.path);
-      next.add(`${ROOT_GROUP_PREFIX}${revealPathRequest.path}`);
+      for (const directoryPath of directories) next.add(directoryPath);
+      const root = noteRoots.find((candidate) => pathContains(candidate.path, revealPathRequest.path));
+      if (root) next.add(`${ROOT_GROUP_PREFIX}${root.path}`);
       return next;
     });
+    setRevealedPath(revealPathRequest.path);
 
     if (rootKind === "notes") {
-      onExpandDirectory(revealPathRequest.path, rootKind);
+      for (const directoryPath of directories) onExpandDirectory(directoryPath, rootKind);
     }
   }, [noteRoots, onExpandDirectory, revealPathRequest]);
+
+  useEffect(() => {
+    if (!revealedPath) return;
+    const frame = window.requestAnimationFrame(() => {
+      const element = document.querySelector<HTMLElement>(`[data-explorer-path="${CSS.escape(revealedPath)}"]`);
+      element?.scrollIntoView({ block: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [expandedPaths, revealedPath]);
 
   useEffect(() => {
     if (!contextTarget) {
@@ -125,6 +138,7 @@ export function FileTree(props: FileTreeProps) {
   }, [contextTarget]);
 
   function togglePath(path: string, rootKind?: ExplorerRootKind) {
+    setRevealedPath(null);
     const shouldExpand = !expandedPaths.has(path);
     if (shouldExpand && rootKind === "notes") {
       onExpandDirectory(path, rootKind);
@@ -217,6 +231,8 @@ export function FileTree(props: FileTreeProps) {
               dragManager={dragManager}
               onContextMenu={openContextMenu}
               mirrored={mirrored}
+              revealedPath={revealedPath}
+              onTreeInteraction={() => setRevealedPath(null)}
             />
           </div>
         </div>
@@ -322,6 +338,20 @@ function rootKindForPath(targetPath: string, noteRoots: RootSection[]): Explorer
 
 function pathContains(parentPath: string, targetPath: string): boolean {
   return targetPath === parentPath || targetPath.startsWith(`${parentPath}/`);
+}
+
+function revealDirectoriesForPath(targetPath: string, noteRoots: RootSection[], kind: "file" | "directory"): string[] {
+  const root = noteRoots.find((candidate) => pathContains(candidate.path, targetPath));
+  if (!root) return [];
+  const end = kind === "directory" ? targetPath : targetPath.slice(0, Math.max(root.path.length, targetPath.lastIndexOf("/")));
+  const relative = end.slice(root.path.length).replace(/^\//, "");
+  const directories = [root.path];
+  let current = root.path;
+  for (const segment of relative.split("/").filter(Boolean)) {
+    current = `${current}/${segment}`;
+    directories.push(current);
+  }
+  return directories;
 }
 
 export function SidebarSearchPane({

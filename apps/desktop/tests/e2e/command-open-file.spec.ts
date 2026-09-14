@@ -45,6 +45,31 @@ test("an external open reactivates an already-open background tab", async () => 
   }
 });
 
+test("an external folder open reveals that exact folder overview", async () => {
+  let folderPath = "";
+  const { electronApp, page, cleanup } = await launchExographWorkspaceFixture({
+    mutable: true,
+    initialNoteLabel: null,
+    prepareWorkspace: async (workspaceRoot) => {
+      folderPath = path.join(workspaceRoot, "notes/test-notes/project");
+      await mkdir(folderPath, { recursive: true });
+      await writeFile(path.join(folderPath, "plan.md"), "# Plan\n", "utf8");
+    },
+  });
+
+  try {
+    await electronApp.evaluate(({ BrowserWindow }, targetPath) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send("command:open-folder", targetPath);
+    }, folderPath);
+
+    const overview = page.getByTestId("folder-overview");
+    await expect(overview).toHaveAttribute("data-folder-loaded", "true");
+    await expect(overview.getByRole("heading", { name: "project" })).toBeVisible();
+  } finally {
+    await cleanup();
+  }
+});
+
 test("opens a Markdown file delivered by the macOS open-file event", async () => {
   let notePath = "";
   const { electronApp, page, cleanup } = await launchExographWorkspaceFixture({

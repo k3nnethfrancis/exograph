@@ -49,6 +49,8 @@ interface SectionProps {
   showHeader?: boolean;
   alwaysShowRoots?: boolean;
   mirrored?: boolean;
+  revealedPath?: string | null;
+  onTreeInteraction?: () => void;
 }
 
 export const ROOT_GROUP_PREFIX = "__root__:";
@@ -126,6 +128,8 @@ export function Section(props: SectionProps) {
     showHeader = true,
     alwaysShowRoots = false,
     mirrored = false,
+    revealedPath = null,
+    onTreeInteraction,
   } = props;
   const CollapsedChevron = mirrored ? ChevronLeft : ChevronRight;
 
@@ -149,6 +153,8 @@ export function Section(props: SectionProps) {
           dragManager={dragManager}
           onContextMenu={onContextMenu}
           mirrored={mirrored}
+          revealedPath={revealedPath}
+          onTreeInteraction={onTreeInteraction}
         />
       </div>
     );
@@ -188,6 +194,8 @@ export function Section(props: SectionProps) {
                 dragManager={dragManager}
                 onContextMenu={onContextMenu}
                 mirrored={mirrored}
+                revealedPath={revealedPath}
+                onTreeInteraction={onTreeInteraction}
               />
             ) : null}
           </div>
@@ -208,6 +216,8 @@ function TreeNodes({
   dragManager,
   onContextMenu,
   mirrored,
+  revealedPath,
+  onTreeInteraction,
 }: {
   nodes: TreeNode[];
   depth: number;
@@ -219,6 +229,8 @@ function TreeNodes({
   dragManager: DragManager;
   onContextMenu?: (event: React.MouseEvent, target: ContextTarget) => void;
   mirrored: boolean;
+  revealedPath: string | null;
+  onTreeInteraction?: () => void;
 }) {
   const visibleNodes = nodes.filter((node) => node.kind === "directory" || node.name !== "index.md");
   return (
@@ -231,13 +243,14 @@ function TreeNodes({
           return (
             <div key={node.path}>
               <button
-                className="tree-node tree-node--directory"
+                className={`tree-node tree-node--directory${node.path === revealedPath ? " tree-node--revealed" : ""}`}
+                data-explorer-path={node.path}
                 data-explorer-drop-path={rootKind === "notes" ? node.path : undefined}
                 data-explorer-root-kind={rootKind}
                 style={depthStyle}
                 aria-expanded={expanded}
                 aria-label={`${node.name}, ${expanded ? "expanded" : "collapsed"} folder`}
-                onClick={() => onTogglePath(node.path, rootKind)}
+                onClick={() => { onTreeInteraction?.(); onTogglePath(node.path, rootKind); }}
                 onDoubleClick={() => onOpenFolder?.(node.path)}
                 onMouseDown={rootKind === "notes" ? (event) =>
                   dragManager.startDrag(event, { kind: "workspace-path", path: node.path, nodeKind: "directory" })
@@ -260,6 +273,8 @@ function TreeNodes({
                   dragManager={dragManager}
                   onContextMenu={onContextMenu}
                   mirrored={mirrored}
+                  revealedPath={revealedPath}
+                  onTreeInteraction={onTreeInteraction}
                 />
               ) : null}
             </div>
@@ -270,13 +285,14 @@ function TreeNodes({
         return (
           <button
             key={node.path}
-            className="tree-node tree-node--file"
+            className={`tree-node tree-node--file${node.path === revealedPath ? " tree-node--revealed" : ""}`}
+            data-explorer-path={node.path}
             data-explorer-drop-path={rootKind === "notes" ? node.path : undefined}
             data-explorer-drop-kind={rootKind === "notes" ? "file" : undefined}
             data-explorer-root-kind={rootKind}
             style={depthStyle}
             aria-label={`${fileLabel}, file`}
-            onClick={() => onOpenFile(node.path)}
+            onClick={() => { onTreeInteraction?.(); onOpenFile(node.path); }}
             onMouseDown={rootKind === "notes" ? (event) =>
               dragManager.startDrag(event, { kind: "workspace-path", path: node.path, nodeKind: "file" })
             : undefined}

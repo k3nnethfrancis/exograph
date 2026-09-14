@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { launchExographWorkspaceFixture } from "../helpers";
@@ -143,6 +143,32 @@ test("does not overwrite an unsaved document when the file changes on disk", asy
   await expect(page.getByTestId("editor-panel")).not.toContainText("external overwrite attempt");
 
   await cleanup();
+});
+
+test("marks an open document as deleted while preserving its buffer and supports explicit recovery", async () => {
+  const { electronApp, page, workspaceRoot, cleanup } = await launchExographWorkspaceFixture({
+    mutable: true,
+    prepareWorkspace: async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, "notes/test-notes/deleted-state.md"), "# Deleted state\n\npreserved text\n", "utf8");
+    },
+  });
+  const target = path.join(workspaceRoot, "notes/test-notes/deleted-state.md");
+
+  try {
+    await page.getByRole("button", { name: /deleted-state/i }).first().click();
+    await expect(page.getByTestId("editor-panel")).toContainText("preserved text");
+    await rm(target);
+    await electronApp.evaluate(({ BrowserWindow }, event) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send("workspace:changed", event);
+    }, { rootPath: path.dirname(target), eventType: "rename", filePath: target });
+
+    await expect(page.getByTestId("editor-deleted-notice")).toBeVisible();
+    await expect(page.getByTestId("editor-panel")).toContainText("preserved text");
+    await page.getByTestId("recover-deleted-document").click();
+    await expect(page.getByTestId("editor-deleted-notice")).toHaveCount(0);
+  } finally {
+    await cleanup();
+  }
 });
 
 function waitForWorkspaceChange(page: Page, targetPath: string): Promise<unknown> {

@@ -99,6 +99,7 @@ export interface DesktopEventPayloads {
   "workspace:invocation-updated": InvocationRecord;
   "workspace:invocation-activity": InvocationActivityEvent;
   "command:open-file": string;
+  "command:open-folder": string;
   "command:open-settings": { section: WorkspaceSettingsSection };
   "terminal:created": TerminalSessionInfo;
   "terminal:data": TerminalDataEvent;

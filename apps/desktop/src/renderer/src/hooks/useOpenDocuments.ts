@@ -13,6 +13,8 @@ export interface OpenEditorDocument extends NoteDocument {
   diskVersion: FileStatInfo | null;
   /** Ephemeral review documents are exact snapshots and never save to disk. */
   readOnly?: boolean;
+  /** The backing workspace path disappeared outside Exograph; the buffer remains recoverable. */
+  filesystemState?: "deleted";
 }
 
 export type DocumentSaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
@@ -212,7 +214,7 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
 
   function scheduleRefresh(filePath: string, diskVersion?: FileStatInfo | null) {
     const currentDocument = openDocumentsRef.current[filePath];
-    if (!currentDocument || currentDocument.dirty) {
+    if (!currentDocument || currentDocument.dirty || currentDocument.filesystemState === "deleted") {
       return;
     }
 
@@ -230,7 +232,7 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
 
   async function refreshFromDisk(filePath: string, knownVersion?: FileStatInfo | null) {
     const currentDocument = openDocumentsRef.current[filePath];
-    if (!currentDocument || currentDocument.dirty) {
+    if (!currentDocument || currentDocument.dirty || currentDocument.filesystemState === "deleted") {
       return;
     }
 
@@ -322,13 +324,16 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
   }
 
   function saveDocument(filePath: string): Promise<void> {
+    if (openDocumentsRef.current[filePath]?.filesystemState === "deleted") {
+      return Promise.resolve();
+    }
     cancelPendingAutosave(filePath);
     return saveBarrierRef.current.run(filePath, () => performSaveDocument(filePath));
   }
 
   async function performSaveDocument(filePath: string) {
     const document = openDocumentsRef.current[filePath];
-    if (!document || document.readOnly || !document.dirty) {
+    if (!document || document.readOnly || !document.dirty || document.filesystemState === "deleted") {
       return;
     }
 
@@ -466,6 +471,7 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
 
   function scheduleAutosave(filePath: string) {
     if (openDocumentsRef.current[filePath]?.saveConflict) return;
+    if (openDocumentsRef.current[filePath]?.filesystemState === "deleted") return;
     if (!dirtySinceRef.current.has(filePath)) dirtySinceRef.current.set(filePath, performance.now());
     cancelPendingAutosave(filePath);
     const dirtyForMs = performance.now() - (dirtySinceRef.current.get(filePath) ?? performance.now());
@@ -477,6 +483,10 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
   }
 
   function runAutosaveWhenIdle(filePath: string) {
+    if (openDocumentsRef.current[filePath]?.filesystemState === "deleted") {
+      pendingAutosavesRef.current.delete(filePath);
+      return;
+    }
     const idleForMs = performance.now() - lastEditorInputAtRef.current;
     const dirtyForMs = performance.now() - (dirtySinceRef.current.get(filePath) ?? performance.now());
     if (idleForMs < AUTOSAVE_IDLE_DELAY_MS && dirtyForMs < AUTOSAVE_MAX_DELAY_MS) {
@@ -493,7 +503,7 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
 
   async function flushDirtyDocuments(): Promise<void> {
     const dirtyPaths = Object.entries(openDocumentsRef.current)
-      .filter(([, document]) => document.dirty)
+      .filter(([, document]) => document.dirty && document.filesystemState !== "deleted")
       .map(([filePath]) => filePath);
     await Promise.all(dirtyPaths.map((filePath) => saveDocument(filePath)));
   }
@@ -564,6 +574,54 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
     const timeoutId = pendingAutosavesRef.current.get(filePath);
     if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     pendingAutosavesRef.current.delete(filePath);
+  }
+
+  async function reconcileOpenDocumentFilesystemState(): Promise<void> {
+    const candidates = Object.entries(openDocumentsRef.current)
+      .filter(([, document]) => !document.readOnly)
+      .map(([filePath]) => filePath);
+    const results = await Promise.all(candidates.map(async (filePath) => {
+      try {
+        return [filePath, await window.exograph.notes.stat(filePath)] as const;
+      } catch {
+        return [filePath, null] as const;
+      }
+    }));
+    const missingPaths = new Set(results.filter(([, stat]) => stat === null).map(([filePath]) => filePath));
+    if (missingPaths.size === 0) return;
+    for (const filePath of missingPaths) cancelPendingAutosave(filePath);
+    setOpenDocuments((current) => {
+      const next = { ...current };
+      for (const filePath of missingPaths) {
+        const document = next[filePath];
+        if (document) next[filePath] = { ...document, filesystemState: "deleted" };
+      }
+      openDocumentsRef.current = next;
+      return next;
+    });
+    setDocumentSaveStatuses((current) => Object.fromEntries(
+      Object.entries(current).map(([filePath, status]) => [filePath, missingPaths.has(filePath) ? "idle" : status]),
+    ));
+  }
+
+  async function recoverDeletedDocument(sourcePath: string, destinationPath: string): Promise<void> {
+    const document = openDocumentsRef.current[sourcePath];
+    if (!document || document.filesystemState !== "deleted") return;
+    await window.exograph.workspace.createFile(destinationPath);
+    await window.exograph.notes.save(destinationPath, document.frontmatter, document.body);
+    const diskVersion = await window.exograph.notes.stat(destinationPath);
+    const next = { ...openDocumentsRef.current };
+    delete next[sourcePath];
+    next[destinationPath] = { ...document, filePath: destinationPath, dirty: false, diskVersion, filesystemState: undefined };
+    openDocumentsRef.current = next;
+    setOpenDocuments(next);
+    setDocumentSaveStatuses((current) => {
+      const updated = { ...current };
+      delete updated[sourcePath];
+      updated[destinationPath] = "saved";
+      return updated;
+    });
+    dirtySinceRef.current.delete(sourcePath);
   }
 
   function updateMarkdownContext(filePath: string, graphContext: WorkspaceGraphContext | null) {
@@ -642,6 +700,8 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
     discardAndReloadDocument,
     deletePathsWithin,
     remapOpenPaths,
+    reconcileOpenDocumentFilesystemState,
+    recoverDeletedDocument,
   };
 }
 
