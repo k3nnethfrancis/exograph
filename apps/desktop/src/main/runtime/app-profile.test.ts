@@ -19,9 +19,9 @@ it("preserves profile data, relocates managed sites and saved references, and le
   writeFileSync(path.join(legacy, "workspace-settings.json"), JSON.stringify(settings));
   writeFileSync(path.join(legacy, "workspace-registry.json"), JSON.stringify({ entries: [{ settings }] }));
   expect(prepareAppProfile(root)).toBe(destination);
-  expect(JSON.parse(readFileSync(path.join(destination, "workspace-settings.json"), "utf8"))).toEqual({ ...settings, publishing: { engineDirectory: path.join(destination, "exo-quartz-sites", "site") } });
+  expect(JSON.parse(readFileSync(path.join(destination, "workspace-settings.json"), "utf8"))).toEqual({ ...settings, publishing: { engineDirectory: path.join(destination, "published-sites", "site") } });
   expect(readFileSync(path.join(destination, "Cookies"))).toEqual(Buffer.from([0, 1, 255]));
-  expect(readFileSync(path.join(destination, "exo-quartz-sites", "site", ".git", "config"), "utf8")).toBe("git data");
+  expect(readFileSync(path.join(destination, "published-sites", "site", ".git", "config"), "utf8")).toBe("git data");
   expect(JSON.parse(readFileSync(path.join(legacy, "workspace-settings.json"), "utf8"))).toEqual(settings);
   expect(prepareAppProfile(root)).toBe(destination);
 });

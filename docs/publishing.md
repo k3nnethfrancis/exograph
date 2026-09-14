@@ -16,7 +16,7 @@ Choose **Set up website** in Settings → Publishing, then select a content fold
 connect GitHub, and create or choose a website repository. New repositories are
 public. Choose the pinned Quartz default or import an existing committed Quartz
 project. Existing custom domains and repository history are preserved. Exo
-creates a local checkout under the app profile's `exo-quartz-sites/` and saves
+creates a local checkout under the app profile's `published-sites/` and saves
 its actual location in the workspace settings. Users need no separate local
 website checkout or manually installed Pages workflow.
 

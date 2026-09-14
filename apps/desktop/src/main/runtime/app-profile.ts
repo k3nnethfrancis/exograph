@@ -33,15 +33,15 @@ export function prepareAppProfile(appData: string, override?: string): string {
       } });
       const oldSites = path.join(stage, "publishing-sites");
       if (existsSync(oldSites)) {
-        if (existsSync(path.join(stage, "exo-quartz-sites"))) throw new Error("Both site directories exist; refusing to overwrite either.");
-        renameSync(oldSites, path.join(stage, "exo-quartz-sites"));
+        if (existsSync(path.join(stage, "published-sites"))) throw new Error("Both site directories exist; refusing to overwrite either.");
+        renameSync(oldSites, path.join(stage, "published-sites"));
       }
       const relocate = (value: unknown): unknown => {
         if (typeof value === "string") {
           if (value !== legacy && !value.startsWith(legacy + path.sep)) return value;
           const relative = path.relative(legacy, value);
           return path.join(destination, relative === "publishing-sites" || relative.startsWith("publishing-sites" + path.sep)
-            ? relative.replace(/^publishing-sites/, "exo-quartz-sites") : relative);
+            ? relative.replace(/^publishing-sites/, "published-sites") : relative);
         }
         if (Array.isArray(value)) return value.map(relocate);
         if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, relocate(item)]));

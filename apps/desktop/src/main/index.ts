@@ -381,7 +381,7 @@ function registerIpcHandlers() {
   });
   managedSiteSetup = new ManagedSiteSetup({
     context: () => ({ ...currentSnapshot(), model: workspaceModel }),
-    sitesParent: path.join(app.getPath("userData"), "exo-quartz-sites"),
+    sitesParent: path.join(app.getPath("userData"), "published-sites"),
     capture: async (model, publicationDirectory, stagingParent, generatedRoutes, assertCurrent) => {
       await appLifecycle.withDocumentsFlushed(async () => {});
       assertCurrent();

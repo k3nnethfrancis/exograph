@@ -196,7 +196,7 @@ export class PublishingService {
       assertCurrent();
       if (await (this.options.readEngineRepository ?? readPublicationEngineRepository)(prepared.engineDirectory) !== prepared.engineRepository) throw new Error("The Quartz GitHub origin changed after preparation.");
       assertCurrent();
-      const githubCliPath = this.options.deploy ? undefined : await resolveGitHubCli(path.join(path.dirname(this.options.stagingParent), "exo-quartz-sites", ".tools"), signal);
+      const githubCliPath = this.options.deploy ? undefined : await resolveGitHubCli(path.join(path.dirname(this.options.stagingParent), "published-sites", ".tools"), signal);
       assertCurrent();
       const deployment = await (this.options.deploy ?? deployQuartzSite)({
         githubCliPath,

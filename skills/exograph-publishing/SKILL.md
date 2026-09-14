@@ -45,7 +45,7 @@ Managed publishing starts at Settings → Publishing → Set up website. The use
 chooses content, connects GitHub, creates/selects a repository, and chooses the
 Quartz default or imports a committed theme. Setup returns the managed checkout
 path into `publishing.engineDirectory`; do not reconstruct that path yourself.
-The checkout is under the app profile's `exo-quartz-sites/`, outside Note Roots.
+The checkout is under the app profile's `published-sites/`, outside Note Roots.
 
 A managed checkout has `exograph-site.json` with `schemaVersion: 1`. Its website
 repository owns Quartz/theme code, exported `garden/`, pinned dependencies, and
