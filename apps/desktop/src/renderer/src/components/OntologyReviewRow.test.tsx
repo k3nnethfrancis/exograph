@@ -36,7 +36,7 @@ describe("Ontology review presentation", () => {
     expect(html).toContain("Research · v2");
     expect(html).toContain("3 typed");
     expect(html).toContain("+2 relations");
-    expect(html).toContain('aria-label="Keep ontology"');
+    expect(html).toContain('aria-label="Activate ontology"');
     expect(html).toContain('aria-label="Reject ontology"');
     expect(html).not.toContain('aria-label="Discover ontology"');
     expect(html).not.toContain("candidate-secret");
@@ -60,7 +60,7 @@ describe("Ontology review presentation", () => {
     expect(rejected).toContain("Not applied");
     expect(rejected.match(/Not applied/g)).toHaveLength(1);
     expect(rejected).toContain('aria-label="Review ontology again"');
-    expect(rejected).not.toContain('aria-label="Keep ontology"');
+    expect(rejected).not.toContain('aria-label="Activate ontology"');
 
     const invalid = renderToStaticMarkup(
       <OntologyReviewPresentation
@@ -76,7 +76,7 @@ describe("Ontology review presentation", () => {
     );
     expect(invalid).toContain("Fix one field.");
     expect(invalid).toContain("2 more");
-    expect(invalid).toContain('aria-label="Keep ontology"');
+    expect(invalid).toContain('aria-label="Activate ontology"');
     expect(invalid).toContain("disabled");
   });
 
@@ -93,7 +93,7 @@ describe("Ontology review presentation", () => {
         }}
       />,
     );
-    expect(current).not.toContain('aria-label="Keep ontology"');
+    expect(current).not.toContain('aria-label="Activate ontology"');
     expect(current).not.toContain('aria-label="Reject ontology"');
     expect(current).toContain('aria-label="Discover ontology"');
 
@@ -104,7 +104,7 @@ describe("Ontology review presentation", () => {
       />,
     );
     expect(unavailable).toContain("Preview unavailable");
-    expect(unavailable).not.toContain('aria-label="Keep ontology"');
+    expect(unavailable).not.toContain('aria-label="Activate ontology"');
 
     const invalidActive = renderToStaticMarkup(
       <OntologyReviewPresentation
@@ -120,7 +120,7 @@ describe("Ontology review presentation", () => {
     );
     expect(invalidActive).toContain("Active unavailable");
     expect(invalidActive).toContain("Changed—review again");
-    expect(invalidActive).not.toContain('aria-label="Keep ontology"');
+    expect(invalidActive).not.toContain('aria-label="Activate ontology"');
     expect(invalidActive).not.toContain('aria-label="Reject ontology"');
   });
 });

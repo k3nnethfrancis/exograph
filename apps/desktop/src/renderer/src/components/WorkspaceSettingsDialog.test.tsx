@@ -8,6 +8,7 @@ import {
 
 import {
   WorkspaceSettingsDialog,
+  markdownScopePreset,
   loadAgentCommandContinuityState,
   indexSettingsStatusCopy,
   workspaceSettingsDialogIntroCopy,
@@ -93,10 +94,11 @@ describe("workspace settings footer copy", () => {
     expect(html).toContain("Reverse orbit direction while dragging.");
     expect(html).toContain('data-testid="workspace-settings-graph-inverse-navigation"');
     expect(html).toContain("Advanced");
+    expect(html).toContain('data-testid="workspace-settings-ontology"');
     expect(html).toContain("Ontology prompt");
     expect(html).toContain("Used by Discover structure");
     expect(html).toContain('data-testid="workspace-settings-ontology-prompt"');
-    expect(workspaceSettingsDialogIntroCopy("graph", false)).toBe("Adjust graph navigation and labels.");
+    expect(workspaceSettingsDialogIntroCopy("graph", false)).toBe("Adjust graph navigation, labels, and ontology.");
   });
 
   it("keeps Markdown scope editable from Workspace settings", () => {
@@ -115,8 +117,9 @@ describe("workspace settings footer copy", () => {
       />,
     );
 
-    expect(html).toContain("Content scope");
-    expect(html).toContain("Repository Markdown");
+    expect(html).toContain("Markdown files");
+    expect(html).not.toContain('data-testid="workspace-settings-ontology"');
+    expect(html).toContain("Exclude generated and dependency folders");
     expect(html).toContain("All Markdown");
   });
 
@@ -333,3 +336,10 @@ function renderSearchSettings(status: IndexStatus, busy: "syncing" | "updating" 
     setSettings={() => {}} structuralDraftKey={workspaceSettingsStructuralDraftKey}
   />);
 }
+
+it("distinguishes custom exclusions from the repository preset without changing them", () => {
+  const policy = { excludedPaths: ["private/**"], sourceVisibility: true };
+  expect(markdownScopePreset(policy)).toBe("custom");
+  expect(policy).toEqual({ excludedPaths: ["private/**"], sourceVisibility: true });
+  expect(markdownScopePreset({ excludedPaths: [], sourceVisibility: false })).toBe("all");
+});

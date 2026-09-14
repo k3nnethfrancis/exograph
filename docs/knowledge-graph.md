@@ -52,6 +52,6 @@ not yet.
 
 ## Add more meaning deliberately
 
-An optional workspace `ontology.yaml` can declare property shapes, path-default types, reference-valued relations, and validation rules. Exograph previews its exact effects and requires Keep before activating it. One ontology is active at a time; switching never rewrites Notes. Read [Workspace ontology](workspace-ontology.md).
+An optional workspace `ontology.yaml` can declare property shapes, path-default types, reference-valued relations, and validation rules. Exograph previews its exact effects and requires the explicit Activate action (Keep) before using it. One ontology is active at a time; switching never rewrites Notes. Read [Workspace ontology](workspace-ontology.md).
 
 For the base reading rules and OKF compatibility, read [Note Root Formats](note-root-formats.md).

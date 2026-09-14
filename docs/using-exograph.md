@@ -13,7 +13,7 @@ When the folder resembles a code repository, Exograph asks what should become a 
 - **Markdown notes** is the safe repository default. It keeps documentation in scope while excluding generated and code-oriented paths.
 - **All Markdown** makes every Markdown file under the selected folder a Note.
 
-This is a content decision, not an access-control change. You can change it in **Settings → Workspace**. Local code or attachment links in an in-scope Note remain visible as artifact references; they do not become searchable Notes or graph nodes. PDFs inside a Note Root appear in Explorer as read-only attachments: open one directly or use a relative link such as `[[research.pdf]]` to read it in Preview, with page, zoom, fit-to-width, and selectable-text controls.
+This is a content decision, not an access-control change. You can change it under **Markdown files** in **Settings → Workspace**: include all Markdown or exclude generated and dependency folders. Custom exclusions remain visible until you choose a preset. Local code or attachment links in an in-scope Note remain visible as artifact references; they do not become searchable Notes or graph nodes. PDFs inside a Note Root appear in Explorer as read-only attachments: open one directly or use a relative link such as `[[research.pdf]]` to read it in Preview, with page, zoom, fit-to-width, and selectable-text controls.
 
 ## Notes, folders, links, and properties
 
@@ -41,6 +41,8 @@ When the Graph canvas has keyboard focus, brackets select the previous or next N
 A framed graph fits again when the pane changes size. After you pan, orbit, zoom, or focus, resizing preserves your camera direction and target, moving back within the zoom range when needed to keep a previously visible selection in view. Use **Frame graph** to restore the overview.
 
 Turn off **Settings → Graph → Show overflow labels** to hide labels placed away from crowded nodes. Labels that fit beside their nodes remain visible. This preference is saved for the workspace. The selected Note's title and link count stay below the graph; expand **Details** for its type, path, properties, and connection tools.
+
+Choose an ontology in **Settings → Graph** or the Graph toolbar. The active identity stays visible while you preview another source; **Activate** applies the reviewed source. Selecting a preview alone leaves the active graph unchanged.
 
 The graph is evidence-aware. It distinguishes a relation written in Markdown, one interpreted by an active ontology, and a machine-derived signal. It does not silently turn semantic similarity into a durable fact. Read [Knowledge graph](knowledge-graph.md) for the model and [Workspace ontology](workspace-ontology.md) for optional property interpretation.
 

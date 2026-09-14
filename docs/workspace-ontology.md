@@ -104,8 +104,10 @@ kept interpreter while the user-owned candidate changes. A missing or invalid
 kept state falls back explicitly to the existing base graph without additional
 Ontology interpretation.
 
-Workspace Settings and Graph expose the same compact selector and review row.
-It reports bounded typed-Concept, Ontology-Relation, and Finding effects. Keep
+Settings → Graph and the Graph toolbar expose the same preview and review controls.
+The active identity is shown separately from the preview selection. The UI labels
+the explicit Keep action **Activate**; selecting a preview never activates it.
+The review reports bounded typed-Concept, Ontology-Relation, and Finding effects. Keep
 and Reject are explicit; stale Candidate, Active, or Markdown revisions require
 a fresh review. Keep atomically persists the exact accepted source and source
 identity, then publishes the already-reviewed graph. Reject preserves Active.

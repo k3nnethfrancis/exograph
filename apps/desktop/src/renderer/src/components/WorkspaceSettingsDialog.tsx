@@ -44,7 +44,7 @@ const SETTINGS_SECTIONS: Array<{
   { id: "workspace", label: "Workspace", description: "Folders and roots", icon: FolderOpen },
   { id: "index", label: "Search", description: "Search behavior", icon: Search },
   { id: "appearance", label: "Appearance", description: "Theme and editor", icon: Palette },
-  { id: "graph", label: "Graph", description: "Navigation", icon: ExographMark },
+  { id: "graph", label: "Graph", description: "Navigation and ontology", icon: ExographMark },
   { id: "terminal", label: "Terminal", description: "Display", icon: TerminalSquare },
   { id: "shortcuts", label: "Shortcuts", description: "App commands", icon: Keyboard },
   { id: "publishing", label: "Publishing", description: "Site and preview", icon: Globe },
@@ -214,7 +214,7 @@ export function workspaceSettingsDialogIntroCopy(section: WorkspaceSettingsSecti
     return "Adjust how Exograph looks and reads.";
   }
   if (section === "graph") {
-    return "Adjust graph navigation and labels.";
+    return "Adjust graph navigation, labels, and ontology.";
   }
   if (section === "terminal") {
     return "Adjust terminal text.";
@@ -283,41 +283,40 @@ function WorkspaceSection({
           onRemove={() => setSettings((current) => (current ? { ...current, noteRoots: [], applyStatus: "idle", applyErrorMessage: null } : current))}
         />
       </div>
-      <div className="dialog-field dialog-field--section">
-        <div className="dialog-field__label">Content scope</div>
-        <div className="settings-control-row" role="group" aria-label="Content scope">
-          <button
-            aria-pressed={(settings.contentPolicy?.excludedPaths.length ?? 0) > 0}
-            className="toolbar-button"
-            data-testid="workspace-settings-content-scope-notes"
-            onClick={() => setSettings((current) => current ? {
+      <label className="dialog-field dialog-field--section">
+        <span className="dialog-field__label">Markdown files</span>
+        <select
+          aria-label="Markdown files"
+          className="dialog-card__input"
+          data-testid="workspace-settings-markdown-files"
+          value={markdownScopePreset(settings.contentPolicy)}
+          onChange={(event) => {
+            const preset = event.target.value;
+            if (preset !== "repository" && preset !== "all") return;
+            setSettings((current) => current ? {
               ...current,
-              contentPolicy: repositoryWorkspaceContentPolicy(),
+              contentPolicy: {
+                ...(current.contentPolicy ?? defaultWorkspaceContentPolicy()),
+                excludedPaths: preset === "repository" ? repositoryWorkspaceContentPolicy().excludedPaths : [],
+              },
               applyStatus: "idle",
               applyErrorMessage: null,
-            } : current)}
-            type="button"
-          >
-            Repository Markdown
-          </button>
-          <button
-            aria-pressed={(settings.contentPolicy?.excludedPaths.length ?? 0) === 0}
-            className="toolbar-button"
-            data-testid="workspace-settings-content-scope-all"
-            onClick={() => setSettings((current) => current ? {
-              ...current,
-              contentPolicy: defaultWorkspaceContentPolicy(),
-              applyStatus: "idle",
-              applyErrorMessage: null,
-            } : current)}
-            type="button"
-          >
-            All Markdown
-          </button>
-        </div>
-        <div className="onboarding-section__hint">Code files never become Notes. Repository Markdown skips tool folders such as build, dist, coverage, node_modules, release, and vendor.</div>
-      </div>
-      <OntologyReviewRow />
+            } : current);
+          }}
+        >
+          <option value="all">All Markdown</option>
+          <option value="repository">Exclude generated and dependency folders</option>
+          {markdownScopePreset(settings.contentPolicy) === "custom" ? <option value="custom" disabled>Custom exclusions ({settings.contentPolicy?.excludedPaths.length})</option> : null}
+        </select>
+        <span className="onboarding-section__hint">Choose which Markdown files appear as Notes, in Search, and in Graph. Exclusions skip folders such as build, dist, and node_modules.</span>
+      </label>
+      {markdownScopePreset(settings.contentPolicy) === "custom" ? (
+        <details className="workspace-content-exclusions">
+          <summary>View custom exclusions</summary>
+          {settings.contentPolicy?.excludedPaths.map(pattern => <div key={pattern}><code>{pattern}</code></div>)}
+        </details>
+      ) : null}
+
     </>
   );
 }
@@ -587,7 +586,8 @@ function GraphSection({
   setSettings,
 }: Pick<WorkspaceSettingsDialogProps, "settings" | "setSettings">) {
   return (
-    <div className="dialog-form__grid dialog-form__grid--compact" data-testid="workspace-settings-graph">
+    <div className="dialog-form__grid workspace-settings-graph" data-testid="workspace-settings-graph">
+      <OntologyReviewRow />
       <label className="dialog-check">
         <input
           checked={settings.graphInverseNavigation}
@@ -787,4 +787,12 @@ function formatRelativeTime(value: string): string {
     return `${Math.round(elapsedMs / 60_000)}m ago`;
   }
   return `${Math.round(elapsedMs / 3_600_000)}h ago`;
+}
+
+
+export function markdownScopePreset(policy: WorkspaceSettings["contentPolicy"]): "all" | "repository" | "custom" {
+  const exclusions = policy?.excludedPaths ?? [];
+  if (!exclusions.length) return "all";
+  const repository = repositoryWorkspaceContentPolicy().excludedPaths;
+  return exclusions.length === repository.length && repository.every(pattern => exclusions.includes(pattern)) ? "repository" : "custom";
 }
