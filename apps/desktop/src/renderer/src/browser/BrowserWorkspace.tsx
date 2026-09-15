@@ -125,7 +125,13 @@ export function BrowserWorkspace() {
               setSaveStatus("idle");
             }
           })
-          .catch(fail);
+          .catch((reason) => {
+            if (
+              refreshSequence.current === refresh &&
+              navigation.current === generation
+            )
+              fail(reason);
+          });
       }),
     [],
   );
@@ -175,6 +181,7 @@ export function BrowserWorkspace() {
       return;
     }
     const generation = ++navigation.current;
+    const startingDraft = draftRef.current;
     setError(null);
     try {
       const [document, graph] = await Promise.all([
@@ -182,7 +189,10 @@ export function BrowserWorkspace() {
         api.getGraphContext(filePath),
       ]);
       if (generation !== navigation.current) return;
-      if (!discard && draftRef.current?.dirty) {
+      if (
+        draftRef.current?.dirty &&
+        (!discard || draftRef.current !== startingDraft)
+      ) {
         setPendingPath(filePath);
         return;
       }
@@ -211,7 +221,11 @@ export function BrowserWorkspace() {
         current.body,
         current.revision,
       );
-      if (navigation.current !== generation || draftRef.current?.filePath !== current.filePath) return false;
+      if (
+        navigation.current !== generation ||
+        draftRef.current?.filePath !== current.filePath
+      )
+        return false;
       if (result.status === "saved") {
         const latest = draftRef.current;
         update({
@@ -223,9 +237,24 @@ export function BrowserWorkspace() {
           saveConflict: undefined,
         });
         setSaveStatus("saved");
-        void api.getGraphContext(current.filePath).then(graph => {
-          if (navigation.current === generation && draftRef.current?.filePath === current.filePath) setContext(graph);
-        }).catch(fail);
+        const refresh = ++refreshSequence.current;
+        void api
+          .getGraphContext(current.filePath)
+          .then((graph) => {
+            if (
+              refreshSequence.current === refresh &&
+              navigation.current === generation &&
+              draftRef.current?.filePath === current.filePath
+            )
+              setContext(graph);
+          })
+          .catch((reason) => {
+            if (
+              refreshSequence.current === refresh &&
+              navigation.current === generation
+            )
+              fail(reason);
+          });
         return !draftRef.current?.dirty;
       }
       update({
@@ -255,8 +284,13 @@ export function BrowserWorkspace() {
       if (draftRef.current === current) {
         update({ ...copy, dirty: false });
         setSaveStatus("saved");
+        const refresh = ++refreshSequence.current;
         const graph = await api.getGraphContext(copy.filePath);
-        if (draftRef.current?.filePath === copy.filePath) setContext(graph);
+        if (
+          refreshSequence.current === refresh &&
+          draftRef.current?.filePath === copy.filePath
+        )
+          setContext(graph);
       } else
         setError(
           `Saved your earlier edits as ${copy.filePath}. Current edits remain in this editor.`,
@@ -270,12 +304,14 @@ export function BrowserWorkspace() {
   async function openTarget(target: string) {
     const current = draftRef.current;
     if (!current) return;
+    const generation = ++navigation.current;
     try {
       const resolved = await api.resolveTarget(current.filePath, target);
+      if (navigation.current !== generation) return;
       if (resolved) await open(resolved);
       else setError(`No note found for ${target}.`);
     } catch (reason) {
-      fail(reason);
+      if (navigation.current === generation) fail(reason);
     }
   }
   function edit(body: string, frontmatter = draftRef.current?.frontmatter) {
@@ -477,7 +513,14 @@ export function BrowserWorkspace() {
                   void saveCopy();
                 }}
                 onDiscardSaveConflict={async () => {
-                  await open(draft.filePath, true);
+                  if (draftRef.current?.saveConflict === "missing") {
+                    navigation.current++;
+                    update(null);
+                    setContext(null);
+                    setPendingPath(null);
+                    setSaveStatus("idle");
+                    setError(null);
+                  } else await open(draft.filePath, true);
                 }}
                 onRecoverDeleted={() => {
                   void saveCopy();

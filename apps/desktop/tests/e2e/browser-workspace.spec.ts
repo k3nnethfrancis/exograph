@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchExographWorkspaceFixture } from "../helpers";
@@ -51,9 +51,52 @@ test("browser shares live notes, preserves conflicting edits, and renders the gr
     await page.goto(url);
     await expect(page.getByText("Connected", { exact: true })).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "focus-note", exact: true }),
+      page
+        .getByRole("complementary", { name: "Notes navigation" })
+        .getByRole("button", { name: "focus-note", exact: true }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "focus-note", exact: true }).click();
+    let releaseRead!: () => void;
+    const heldRead = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    const isFocusRead = (request: import("@playwright/test").Request) =>
+      request.url().endsWith("/api/read") &&
+      request.postDataJSON()?.args?.[0]?.endsWith("/focus-note.md");
+    await page.route("**/api/read", async (route) => {
+      if (isFocusRead(route.request())) await heldRead;
+      await route.continue();
+    });
+    const firstRead = page.waitForRequest(isFocusRead);
+    await page
+      .getByRole("complementary", { name: "Notes navigation" })
+      .getByRole("button", { name: "focus-note", exact: true })
+      .click();
+    await firstRead;
+    await page
+      .getByRole("complementary", { name: "Notes navigation" })
+      .getByRole("button", { name: "related-note", exact: true })
+      .click();
+    await expect(page.getByTestId("editor-title")).toHaveText("related-note");
+    const delayedResponse = page.waitForResponse((response) =>
+      isFocusRead(response.request()),
+    );
+    releaseRead();
+    await (await delayedResponse).finished();
+    await page.unroute("**/api/read");
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await expect(page.getByTestId("editor-title")).toHaveText("related-note");
+    await page
+      .getByRole("button", { name: "Toggle notes", exact: true })
+      .click();
+    await page
+      .getByRole("complementary", { name: "Notes navigation" })
+      .getByRole("button", { name: "focus-note", exact: true })
+      .click();
     await expect(page.getByTestId("editor-title")).toHaveText("focus-note");
     const editor = page.locator(".cm-content");
     await editor.click();
@@ -128,6 +171,21 @@ test("browser shares live notes, preserves conflicting edits, and renders the gr
       (await page.locator(".spatial-graph__detail").boundingBox())!.height,
     ).toBeLessThan(120);
     await page.screenshot({ path: "/tmp/exo-browser-workspace-graph.png" });
+    await rm(file);
+    await page.getByRole("button", { name: "Notes", exact: true }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByTestId("save-conflict-notice")).toContainText(
+      "This file was removed.",
+    );
+    await page
+      .getByRole("button", {
+        name: "Discard local edits and close",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByText("Open a note or explore the graph.", { exact: true }),
+    ).toBeVisible();
     expect(errors).toEqual([]);
   } finally {
     await context.close();
