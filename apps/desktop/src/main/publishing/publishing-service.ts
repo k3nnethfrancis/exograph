@@ -1,4 +1,5 @@
 import { resolveGitHubCli } from "./github-cli";
+import { changeManagedDesign, vanillaPreview } from "./managed-design";
 import { saveManagedTheme } from "./managed-theme";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
@@ -46,6 +47,7 @@ export class PublishingService {
   async build(input: PublishingBuildRequest): Promise<PublishingStatus> {
     this.updateContext();
     if (!input || (input.action !== "preview" && input.action !== "prepare")) throw new Error("Unknown publishing action.");
+    if (input.design && (input.design !== "vanilla" || input.action !== "preview")) throw new Error("Vanilla can only be previewed. Restore it before preparing a publication.");
     const context = this.options.context();
     this.assertScope(input.scope);
     if (this.pending) throw new Error("A publication build is already running.");
@@ -54,7 +56,36 @@ export class PublishingService {
     const controller = new AbortController();
     this.abort = controller;
     this.setStatus({ phase: "exporting", action: input.action, diagnostics: [] });
-    const job = this.run(context, input.action, generation, controller.signal);
+    const job = this.run(context, input.action, generation, controller.signal, input.design);
+    this.pending = job;
+    try { return await job; } finally {
+      if (this.pending === job) this.pending = null;
+      if (this.abort === controller) this.abort = null;
+    }
+  }
+
+  async changeDesign(input: { scope: PublishingBuildRequest["scope"]; action: "restore" | "undo" }): Promise<PublishingStatus> {
+    this.updateContext();
+    this.assertScope(input?.scope);
+    if (!["restore", "undo"].includes(input.action)) throw new Error("Unknown design action.");
+    if (this.pending) throw new Error("A publication operation is already running.");
+    this.invalidate();
+    const generation = this.generation;
+    const controller = new AbortController();
+    this.abort = controller;
+    this.setStatus({ phase: "building", diagnostics: [] });
+    const job = (async () => {
+      try {
+        const context = this.options.context();
+        const config = await validatePublishingSettings(context.settings, context.model, this.options.stagingParent);
+        controller.signal.throwIfAborted();
+        await changeManagedDesign(config.engineDirectory, input.action, controller.signal);
+        if (generation === this.generation) this.setStatus({ phase: "idle", diagnostics: [] });
+      } catch (error) {
+        if (generation === this.generation) this.setStatus({ phase: "error", diagnostics: [], error: error instanceof Error ? error.message : String(error) });
+      }
+      return this.status;
+    })();
     this.pending = job;
     try { return await job; } finally {
       if (this.pending === job) this.pending = null;
@@ -104,7 +135,8 @@ export class PublishingService {
     this.setStatus({ phase: "idle", diagnostics: [] });
   }
 
-  private async run(context: PublishingContext, action: PublicationAction, generation: number, signal: AbortSignal): Promise<PublishingStatus> {
+  private async run(context: PublishingContext, action: PublicationAction, generation: number, signal: AbortSignal, design?: "vanilla"): Promise<PublishingStatus> {
+    let vanilla: Awaited<ReturnType<typeof vanillaPreview>> | undefined;
     let snapshot: PublicationSnapshot | undefined;
     let retained = false;
     const assertCurrent = () => {
@@ -128,7 +160,10 @@ export class PublishingService {
         catch (error) { deployment = { status: "setup-required", message: `The site can be reviewed locally. Publishing setup: ${error instanceof Error ? error.message : String(error)}` }; }
       }
       assertCurrent();
-      const generatedRoutes = await readGeneratedRoutes(config.engineDirectory);
+      if (design === "vanilla") vanilla = await vanillaPreview(config.engineDirectory, config.stagingParent, signal);
+      assertCurrent();
+      const buildEngine = vanilla?.directory ?? config.engineDirectory;
+      const generatedRoutes = await readGeneratedRoutes(buildEngine);
       assertCurrent();
       snapshot = await this.options.capture(context.model, config.publicationDirectory, config.stagingParent, generatedRoutes, assertCurrent);
       assertCurrent();
@@ -136,7 +171,7 @@ export class PublishingService {
       assertCurrent();
       const output = path.join(snapshot.stagingRoot, "site");
       this.setStatus({ phase: "building", action, diagnostics: snapshot.manifest.diagnostics });
-      await (this.options.build ?? buildQuartzSite)({ engineDirectory: config.engineDirectory, inputDirectory: snapshot.directory,
+      await (this.options.build ?? buildQuartzSite)({ engineDirectory: buildEngine, inputDirectory: snapshot.directory,
         outputDirectory: output, siteUrl: config.siteUrl, action, signal });
       assertCurrent();
       await this.options.verify(snapshot);
@@ -164,7 +199,7 @@ export class PublishingService {
       }
       this.retainedRoot = snapshot.stagingRoot;
       retained = true;
-      this.setStatus({ phase: "ready", action, outputPath: output, previewUrl, preparedId: this.prepared?.id, deployment, diagnostics: snapshot.manifest.diagnostics });
+      this.setStatus({ phase: "ready", action, design, outputPath: output, previewUrl, preparedId: this.prepared?.id, deployment, diagnostics: snapshot.manifest.diagnostics });
     } catch (error) {
       if (generation === this.generation) {
         const diagnostics = error && typeof error === "object" && "diagnostics" in error && Array.isArray(error.diagnostics)
@@ -172,6 +207,7 @@ export class PublishingService {
         this.setStatus({ phase: "error", action, diagnostics, error: error instanceof Error ? error.message : String(error) });
       }
     } finally {
+      await vanilla?.dispose();
       if (snapshot && !retained) await rm(snapshot.stagingRoot, { recursive: true, force: true });
     }
     return this.status;

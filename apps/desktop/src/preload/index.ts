@@ -32,6 +32,7 @@ const api: DesktopApi = {
     startAuth: () => invokeDesktop("publishing:start-auth"),
     setup: (input) => invokeDesktop("publishing:setup", input),
     cancelSetup: () => invokeDesktop("publishing:cancel-setup"),
+    changeDesign: (input) => invokeDesktop("publishing:change-design", input),
     revealTheme: () => invokeDesktop("publishing:reveal-theme"),
     getStatus: () => invokeDesktop("publishing:get-status"),
     build: (input) => invokeDesktop("publishing:build", input),

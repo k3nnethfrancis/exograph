@@ -1,7 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
 import { cp, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile, readdir, appendFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { PublicationSnapshot, WorkspaceModel, WorkspaceSettings } from "@exograph/core";
@@ -12,8 +10,8 @@ import { readGeneratedRoutes } from "./publishing-service";
 import { publishingResource } from "./publishing-resources";
 import { within } from "./preview-server";
 
-const STOCK_REPOSITORY = "https://github.com/jackyzha0/quartz.git";
-const STOCK_COMMIT = "f1fba3fc55cbf60a60a5d09c95a49c042cdab63a";
+import { installSiteDependencies } from "./site-dependencies";
+import { STOCK_REPOSITORY, STOCK_COMMIT } from "./quartz-baseline";
 const excluded = ["content", "garden", "node_modules", "public", "dist", "release", ".quartz-cache", ".github/workflows"];
 type Run = (file: string, args: string[], options?: { cwd?: string; signal?: AbortSignal; env?: NodeJS.ProcessEnv }) => Promise<string>;
 interface Options {
@@ -43,22 +41,35 @@ export class ManagedSiteSetup {
     if (!this.options.run) this.gh = await findGitHubCli(path.join(this.options.sitesParent, ".tools")) ?? "gh";
     const engineDirectory = this.options.context().settings.publishing?.engineDirectory;
     let managed = false;
+    let hasSavedDesign = false;
     if (engineDirectory) {
       try {
         const marker = JSON.parse(await readFile(path.join(engineDirectory, "exograph-site.json"), "utf8"));
         managed = marker.schemaVersion === 1 && marker.contentDirectory === "garden";
       } catch { /* Legacy engine or not configured. */ }
     }
+    if (managed && engineDirectory) {
+      try { await this.run("git", ["-C", engineDirectory, "rev-parse", "--verify", "refs/exograph/design-recovery"]); hasSavedDesign = true; } catch { /* No restore checkpoint yet. */ }
+    }
     try {
       const login = await this.run(this.gh, ["api", "user", "--jq", ".login"]);
       const headers = await this.run(this.gh, ["api", "--include", "user"]);
       const scopes = headers.match(/^x-oauth-scopes:\s*(.*)$/im)?.[1];
-      if (scopes !== undefined && !scopes.split(",").map(value => value.trim()).includes("workflow")) {
-        return { authenticated: false, login, managed, engineDirectory, pending: Boolean(this.auth), deviceCode: this.deviceCode, verificationUrl: this.deviceCode ? "https://github.com/login/device" : undefined, message: "Reconnect GitHub to allow Exo to install the website publishing workflow." };
+      const granted = scopes?.split(",").map(value => value.trim());
+      if (granted && (!granted.includes("workflow") || !["read:org", "write:org", "admin:org"].some(scope => granted.includes(scope)))) {
+        return { authenticated: false, login, managed, engineDirectory, hasSavedDesign, pending: Boolean(this.auth), deviceCode: this.deviceCode, verificationUrl: this.deviceCode ? "https://github.com/login/device" : undefined, message: "Reconnect GitHub to load your organizations and install the website publishing workflow." };
       }
-      return { authenticated: true, login, managed, engineDirectory };
+      const accounts = [{ login, kind: "user" as "user" | "organization", canCreate: true }];
+      let accountsMessage: string | undefined;
+      try {
+        const pages = JSON.parse(await this.run(this.gh, ["api", "graphql", "--paginate", "--slurp", "-f", 'query=query($endCursor:String){viewer{organizations(first:100,after:$endCursor){nodes{login viewerCanCreateRepositories}pageInfo{hasNextPage endCursor}}}}']));
+        for (const page of pages) for (const org of page.data.viewer.organizations.nodes) {
+          accounts.push({ login: org.login, kind: "organization", canCreate: org.viewerCanCreateRepositories });
+        }
+      } catch { accountsMessage = "Organizations could not be loaded. Retry GitHub connection to refresh the account list."; }
+      return { authenticated: true, login, managed, engineDirectory, hasSavedDesign, accounts, accountsMessage };
     } catch {
-      return { authenticated: false, managed, engineDirectory, pending: Boolean(this.auth), deviceCode: this.deviceCode,
+      return { authenticated: false, managed, engineDirectory, hasSavedDesign, pending: Boolean(this.auth), deviceCode: this.deviceCode,
         verificationUrl: this.deviceCode ? "https://github.com/login/device" : undefined,
         message: this.authMessage ?? "Connect GitHub to set up your website." };
     }
@@ -69,7 +80,7 @@ export class ManagedSiteSetup {
     if (this.auth || (await this.getSetupStatus()).authenticated) return this.getSetupStatus();
     this.authMessage = undefined;
     this.deviceCode = undefined;
-    const child = spawn(this.gh, ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web", "--scopes", "workflow"], {
+    const child = spawn(this.gh, ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web", "--scopes", "workflow,read:org"], {
       env: { ...commandEnvironment(), GH_BROWSER: "true", BROWSER: "true" }, stdio: ["ignore", "pipe", "pipe"],
     });
     this.auth = child;
@@ -126,7 +137,11 @@ export class ManagedSiteSetup {
     const parent = await realpath(this.options.sitesParent);
     if (roots.some((root) => within(root, parent))) throw new Error("Managed websites must be stored outside Note Roots.");
     const repository = input.repository;
-    const destination = path.join(parent, createHash("sha256").update(repository.toLowerCase()).digest("hex").slice(0, 24));
+    const [owner, name] = repository.toLowerCase().split("/");
+    const ownerDirectory = path.join(parent, owner);
+    await mkdir(ownerDirectory, { recursive: true });
+    if (await realpath(ownerDirectory) !== ownerDirectory) throw new Error("The website account folder must not be a symbolic link.");
+    const destination = path.join(ownerDirectory, name);
     const command: Run = (file, args, options) => {
       assertCurrent();
       const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
@@ -185,6 +200,14 @@ export class ManagedSiteSetup {
       if (await realpath(await git(theme, "rev-parse", "--show-toplevel")) !== theme) throw new Error("Choose the root of a dedicated Quartz theme checkout.");
       if (await git(theme, "status", "--porcelain")) throw new Error("The imported theme has uncommitted changes. Commit them before setup.");
       const commit = await git(theme, "rev-parse", "HEAD");
+      let vanillaCommit = STOCK_COMMIT;
+      try {
+        const previous = JSON.parse(await readFile(path.join(theme, "exograph-site.json"), "utf8"));
+        if (previous.vanillaCommit !== undefined) {
+          if (!/^[a-f0-9]{40}$/.test(previous.vanillaCommit)) throw new Error("The imported site's vanilla Quartz revision is invalid.");
+          vanillaCommit = previous.vanillaCommit;
+        }
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
       const paths = [".", ...excluded.map((entry) => `:(exclude)${entry}`)];
       const entries = (await git(theme, "ls-tree", "-r", "-z", commit)).split("\0").filter(entry => {
         const filename = entry.slice(entry.indexOf("\t") + 1);
@@ -205,23 +228,14 @@ export class ManagedSiteSetup {
       await mkdir(path.join(checkout, ".github", "scripts"), { recursive: true });
       await cp(await publishingResource("managed-github-pages.yml"), path.join(checkout, ".github", "workflows", "exograph-publish.yml"));
       await cp(await publishingResource("quartz-build.mjs"), path.join(checkout, ".github", "scripts", "exograph-quartz-build.mjs"));
-      await writeFile(path.join(checkout, "exograph-site.json"), JSON.stringify({ schemaVersion: 1, repository, contentDirectory: "garden", sourceEngine: { commit } }, null, 2) + "\n");
+      await writeFile(path.join(checkout, "exograph-site.json"), JSON.stringify({ schemaVersion: 1, repository, contentDirectory: "garden", sourceEngine: { commit }, vanillaCommit }, null, 2) + "\n");
       snapshot = await this.options.capture(context.model, publicationDirectory, temporary, await readGeneratedRoutes(theme), assertCurrent);
       await this.options.verify(snapshot);
       await rm(path.join(checkout, "garden"), { recursive: true, force: true });
       await cp(snapshot.directory, path.join(checkout, "garden"), { recursive: true });
       if (customDomain) await writeFile(path.join(checkout, "CNAME"), `${url.hostname}\n`);
       if (this.options.install) await this.options.install(checkout, controller.signal);
-      else {
-        const npmPackage = createRequire(import.meta.url).resolve("npm/package.json");
-        const npmCli = path.join(path.dirname(npmPackage), "bin", "npm-cli.js");
-        const bin = path.join(temporary, "bin");
-        await mkdir(bin);
-        const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
-        await writeFile(path.join(bin, "node"), `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${quote(process.execPath)} "$@"\n`, { mode: 0o700 });
-        await command(process.execPath, [npmCli, "ci", "--no-audit", "--no-fund"], { cwd: checkout,
-          env: { PATH: `${bin}${path.delimiter}${commandEnvironment().PATH}` } });
-      }
+      else await installSiteDependencies(checkout, controller.signal);
       await this.options.verify(snapshot);
       await rm(path.join(checkout, "garden"), { recursive: true, force: true });
       await cp(snapshot.directory, path.join(checkout, "garden"), { recursive: true });

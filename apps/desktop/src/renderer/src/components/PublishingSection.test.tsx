@@ -31,7 +31,7 @@ it("refreshes managed controls after migrated settings finish saving", async () 
   getSetupStatus.mockResolvedValue({ authenticated: true, managed: true });
   await act(async () => mounted!.update(<PublishingSection settings={migrated} setSettings={vi.fn()} />));
   expect(getSetupStatus).toHaveBeenCalledTimes(2);
-  expect(JSON.stringify(mounted!.toJSON())).toContain("Customize theme");
+  expect(JSON.stringify(mounted!.toJSON())).toContain("Customize appearance");
   expect(JSON.stringify(mounted!.toJSON())).not.toContain("Use managed publishing");
 });
 it("enables publication only for a saved prepared snapshot, never a preview or pending build", async () => {

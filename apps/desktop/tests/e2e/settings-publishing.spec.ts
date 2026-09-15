@@ -157,3 +157,106 @@ test("Publish uses Exograph's adapter and reports a missing destination workflow
     throw error;
   } finally { await fixture.cleanup(); }
 });
+
+test("Managed design recovery previews vanilla and restores customization through the real desktop bridge", async () => {
+  let engine = "";
+  const fixture = await launchExographWorkspaceFixture({
+    mutable: true,
+    prepareSettings: async ({ settingsPath, workspaceRoot }) => {
+      const notes = path.join(workspaceRoot, "notes/test-notes"), garden = path.join(notes, "garden");
+      engine = path.join(workspaceRoot, "website");
+      await mkdir(garden, { recursive: true }); await writeFile(path.join(garden, "index.md"), "# My garden\n");
+      await mkdir(path.join(engine, "scripts"), { recursive: true });
+      const git = async (...args: string[]) => (await promisify(execFile)("git", ["-C", engine, ...args])).stdout.trim();
+      await git("init", "-b", "main"); await git("config", "user.name", "Test"); await git("config", "user.email", "test@example.com");
+      await writeFile(path.join(engine, ".gitignore"), "node_modules/\n");
+      await writeFile(path.join(engine, "package.json"), '{"name":"design-fixture","version":"1.0.0"}');
+      await writeFile(path.join(engine, "package-lock.json"), '{"name":"design-fixture","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"design-fixture","version":"1.0.0"}}}');
+      await writeFile(path.join(engine, "style.txt"), "vanilla");
+      await writeFile(path.join(engine, "scripts/exograph-publish.mjs"), `
+        import {readFile,mkdir,writeFile} from 'node:fs/promises';
+        import {parseArgs} from 'node:util';
+        const {values}=parseArgs({options:Object.fromEntries(['input','output','site-url','action'].map(name=>[name,{type:'string'}]))});
+        await mkdir(values.output);
+        await writeFile(values.output+'/index.html','<!doctype html><title>Design</title>'+await readFile(new URL('../style.txt',import.meta.url),'utf8'));
+        console.log(JSON.stringify({ok:true,outputPath:values.output,action:values.action}));
+      `);
+      await git("add", "."); await git("commit", "-m", "Vanilla baseline"); const vanillaCommit = await git("rev-parse", "HEAD");
+      await writeFile(path.join(engine, "exograph-site.json"), JSON.stringify({ schemaVersion: 1, contentDirectory: "garden", vanillaCommit }));
+      await writeFile(path.join(engine, "style.txt"), "custom");
+      await mkdir(path.join(engine, "garden")); await writeFile(path.join(engine, "garden/index.md"), "export");
+      await writeFile(path.join(engine, "CNAME"), "fixture.example");
+      await git("add", "."); await git("commit", "-m", "My customization");
+      await writeFile(settingsPath, JSON.stringify({ workspaceRoot, defaultTerminalCwd: workspaceRoot, noteRoots: [notes], indexedRoots: [], indexing: { enabled: false, mode: "off", backend: "qmd" }, searchEngine: "filesystem", publishing: { publicationDirectory: garden, engineDirectory: engine, siteUrl: "https://fixture.example/", destinationRepository: "author/site" } }));
+    },
+  });
+  try {
+    const page = fixture.page;
+    await page.getByTestId("workspace-menu-toggle").click();
+    await page.getByTestId("workspace-menu-settings").click();
+    await page.getByTestId("workspace-settings-tab-publishing").click();
+    await expect(page.getByRole("button", { name: "Customize appearance" })).toBeVisible();
+    await page.getByText("Design and recovery", { exact: true }).click();
+    await expect(page.getByRole("button", { name: "Undo restore", exact: true })).toBeDisabled();
+    await writeFile(path.join(engine, "style.txt"), "unsaved custom");
+    await page.getByRole("button", { name: "Preview vanilla", exact: true }).click();
+    await expect(page.getByTestId("publishing-status")).toContainText("Vanilla preview ready", { timeout: 30_000 });
+    const preview = await page.evaluate(() => window.exograph.publishing.getStatus());
+    expect(await (await fetch(preview.previewUrl!)).text()).toContain("vanilla");
+    expect(await readFile(path.join(engine, "style.txt"), "utf8")).toBe("unsaved custom");
+    await expect(page.getByTestId("publishing-publish")).toBeDisabled();
+    await page.getByRole("button", { name: "Restore vanilla", exact: true }).click();
+    await page.getByRole("button", { name: "Save customization and restore", exact: true }).click();
+    await expect(page.getByText("Vanilla restored.", { exact: false })).toBeVisible({ timeout: 30_000 });
+    expect(await readFile(path.join(engine, "style.txt"), "utf8")).toBe("vanilla");
+    await page.getByRole("button", { name: "Undo restore", exact: true }).click();
+    await expect(page.getByText("Your saved customization is restored.", { exact: false })).toBeVisible({ timeout: 30_000 });
+    expect(await readFile(path.join(engine, "style.txt"), "utf8")).toBe("unsaved custom");
+    expect(await readFile(path.join(engine, "CNAME"), "utf8")).toBe("fixture.example");
+    expect(await readFile(path.join(engine, "garden/index.md"), "utf8")).toBe("export");
+  } finally { await fixture.cleanup(); }
+});
+
+test("First website setup defaults the account and Quartz and separates importing an existing site", async () => {
+  const env: Record<string, string> = {};
+  const fixture = await launchExographWorkspaceFixture({ mutable: true, env,
+    prepareSettings: async ({ settingsPath, workspaceRoot }) => {
+      const notes = path.join(workspaceRoot, "notes/test-notes"), bin = path.join(workspaceRoot, "fake-gh-bin");
+      await mkdir(bin);
+      await writeFile(path.join(bin, "gh"), `#!/bin/sh
+case "$*" in
+  '--version') echo 'gh fixture';;
+  'api user --jq .login') echo 'author';;
+  'api --include user') echo 'x-oauth-scopes: repo, workflow, read:org';;
+  'api graphql'*) echo '[{"data":{"viewer":{"organizations":{"nodes":[{"login":"my-team","viewerCanCreateRepositories":true},{"login":"restricted","viewerCanCreateRepositories":false}]}}}}]';;
+  *) exit 1;;
+esac
+`);
+      await chmod(path.join(bin, "gh"), 0o755);
+      env.PATH = `${bin}${path.delimiter}${process.env.PATH ?? ""}`;
+      await writeFile(settingsPath, JSON.stringify({ workspaceRoot, defaultTerminalCwd: workspaceRoot, noteRoots: [notes], indexedRoots: [], indexing: { enabled: false, mode: "off", backend: "qmd" }, searchEngine: "filesystem" }));
+    },
+  });
+  try {
+    const page = fixture.page;
+    await page.getByTestId("workspace-menu-toggle").click();
+    await page.getByTestId("workspace-menu-settings").click();
+    await page.getByTestId("workspace-settings-tab-publishing").click();
+    await page.getByTestId("publishing-start-setup").click();
+    await expect(page.getByLabel("GitHub account")).toHaveValue("author");
+    await expect(page.getByText("Your site starts with vanilla Quartz.", { exact: false })).toBeVisible();
+    await expect(page.getByTestId("publishing-setup-theme")).toHaveCount(0);
+    await page.getByTestId("publishing-setup-folder").fill(path.join(fixture.workspaceRoot, "notes/test-notes"));
+    await page.getByLabel("Repository name").fill("my-garden");
+    await expect(page.getByTestId("publishing-setup-submit")).toBeEnabled();
+    await page.getByLabel("GitHub account").selectOption("my-team");
+    await expect(page.getByLabel("GitHub account")).toHaveValue("my-team");
+    await page.getByLabel("Repository name").fill("owner/repo");
+    await expect(page.getByTestId("publishing-setup-submit")).toBeDisabled();
+    await page.getByLabel("Repository name").fill("my-garden");
+    await page.screenshot({ path: "/tmp/exo-publishing-setup.png" });
+    await page.getByLabel("Import an existing Quartz site").check();
+    await expect(page.getByTestId("publishing-setup-theme")).toBeVisible();
+    await expect(page.getByTestId("publishing-setup-submit")).toBeDisabled();
+  } finally { await fixture.cleanup(); }
+});
