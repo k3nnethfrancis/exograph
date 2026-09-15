@@ -20,6 +20,18 @@ afterEach(async () => {
 });
 
 describe("AppClient", () => {
+  it("accepts local browser links and rejects malformed or external destinations", async () => {
+    const runtimeRoot = await runtimeFixture();
+    let response: unknown = { url: "http://127.0.0.1:43210/#token=ticket" };
+    stubCommandServer((url) => url.pathname === "/status" ? json(statusResponse()) : json(response));
+    const client = await AppClient.connect(runtimeRoot);
+    await expect(client!.openBrowser()).resolves.toEqual(response);
+    for (const invalid of [null, {}, { url: "not a URL" }, { url: "https://example.com/#token=ticket" }, { url: "http://127.0.0.1:123/" }, { url: "http://user@127.0.0.1:123/#token=ticket" }]) {
+      response = invalid;
+      await expect(client!.openBrowser()).rejects.toThrow(/protocol/i);
+    }
+  });
+
   it("decodes actual Core traversal and rejects malformed or cross-workspace transport responses", async () => {
     const runtimeRoot = await runtimeFixture();
     const notePath = path.join(runtimeRoot, "a.md");

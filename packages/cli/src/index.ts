@@ -42,6 +42,7 @@ import { workspaceMatches } from "./workspace-match";
 interface AppClientLike {
   traverseGraph?: (request: GraphTraversalRequest) => Promise<GraphTraversalResult>;
   getStatus(): Promise<ExographCommandStatusWithControlPlane>;
+  openBrowser?: () => Promise<{ url: string }>;
   showWindow(): Promise<void>;
   search(query: string, options?: { limit?: number; offset?: number }): Promise<ExographCommandSearchResponse>;
   getIndexStatus(): Promise<ExographCommandIndexStatusResponse>;
@@ -88,6 +89,7 @@ interface CliConnection {
 const CLI_COMMANDS = new Set([
   "start",
   "show",
+  "serve",
   "workspaces",
   "status",
   "search",
@@ -235,7 +237,7 @@ export async function runCli(argv: string[], options: {
     return runTerminals(connection.client, subcommand, args, stdout);
   }
 
-  if (command === "show") {
+  if (command === "show" || command === "serve") {
     assertNoUnexpectedArguments([subcommand, ...args]);
   } else if (command === "index") {
     assertIndexArguments(subcommand, args);
@@ -256,6 +258,10 @@ export async function runCli(argv: string[], options: {
     return 1;
   }
 
+  if (command === "serve") {
+    if (!client.openBrowser) throw new Error("Update Exograph to use the browser workspace.");
+    return print(client.openBrowser(), stdout);
+  }
   if (command === "show") { await client.showWindow(); return 0; }
   if (command === "index") return runIndex(client, subcommand, stdout);
   if (command === "open") {
@@ -639,6 +645,7 @@ async function print(value: Promise<unknown> | unknown, stdout: { write(text: st
 function commandHelp(command: string): string {
   const usage = {
     start: "exo start",
+    serve: "exo serve",
     show: "exo show",
     workspaces: "exo workspaces",
     status: "exo status [--workspace <id|label|path>]",
@@ -660,7 +667,7 @@ function help(): string {
     "Workspace selection: exo workspaces; status/search accept --workspace <id|label|path>.",
     "Graph traversal: exo graph traverse --help (explicit Workspace; --offline for Core filesystem mode).",
     "App-off: status and search use the configured workspace's filesystem roots.",
-    "App-backed: show, index maintenance, open, invoke, and terminal control require Exograph to be running.",
+    "App-backed: serve, show, index maintenance, open, invoke, and terminal control require Exograph to be running.",
     "Developer source QA: pnpm dev:qa",
     "",
   ].join("\n");

@@ -4,6 +4,7 @@ export const EXOGRAPH_COMMAND_ROUTES = {
   status: "/status",
   graphTraverse: "/graph/traverse",
   show: "/show",
+  browser: "/browser",
   search: "/search",
   indexStatus: "/index/status",
   indexSync: "/index/sync",
@@ -11,6 +12,9 @@ export const EXOGRAPH_COMMAND_ROUTES = {
   spawnAgentCommand: "/agent-commands/spawn",
   terminals: "/terminals",
 } as const;
+
+/** Authenticated operator result; the fragment ticket is exchanged once by the browser. */
+export interface ExographBrowserWorkspaceResponse { url: string }
 
 export const EXOGRAPH_COMMAND_TOKEN_HEADER = "x-exograph-command-token";
 

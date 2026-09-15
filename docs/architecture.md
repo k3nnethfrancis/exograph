@@ -191,3 +191,18 @@ main, or preload implementations. Renderer features cross the typed shared/prelo
 interface instead of widening their own authority.
 
 For persisted state ownership and recovery, read [`durable-state.md`](durable-state.md).
+
+## Local browser workspace
+
+The optional browser surface is a loopback transport over the running desktop
+Workspace. The authenticated command server issues a browser link via
+`/browser` (`exo serve`). `BrowserWorkspaceServer` serves built browser assets,
+exchanges a one-use ticket for a scoped session, authorizes note paths through
+Core `WorkspaceFiles`, and calls a closed subset of existing workspace handlers.
+Filesystem events refresh both surfaces. It exposes no general IPC dispatcher,
+shell or settings mutation. Graph typed buffers have an explicit JSON encoding.
+
+The browser shell reuses the production editor and graph renderer through
+explicit API props. It owns browser draft state and presentation, while Core
+remains the owner of parsing, revision checks, graph meaning and containment.
+See [Browser workspace](browser-workspace.md) for operator flow and proof.

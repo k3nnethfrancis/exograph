@@ -16,6 +16,23 @@ afterEach(async () => {
 });
 
 describe("CommandServer operator contract", () => {
+  it("issues browser links only through the authenticated CLI route", async () => {
+    const url = "http://127.0.0.1:43210/#token=browser-ticket";
+    const browserRoot = await mkdtemp(path.join(os.tmpdir(), "exo-browser-cli-")); tempPaths.push(browserRoot);
+    const workspace = { ...commandStatusResponse().workspace, workspaceRoot: browserRoot, noteRoots: [{ id: "note-root-1", label: "Notes", path: browserRoot }] };
+    const { server, runtimeRoot, token, port } = await startServer({ onOpenBrowser: async () => ({ url }), onGetStatus: () => ({ workspace, terminals: [] }) });
+    await writeFile(path.join(runtimeRoot, "server.json"), JSON.stringify(server.getServerInfo()));
+    try {
+      expect((await fetch(`http://127.0.0.1:${port}/browser`, { method: "POST" })).status).toBe(401);
+      expect(await (await commandFetch(token, port, "/browser", { method: "POST" })).json()).toEqual({ url });
+      const repo = path.resolve(import.meta.dirname, "../../../../..");
+      const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", path.join(repo, "packages/cli/src/index.ts"), "serve"], {
+        cwd: repo, env: { ...process.env, EXOGRAPH_WORKSPACE_ROOT: browserRoot, EXOGRAPH_NOTE_ROOTS: browserRoot, EXOGRAPH_RUNTIME_ROOT: runtimeRoot },
+      });
+      expect(JSON.parse(stdout)).toEqual({ url });
+    } finally { await server.stop(); }
+  });
+
   it("runs a real CLI child through authenticated HTTP to the Core filesystem graph", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "exo-http-traversal-")); tempPaths.push(root);
     const startPath = path.join(root, "a.md");
