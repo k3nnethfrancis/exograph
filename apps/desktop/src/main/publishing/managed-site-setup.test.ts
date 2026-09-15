@@ -38,6 +38,7 @@ async function fixture() {
 }
 it("creates a self-contained normal descendant with only sanitized content, manual workflow, and preserved domain", async () => {
   const f = await fixture(); const result = await f.service.setup(f.input);
+  expect(result.engineDirectory).toBe(path.join(f.temp, "sites", "author", "site"));
   expect(result).toMatchObject({ status: "ready", siteUrl: "https://example.com/", branch: "main" });
   expect(await f.git(result.engineDirectory, "rev-parse", "HEAD^")).toBe(f.original);
   expect(await readFile(path.join(result.engineDirectory, "garden", "index.md"), "utf8")).toContain("Private");
@@ -112,4 +113,39 @@ it("keeps raw CRLF exports clean despite theme text attributes while detecting g
   expect(await readFile(path.join(result.engineDirectory, "garden", "index.md"), "utf8")).toContain("\r\n");
   await writeFile(path.join(result.engineDirectory, "garden", "index.md"), "user edit");
   expect(await f.git(result.engineDirectory, "status", "--porcelain")).toContain("garden/index.md");
+});
+
+it("rejects an account-directory symlink before touching a remote repository", async () => {
+  const f = await fixture();
+  await mkdir(path.join(f.temp, "sites"));
+  await symlink(f.notes, path.join(f.temp, "sites", "author"));
+  await expect(f.service.setup(f.input)).rejects.toThrow("symbolic link");
+  expect(f.calls).toHaveLength(0);
+});
+
+it("loads personal and organization accounts across pages with their creation permissions", async () => {
+  const f = await fixture();
+  const service = new ManagedSiteSetup({ context: () => ({ settings: f.settings, model: workspaceModelFromSettings(f.settings) }), sitesParent: path.join(f.temp, "sites"),
+    capture: (model, publicationDirectory, stagingParent) => exportPublication({ model, publicationDirectory, stagingParent }), verify: verifyPublicationSnapshot,
+    run: async (_file, args) => {
+      if (args.includes("--include")) return "x-oauth-scopes: repo, workflow, read:org";
+      if (args.includes("graphql")) {
+        expect(args).toContain("--paginate"); expect(args).toContain("--slurp");
+        return JSON.stringify([{ data: { viewer: { organizations: { nodes: [{ login: "team", viewerCanCreateRepositories: true }] } } } },
+          { data: { viewer: { organizations: { nodes: [{ login: "restricted", viewerCanCreateRepositories: false }] } } } }]);
+      }
+      return "author";
+    },
+  });
+  expect(await service.getSetupStatus()).toMatchObject({ authenticated: true, accounts: [
+    { login: "author", kind: "user", canCreate: true }, { login: "team", kind: "organization", canCreate: true }, { login: "restricted", kind: "organization", canCreate: false },
+  ] });
+});
+it("preserves an imported managed site's original vanilla revision across setup", async () => {
+  const f = await fixture();
+  const vanillaCommit = await f.git(f.theme, "rev-parse", "HEAD");
+  await writeFile(path.join(f.theme, "exograph-site.json"), JSON.stringify({ schemaVersion: 1, vanillaCommit }));
+  await f.git(f.theme, "add", "."); await f.git(f.theme, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "baseline metadata");
+  const result = await f.service.setup(f.input);
+  expect(JSON.parse(await readFile(path.join(result.engineDirectory, "exograph-site.json"), "utf8")).vanillaCommit).toBe(vanillaCommit);
 });

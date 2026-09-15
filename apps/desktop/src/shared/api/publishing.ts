@@ -8,6 +8,7 @@ export type PublicationDeployResult =
 export interface PublishingStatus {
   phase: "idle" | "exporting" | "building" | "ready" | "deploying" | "error";
   action?: PublicationAction;
+  design?: "vanilla";
   previewUrl?: string;
   outputPath?: string;
   preparedId?: string;
@@ -16,7 +17,7 @@ export interface PublishingStatus {
   error?: string;
 }
 export type PublishingScope = Pick<WorkspaceSettings, "workspaceRoot" | "noteRoots" | "publishing">;
-export interface PublishingBuildRequest { scope: PublishingScope; action: PublicationAction }
+export interface PublishingBuildRequest { scope: PublishingScope; action: PublicationAction; design?: "vanilla" }
 
 /** Stable publication authority, independent of unrelated settings revisions. */
 export function publicationScope(settings: PublishingScope): PublishingScope {
@@ -33,6 +34,7 @@ export function publicationScope(settings: PublishingScope): PublishingScope {
 }
 
 export interface PublishingApi {
+  changeDesign: (input: { scope: PublishingScope; action: "restore" | "undo" }) => Promise<PublishingStatus>;
   getSetupStatus: () => Promise<PublishingAuthStatus>;
   startAuth: () => Promise<PublishingAuthStatus>;
   setup: (input: PublishingSetupRequest) => Promise<PublishingSetupResult>;
@@ -47,6 +49,8 @@ export interface PublishingApi {
 }
 
 export interface PublishingAuthStatus {
+  accounts?: { login: string; kind: "user" | "organization"; canCreate: boolean }[];
+  accountsMessage?: string;
   authenticated: boolean;
   login?: string;
   pending?: boolean;
@@ -55,6 +59,7 @@ export interface PublishingAuthStatus {
   message?: string;
   managed: boolean;
   engineDirectory?: string;
+  hasSavedDesign?: boolean;
 }
 export interface PublishingSetupRequest {
   scope: PublishingScope;

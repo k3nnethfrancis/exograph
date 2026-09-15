@@ -11,12 +11,14 @@ export function PublishingSection({ settings, setSettings }: {
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
+  const [hasSavedDesign, setHasSavedDesign] = useState(false);
+  const [confirmRestore, setConfirmRestore] = useState(false);
   const [managed, setManaged] = useState(false);
   const [setupNotice, setSetupNotice] = useState<string | null>(null);
   useEffect(() => {
     if (settings.saveStatus !== "saved" || settings.applyStatus === "applying") return;
     let current = true;
-    void window.exograph.publishing.getSetupStatus().then(result => { if (current) setManaged(result.managed); }).catch(() => {});
+    void window.exograph.publishing.getSetupStatus().then(result => { if (current) { setManaged(result.managed); setHasSavedDesign(Boolean(result.hasSavedDesign)); } }).catch(() => {});
     return () => { current = false; };
   }, [settings.publishing?.engineDirectory, settings.saveStatus, settings.applyStatus]);
   const identity = JSON.stringify([settings.workspaceRoot, settings.noteRoots, settings.publishing]);
@@ -40,14 +42,27 @@ export function PublishingSection({ settings, setSettings }: {
     setError(null);
     setSettings((current) => current ? { ...current, publishing: { ...config, [key]: value }, saveStatus: "idle", errorMessage: null } : current);
   };
-  const run = async (action: PublicationAction) => {
+  const run = async (action: PublicationAction, design?: "vanilla") => {
     const requestIdentity = identity;
     setStarting(true);
     setError(null);
     try {
-      const next = await window.exograph.publishing.build({ action, scope: publicationScope(settings) });
+      const next = await window.exograph.publishing.build({ action, ...(design ? { design } : {}), scope: publicationScope(settings) });
       if (mounted.current && requestIdentity === identityRef.current) setStatus(next);
     } catch (cause) { if (mounted.current && requestIdentity === identityRef.current) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (mounted.current) setStarting(false); }
+  };
+  const changeDesign = async (action: "restore" | "undo") => {
+    const requestIdentity = identity;
+    setStarting(true); setError(null); setConfirmRestore(false);
+    try {
+      const next = await window.exograph.publishing.changeDesign({ scope: publicationScope(settings), action });
+      if (mounted.current && requestIdentity === identityRef.current) {
+        setStatus(next);
+        if (next.phase !== "error") setHasSavedDesign(action === "restore");
+        if (next.phase !== "error") setSetupNotice(action === "restore" ? "Vanilla restored. Your previous customization is saved. Preview and publish when ready." : "Your saved customization is restored. Preview and publish when ready.");
+      }
+    } catch (cause) { if (mounted.current && requestIdentity === identityRef.current) setError(String(cause)); }
     finally { if (mounted.current) setStarting(false); }
   };
   const publish = async () => {
@@ -81,9 +96,18 @@ export function PublishingSection({ settings, setSettings }: {
     {!config.engineDirectory ? <><p>Turn a folder of notes into a website. Exo manages the site code and publishes through GitHub Pages.</p><button className="toolbar-button" data-testid="publishing-start-setup" type="button" disabled={!saved} onClick={() => setSetupOpen(true)}>Set up website</button></> : <>
     {setupNotice ? <p role="status">{setupNotice}</p> : null}
     <div className="dialog-card"><strong>{config.destinationRepository || "Your website"}</strong><p>{config.siteUrl}</p><small>Content: {config.publicationDirectory}</small>
-      <div className="dialog-card__actions">{managed ? <button className="toolbar-button" type="button" onClick={() => action(() => window.exograph.publishing.revealTheme())}>Customize theme</button> : null}
+      <div className="dialog-card__actions">{managed ? <button className="toolbar-button" type="button" disabled={busy || !saved} onClick={() => action(() => window.exograph.publishing.revealTheme())}>Customize appearance</button> : null}
       <button className="toolbar-button" data-testid="publishing-start-setup" type="button" disabled={busy || !saved} onClick={() => setSetupOpen(true)}>{managed ? "Website setup" : "Use managed publishing"}</button></div>
     </div>
+    {managed ? <details><summary>Design and recovery</summary>
+      <p>Customize the Quartz code for this site. Restoring vanilla keeps your notes, address, and publishing setup. It uses the original Quartz version.</p>
+      <div className="dialog-card__actions">
+        <button className="toolbar-button" disabled={busy || !saved} onClick={() => void run("preview", "vanilla")}>Preview vanilla</button>
+        <button className="toolbar-button" disabled={busy || !saved} onClick={() => setConfirmRestore(true)}>Restore vanilla</button>
+        <button className="toolbar-button" disabled={busy || !saved || !hasSavedDesign} onClick={() => void changeDesign("undo")}>Undo restore</button>
+      </div>
+      {confirmRestore ? <div role="group" aria-label="Restore vanilla design"><p>Your current customization will be saved before vanilla replaces it. Your live site changes only when you publish.</p><button className="toolbar-button" disabled={busy || !saved} onClick={() => void changeDesign("restore")}>Save customization and restore</button><button className="toolbar-button" onClick={() => setConfirmRestore(false)}>Cancel</button></div> : null}
+    </details> : null}
     <details><summary>Publishing configuration</summary><div className="dialog-form">
     <label className="dialog-field">
       <span className="dialog-field__label">Publication folder</span>
@@ -122,7 +146,7 @@ export function PublishingSection({ settings, setSettings }: {
       {status.phase === "exporting" ? "Preparing notes…" : status.phase === "building" ? "Building site…" : null}
       {status.phase === "deploying" ? "Publishing site… Stopping the local wait does not cancel a dispatched remote workflow; check its status before publishing again." : null}
       {status.phase === "ready" ? <>
-        <p>{status.deployment?.status === "deployed" ? "Site published." : status.action === "prepare" ? "Site prepared. It has not been deployed." : "Preview ready."}</p>
+        <p>{status.deployment?.status === "deployed" ? "Site published." : status.action === "prepare" ? "Site prepared. It has not been deployed." : status.design === "vanilla" ? "Vanilla preview ready. Your active design is unchanged." : "Preview ready."}</p>
         <button className="toolbar-button" type="button" onClick={() => action(() => window.exograph.publishing.revealOutput())}>Show site files</button>
       </> : null}
     </div>

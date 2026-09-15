@@ -12,6 +12,7 @@ export function registerPublishingIpc(service: PublishingService, setup: Managed
     const error = await shell.openPath(await setup.themePath());
     if (error) throw new Error(error);
   });
+  handleDesktopInvoke("publishing:change-design", (_event, input) => service.changeDesign(input));
   handleDesktopInvoke("publishing:get-status", () => service.getStatus());
   handleDesktopInvoke("publishing:build", (_event, input) => service.build(input));
   handleDesktopInvoke("publishing:publish", (_event, input) => service.publish(input));

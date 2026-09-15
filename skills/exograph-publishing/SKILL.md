@@ -42,16 +42,18 @@ versions and profiles. Do not infer that a feature exists from this skill alone.
 ## Identify the deployment contract
 
 Managed publishing starts at Settings → Publishing → Set up website. The user
-chooses content, connects GitHub, creates/selects a repository, and chooses the
-Quartz default or imports a committed theme. Setup returns the managed checkout
+chooses content, connects GitHub, selects an account (personal by default), and
+names a repository. New sites use vanilla Quartz; importing a committed Quartz
+site is a separate migration option. Setup returns the managed checkout
 path into `publishing.engineDirectory`; do not reconstruct that path yourself.
-The checkout is under the app profile's `published-sites/`, outside Note Roots.
+The checkout is under the app profile's `published-sites/<owner>/<repository>/`, outside Note Roots.
+Older generated-ID directories remain supported at their saved paths.
 
 A managed checkout has `exograph-site.json` with `schemaVersion: 1`. Its website
 repository owns Quartz/theme code, exported `garden/`, pinned dependencies, and
 `.github/workflows/exograph-publish.yml`. GitHub Actions checks out one exact
 publication commit, builds it, and uploads the finished site to Pages. Setup
-installs the workflow but does not deploy. Customize theme opens the managed
+installs the workflow but does not deploy. Customize appearance opens the managed
 checkout; Prepare saves theme edits locally and builds a content snapshot;
 Publish website explicitly deploys it. Canonical notes remain in the selected
 source folder. The public derivative is not a second editing location.
@@ -92,6 +94,16 @@ and deployment are verified and its local-only changes are preserved.
   and uncommitted/untracked work before calling a checkout obsolete. Preserve
   local-only work. The Pages repository and active theme/content remain required
   even when an obsolete local copy is removable.
+
+## Design recovery
+
+Each website owns one active customization in its own Git checkout. The marker's
+`vanillaCommit` pins the default design independently of future engine upgrades.
+**Preview vanilla** builds a temporary copy; **Restore vanilla** saves edits and
+`refs/exograph/design-recovery` before replacing design code; **Undo restore**
+recovers the saved customization. Notes, domain, repository identity, and Pages
+workflow are preserved. These actions never publish. Prepare again after a design
+change. Keep recovery commits and the local recovery ref when moving a checkout.
 
 ## Where implementation lives
 
