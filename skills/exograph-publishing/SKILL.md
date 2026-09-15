@@ -95,6 +95,13 @@ and deployment are verified and its local-only changes are preserved.
   local-only work. The Pages repository and active theme/content remain required
   even when an obsolete local copy is removable.
 
+After moving an existing Quartz checkout, inspect its generated `.quartz/`
+cache. Cached plugin symlinks can retain absolute paths to the old directory.
+Archive that generated cache and rebuild if those paths are stale; preserve
+`plugins/`, which contains source code. Verify custom styling and draft/unlisted
+boundaries afterward: Quartz can exit successfully even when a custom plugin
+was skipped because of a stale link.
+
 ## Design recovery
 
 Each website owns one active customization in its own Git checkout. The marker's
