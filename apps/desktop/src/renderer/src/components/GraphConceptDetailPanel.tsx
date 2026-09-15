@@ -9,7 +9,7 @@ interface GraphConceptDetailPanelProps {
   degree: number;
   topology: GraphTopology | null;
   onOpenTarget: (target: string) => void;
-  onStartMaintenance: (filePath: string) => void;
+  onStartMaintenance?: (filePath: string) => void;
 }
 
 /** Presents bounded graph metadata without participating in graph navigation. */
@@ -40,7 +40,7 @@ export function GraphConceptDetailPanel({
         <div className="spatial-graph__detail-meta">{graphConceptDisplayKind(concept)}</div>
         {concept.relativePath ? <div className="spatial-graph__path">{concept.relativePath}</div> : null}
         {properties.length ? <div className="spatial-graph__detail-properties">{properties.map(({ key, value }) => <span key={key}><b>{key}</b>{compactValue(value)}</span>)}</div> : null}
-        {concept.filePath ? (
+        {concept.filePath && onStartMaintenance ? (
           <button
             className="spatial-graph__maintenance"
             onClick={() => onStartMaintenance(concept.filePath!)}

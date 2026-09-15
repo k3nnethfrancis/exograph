@@ -10,6 +10,7 @@ export interface ExographCliCommandHelp {
  */
 export const EXOGRAPH_CLI_COMMANDS: readonly ExographCliCommandHelp[] = [
   { usageToken: "[start]", syntax: "exo start", label: "Open app" },
+  { usageToken: "serve", syntax: "exo serve", label: "Browser workspace" },
   { usageToken: "show", syntax: "exo show", label: "Show window" },
   { usageToken: "workspaces", syntax: "exo workspaces", label: "List workspaces" },
   { usageToken: "status", syntax: "exo status", label: "Workspace status" },

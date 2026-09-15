@@ -83,6 +83,7 @@ interface EditorDocument extends NoteDocument {
 }
 
 interface NoteEditorProps {
+  resolveMarkdownImage?: import("../../../shared/api").DesktopApi["notes"]["resolveMarkdownImage"];
   document: EditorDocument | null;
   graphContext: WorkspaceGraphContext | null;
   saveStatus: "idle" | "saving" | "saved" | "error" | "conflict";
@@ -287,7 +288,7 @@ export function NoteEditor(props: NoteEditorProps) {
   const openTagRef = useRef(onOpenTag);
   const suggestTargetsRef = useRef(onSuggestTargets);
   const previewTargetRef = useRef(onPreviewTarget);
-  const resolveMarkdownImageRef = useRef(window.exograph.notes.resolveMarkdownImage);
+  const resolveMarkdownImageRef = useRef(props.resolveMarkdownImage ?? window.exograph.notes.resolveMarkdownImage);
   const saveRef = useRef(onSave);
   const appZoomRef = useRef(onAppZoom);
   // Event callbacks must stay stable for CodeMirror configuration without

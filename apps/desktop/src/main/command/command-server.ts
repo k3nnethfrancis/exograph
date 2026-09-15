@@ -1,3 +1,4 @@
+import type { ExographBrowserWorkspaceResponse } from "@exograph/core";
 import { parseGraphTraversalRequest, type GraphTraversalRequest, type GraphTraversalResult } from "@exograph/core";
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -27,6 +28,7 @@ import { InvocationRunnerError, type InvocationResult } from "../invocation/invo
 export interface CommandServerOptions {
   runtimeRoot: string;
   onGraphTraverse?: (request: GraphTraversalRequest) => Promise<GraphTraversalResult>;
+  onOpenBrowser?: () => Promise<ExographBrowserWorkspaceResponse>;
   onShowWindow: () => void;
   onOpenPath: (filePath: string) => Promise<void>;
   onIndexSearch: (query: string, options: { limit?: number; offset?: number; intent?: string; includeContent?: boolean; maxLinesPerResult?: number }) => Promise<IndexSearchResponse>;
@@ -114,6 +116,12 @@ export class CommandServer {
 
       if (method === "GET" && pathname === EXOGRAPH_COMMAND_ROUTES.status) {
         json(res, this.options.onGetStatus());
+        return;
+      }
+
+      if (method === "POST" && pathname === EXOGRAPH_COMMAND_ROUTES.browser) {
+        if (!this.options.onOpenBrowser) throw new Error("Browser workspace is unavailable.");
+        json(res, await this.options.onOpenBrowser());
         return;
       }
 

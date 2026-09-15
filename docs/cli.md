@@ -30,6 +30,7 @@ to replace an existing `exo` command when that artifact is missing or empty.
 ```text
 exo [start]
 exo show
+exo serve
 exo workspaces
 exo status [--workspace <id|label|path>]
 exo search <query> [--limit n] [--cursor cursor] [--workspace <id|label|path>]
@@ -53,7 +54,11 @@ discovery, an unreachable live process, an inconclusive/permission-limited
 process check, and a running app for a different workspace. Filesystem results
 remain available and continue to name `filesystem` as their effective provider.
 
-`show`, `index`, `open`, `invoke`, and `terminals` require the resident Exograph app. `invoke` opens a visible terminal task and is intentionally different from a note-native `@` invocation, which carries document context and uses inline review.
+`serve`, `show`, `index`, `open`, `invoke`, and `terminals` require the resident Exograph app. `invoke` opens a visible terminal task and is intentionally different from a note-native `@` invocation, which carries document context and uses inline review.
+
+## Browser workspace
+
+Run `exo serve` while Exograph is running. It prints `{ "url": "http://127.0.0.1:…/#token=…" }` for the current Workspace. Open that URL in a browser or your coding app's browser pane. The link is local to this machine; the desktop app owns the live files, graph and search services. See [Browser workspace](browser-workspace.md) for saving, conflicts, connection lifetime and developer checks.
 
 ## Open an exact note or folder
 

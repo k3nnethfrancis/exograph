@@ -47,7 +47,8 @@ import { UtilityDerivedIndexClient } from "./indexing/derived-index-process";
 import { WorkspaceConfigStore, workspaceSettingsFromModel } from "./workspace/workspace-config-store";
 import { registerTerminalIpcHandlers } from "./terminal/terminal-ipc";
 import { TerminalManager } from "./terminal/terminal-manager";
-import { registerWorkspaceIpcHandlers } from "./workspace/workspace-ipc";
+import { BrowserWorkspaceServer } from "./browser/browser-workspace-server";
+import { registerWorkspaceIpcHandlers, type WorkspaceIpcHandlers } from "./workspace/workspace-ipc";
 import { configureProviderMcp } from "./provider-mcp-setup";
 import { findSourceProjectRoot, inspectCliInstallation, installPackagedCli } from "./cli-installation";
 import { readPdfFile, resolvePreviewTarget } from "./preview-target";
@@ -147,10 +148,16 @@ if (!singleInstanceLock) {
   app.quit();
 }
 
+let browserWorkspace: BrowserWorkspaceServer | undefined;
+
 function createCommandServer(runtimeRoot = resolveRuntimeRoot()) {
   return new CommandServer({
     runtimeRoot,
     onShowWindow: () => appLifecycle.showMainWindow(),
+    onOpenBrowser: async () => {
+      if (!browserWorkspace) throw new Error("Workspace is still starting.");
+      return browserWorkspace.open();
+    },
     onOpenPath: async (targetPath: string) => {
       const target = await workspaceNotesService.authorizeOpenPath(targetPath);
       appLifecycle.showMainWindow();
@@ -321,6 +328,7 @@ function broadcastTerminalData() {
 }
 
 function sendToRenderer<C extends DesktopEventChannel>(channel: C, payload: DesktopEventPayloads[C]) {
+  if (channel === "workspace:changed" || channel === "workspace:graph-changed") browserWorkspace?.changed();
   // Recovery can publish invocation updates before the window lifecycle is
   // constructed. Those records are durable and the renderer hydrates them on
   // startup, so there is intentionally nothing to send in this phase.
@@ -391,7 +399,7 @@ function registerIpcHandlers() {
     verify: verifyPublicationSnapshot,
   });
   registerPublishingIpc(publishingService, managedSiteSetup);
-  registerWorkspaceIpcHandlers({
+  const workspaceHandlers: WorkspaceIpcHandlers = {
     activateWorkspace: async (input) => {
       return switchWorkspace(input.workspaceId, input.expectedRevision);
     },
@@ -528,6 +536,21 @@ function registerIpcHandlers() {
     suggestTargets: (sourceFilePath, query) => workspaceNotesService.suggestTargets(sourceFilePath, query),
     syncIndex: () => indexingService.runSync("settings"),
     updateIndex: () => indexingService.update("settings"),
+  };
+  registerWorkspaceIpcHandlers(workspaceHandlers);
+  browserWorkspace = new BrowserWorkspaceServer({
+    assets: path.join(import.meta.dirname, "../renderer"),
+    scope: () => JSON.stringify([workspaceModel.workspaceRoot, workspaceModel.noteRoots]),
+    api: {
+      bootstrap: async () => workspaceHandlers.getModel(),
+      listTree: workspaceHandlers.listTree, search: workspaceHandlers.searchIndex,
+      read: workspaceHandlers.readNote, save: workspaceHandlers.saveNote, saveCopy: workspaceHandlers.saveNoteCopy,
+      getGraphContext: workspaceHandlers.getGraphContext, getGraphTopology: workspaceHandlers.getGraphTopology,
+      getGraphConceptSummaries: workspaceHandlers.getGraphConceptSummaries, graphConceptLookup: workspaceHandlers.graphConceptLookup,
+      getGraphConceptDetailByIndex: workspaceHandlers.getGraphConceptDetailByIndex,
+      resolveTarget: workspaceHandlers.resolveTarget, suggestTargets: workspaceHandlers.suggestTargets,
+      resolveMarkdownImage: workspaceHandlers.resolveMarkdownImage,
+    },
   });
   registerTerminalIpcHandlers(terminalManager);
 }
@@ -1025,6 +1048,7 @@ app.on("before-quit", (event) => {
           typeof invocationRunner === "undefined" ? Promise.resolve() : invocationRunner.stopAll(),
           stopActiveOntologyDiscoveries(),
           publishingService?.stop() ?? Promise.resolve(),
+          browserWorkspace?.stop() ?? Promise.resolve(),
           managedSiteSetup?.cancelSetup() ?? Promise.resolve(),
         ]);
       },

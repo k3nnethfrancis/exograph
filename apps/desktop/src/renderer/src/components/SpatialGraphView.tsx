@@ -1,3 +1,4 @@
+import type { BrowserGraphApi } from "../../../shared/browser-api";
 import { RefreshCw, Scan } from "lucide-react";
 import {
   useCallback,
@@ -40,6 +41,8 @@ import { GraphConceptDetailPanel } from "./GraphConceptDetailPanel";
 import { OntologyReviewRow } from "./OntologyReviewRow";
 
 interface SpatialGraphViewProps {
+  api?: BrowserGraphApi;
+  showOntologyControls?: boolean;
   inverseNavigation: boolean;
   showOverflowLabels: boolean;
   refreshKey?: string;
@@ -51,7 +54,7 @@ interface SpatialGraphViewProps {
   onRestoreEditorConcept: (filePath: string) => void;
   onActivateOpenTarget: (filePath: string) => void;
   onOpenTarget: (target: string) => void;
-  onStartMaintenance: (filePath: string) => void;
+  onStartMaintenance?: (filePath: string) => void;
   onFocus: () => void;
 }
 
@@ -81,6 +84,8 @@ export function GraphBuildingIndicator() {
 }
 
 export function SpatialGraphView({
+  api = window.exograph,
+  showOntologyControls = true,
   inverseNavigation,
   showOverflowLabels,
   refreshKey,
@@ -145,9 +150,9 @@ export function SpatialGraphView({
   if (!metadataStoreRef.current) {
     metadataStoreRef.current = new GraphMetadataStore({
       port: {
-        getGraphConceptSummaries: (indexes, sourceSnapshotId) => window.exograph.notes.getGraphConceptSummaries([...indexes], sourceSnapshotId),
-        getGraphConceptDetailByIndex: (index, sourceSnapshotId) => window.exograph.notes.getGraphConceptDetailByIndex(index, sourceSnapshotId),
-        graphConceptLookup: (reference, sourceSnapshotId) => window.exograph.notes.graphConceptLookup(reference, sourceSnapshotId),
+        getGraphConceptSummaries: (indexes, sourceSnapshotId) => api.notes.getGraphConceptSummaries([...indexes], sourceSnapshotId),
+        getGraphConceptDetailByIndex: (index, sourceSnapshotId) => api.notes.getGraphConceptDetailByIndex(index, sourceSnapshotId),
+        graphConceptLookup: (reference, sourceSnapshotId) => api.notes.graphConceptLookup(reference, sourceSnapshotId),
       },
       currentSnapshot: () => topologyRef.current,
       onPendingChange: updatePendingWork,
@@ -218,7 +223,7 @@ export function SpatialGraphView({
       return;
     }
     runtimeRef.current = runtime;
-    if (window.exograph.test?.graphHooks) canvas.__exographGraphSnapshot = () => {
+    if (api.test?.graphHooks) canvas.__exographGraphSnapshot = () => {
       const snapshot = runtimeRef.current?.snapshot();
       if (!snapshot) return null;
       return {
@@ -238,7 +243,7 @@ export function SpatialGraphView({
         },
       };
     };
-    if (window.exograph.test?.graphHooks) canvas.__exographGraphPointForIndex = (index) => {
+    if (api.test?.graphHooks) canvas.__exographGraphPointForIndex = (index) => {
       const scene = runtimeRef.current?.getScene();
       if (!scene || index < 0 || index >= scene.topology.nodes.seeds.length) return null;
       const offset = index * 4;
@@ -248,12 +253,12 @@ export function SpatialGraphView({
         visible: scene.projection.nodes[offset + 3] === 1,
       };
     };
-    if (window.exograph.test?.graphHooks) canvas.__exographGraphPickAt = (x, y) => {
+    if (api.test?.graphHooks) canvas.__exographGraphPickAt = (x, y) => {
       const scene = runtimeRef.current?.getScene();
       if (!scene) return -1;
       return pickGraphSceneNode(scene.topology, scene.projection, scene.camera, x, y, { pointer: "fine" });
     };
-    if (window.exograph.test?.graphHooks) {
+    if (api.test?.graphHooks) {
       canvas.__exographGraphForceCanvasFallback = () => runtime.forceCanvasFallbackForTesting();
     }
     const refreshCoordinator = new GraphSnapshotRefreshCoordinator(
@@ -265,10 +270,10 @@ export function SpatialGraphView({
       updatePendingWork,
     );
     refreshCoordinatorRef.current = refreshCoordinator;
-    const unsubscribeWorkspace = window.exograph.workspace.onDidChange((event) => {
+    const unsubscribeWorkspace = api.workspace.onDidChange((event) => {
       if (shouldRefreshGraphForWorkspaceChange(event)) refreshCoordinator.workspaceChanged();
     });
-    const unsubscribeGraph = window.exograph.workspace.onGraphChanged(() => refreshCoordinator.workspaceChanged());
+    const unsubscribeGraph = api.workspace.onGraphChanged(() => refreshCoordinator.workspaceChanged());
     const revealInitialScene = () => {
       if (!initialFramePendingRef.current) return;
       runtime.frameAll();
@@ -354,7 +359,7 @@ export function SpatialGraphView({
     updatePendingWork();
     setLoading(topologyRef.current === null);
     setError(null);
-    void window.exograph.notes.getGraphTopology().then((next) => {
+    void api.notes.getGraphTopology().then((next) => {
       if (request !== loadSequenceRef.current || runtimeRef.current !== runtime) return;
       const previous = topologyRef.current;
       if (previous?.sourceSnapshotId !== next.sourceSnapshotId) {
@@ -489,7 +494,7 @@ export function SpatialGraphView({
       <div className="spatial-graph__toolbar">
         <span className="spatial-graph__count">{topology?.nodeCount ?? 0} · {topology?.edgeCount ?? 0}</span>
         {routeNodeCount > 0 ? <span data-testid="graph-route-status">Route · {routeNodeCount}</span> : null}
-        <OntologyReviewRow compact />
+        {showOntologyControls && <OntologyReviewRow compact />}
         <button aria-label="Frame graph" onClick={() => runtimeRef.current?.frameAll()} title="Frame graph" type="button"><Scan size={14} /></button>
         <button aria-label="Refresh graph" onClick={() => setReloadNonce((value) => value + 1)} title="Refresh graph" type="button"><RefreshCw size={14} /></button>
       </div>

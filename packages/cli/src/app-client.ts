@@ -1,3 +1,4 @@
+import type { ExographBrowserWorkspaceResponse } from "@exograph/core";
 import type { GraphTraversalRequest, GraphTraversalResult } from "@exograph/core";
 import { readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
@@ -172,6 +173,20 @@ export class AppClient {
   async openFile(filePath: string): Promise<void> {
     const request: ExographOpenFileRequest = { path: filePath };
     await this.post(EXOGRAPH_COMMAND_ROUTES.open, request, decodeExographCommandOkResponse);
+  }
+
+  async openBrowser(): Promise<ExographBrowserWorkspaceResponse> {
+    return this.post(EXOGRAPH_COMMAND_ROUTES.browser, {}, (value: unknown) => {
+      if (!value || typeof value !== "object" || !("url" in value) || typeof value.url !== "string") throw protocolShapeError("a browser workspace URL");
+      let url: URL;
+      try { url = new URL(value.url); } catch { throw protocolShapeError("a browser workspace URL"); }
+      if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || !url.port
+        || url.username || url.password || url.pathname !== "/" || url.search
+        || !/^#token=[A-Za-z0-9_-]+$/.test(url.hash)) {
+        throw protocolShapeError("a loopback browser workspace URL");
+      }
+      return { url: value.url };
+    });
   }
 
   async showWindow(): Promise<void> {
