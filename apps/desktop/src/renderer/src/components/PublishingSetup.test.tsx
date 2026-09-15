@@ -23,3 +23,23 @@ it("keeps current configuration when setup fails and surfaces the actionable err
   await act(async () => mounted!.root.findByProps({ "data-testid": "publishing-setup-submit" }).props.onClick());
   expect(configured).not.toHaveBeenCalled(); expect(JSON.stringify(mounted!.toJSON())).toContain("uncommitted edits");
 });
+
+it("defaults to the authorized personal account and vanilla without requesting an owner or theme path", async () => {
+  const fresh = { workspaceRoot: "/notes", noteRoots: ["/notes"] };
+  setup.mockResolvedValue({ status: "ready", repository: "user/my-garden", engineDirectory: "/sites/user/my-garden", siteUrl: "https://user.github.io/my-garden/" });
+  await act(async () => { mounted = create(<PublishingSetup scope={fresh} onConfigured={configured} onClose={() => {}} />); });
+  await act(async () => mounted!.root.findByProps({ "data-testid": "publishing-setup-folder" }).props.onChange({ target: { value: "/notes/garden" } }));
+  await act(async () => mounted!.root.findByProps({ "data-testid": "publishing-setup-repository" }).props.onChange({ target: { value: "my-garden" } }));
+  expect(mounted!.root.findAllByProps({ "data-testid": "publishing-setup-theme" })).toHaveLength(0);
+  await act(async () => mounted!.root.findByProps({ "data-testid": "publishing-setup-submit" }).props.onClick());
+  expect(setup).toHaveBeenCalledWith({ scope: fresh, publicationDirectory: "/notes/garden", repository: "user/my-garden", createRepository: true, visibility: "public" });
+});
+it("offers organizations and disables repository creation where it is not allowed", async () => {
+  window.exograph.publishing.getSetupStatus = async () => ({ authenticated: true, managed: false, login: "user", accounts: [
+    { login: "user", kind: "user", canCreate: true }, { login: "team", kind: "organization", canCreate: true }, { login: "restricted", kind: "organization", canCreate: false },
+  ] });
+  await act(async () => { mounted = create(<PublishingSetup scope={{ workspaceRoot: "/notes", noteRoots: ["/notes"] }} onConfigured={configured} onClose={() => {}} />); });
+  expect(mounted!.root.findByProps({ value: "restricted" }).props.disabled).toBe(true);
+  await act(async () => mounted!.root.findByProps({ "aria-label": "GitHub account" }).props.onChange({ target: { value: "team" } }));
+  expect(mounted!.root.findByProps({ "aria-label": "GitHub account" }).props.value).toBe("team");
+});

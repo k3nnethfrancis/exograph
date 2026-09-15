@@ -12,25 +12,58 @@ counterpart and the source GitHub Pages builds.
 
 ## Managed setup
 
-Choose **Set up website** in Settings → Publishing, then select a content folder,
-connect GitHub, and create or choose a website repository. New repositories are
-public. Choose the pinned Quartz default or import an existing committed Quartz
-project. Existing custom domains and repository history are preserved. Exo
-creates a local checkout under the app profile's `published-sites/` and saves
-its actual location in the workspace settings. Users need no separate local
-website checkout or manually installed Pages workflow.
+Choose **Set up website** in Settings → Publishing:
 
-The managed website repository is self-contained: Quartz and theme code live at
+1. Choose the notes folder to publish.
+2. Connect GitHub. Exo defaults to your personal account and lists your
+   organizations; creation is disabled for accounts where GitHub reports that
+   you cannot create repositories. Organization policy may further restrict
+   public repository creation; GitHub reports that at setup.
+3. Enter a repository name, such as `my-garden`. New repositories are public.
+4. Optionally enter a custom domain. Otherwise use the GitHub Pages address.
+5. Set up the website, then prepare and publish when ready.
+
+New websites start with a pinned vanilla Quartz version. **Import an existing
+Quartz site** is a separate migration option that copies a committed local
+checkout. Existing custom domains and destination repository history are preserved.
+Setup uploads site code and eligible exported content to GitHub; it does not
+make the built website live until the explicit Publish action.
+
+New local checkouts live at `published-sites/<owner>/<repository>/` under the
+app profile, using lowercase GitHub names. Exo saves the actual path in settings.
+Older checkouts with generated IDs remain valid at their saved locations; an
+upgrade does not move a checkout that an editor or agent may be using.
+Users need no additional local website checkout or manually installed workflow.
+
+The website repository is self-contained: Quartz and customization code live at
 its root, `garden/` holds the exported content, and its workflow builds one exact
-publication commit. **Customize theme** opens the editable checkout. **Prepare
-publish** saves theme edits locally and builds a snapshot; **Publish website**
-deploys it. The selected notes folder stays authoritative. Edits in the exported
-`garden/` copy are rejected during theme preparation so they can be recovered
-into the source notes instead of silently overwritten.
+publication commit. **Customize appearance** opens this editable checkout.
+**Prepare publish** saves code edits locally and builds a snapshot; **Publish
+website** deploys it. The selected notes folder stays authoritative. Edits in
+exported `garden/` are rejected so they can be recovered into the source notes.
 
-Setup never deploys the site. A failed setup retains recoverable work and does
-not replace the active configuration. Existing separate-engine configurations
-continue to work and can be migrated through setup by importing their theme.
+### Design recovery
+
+Each website has one active design. Shared selectable presets are not part of
+this flow. The managed marker records `vanillaCommit`, the stock Quartz baseline
+selected at setup; older managed sites use the original pinned setup version.
+Restoring vanilla is separate from upgrading Quartz.
+
+- **Preview vanilla** builds a temporary checkout with the stock design and the
+  current exported notes, leaving the active checkout's code and unsaved edits
+  untouched. A vanilla preview cannot be published directly.
+- **Restore vanilla** saves current code edits in Git, records a local recovery
+  ref (`refs/exograph/design-recovery`), installs the target dependencies in a
+  temporary checkout, and replaces only design files. Site identity, `CNAME`,
+  exported `garden/`, and GitHub publishing automation are preserved. Failed
+  dependency installation or concurrent edits leave the active design intact.
+- **Undo restore** restores the saved customization. The recovery ref is local;
+  saved commits remain in the site's Git history. Repeating Restore without
+  design changes retains the previous recovery point.
+
+Design changes invalidate a prepared publication. Preview, prepare, and publish
+again to deploy the chosen design. Nothing in recovery automatically pushes or
+deploys. A failed setup does not replace the saved active configuration.
 
 ## Existing separate-engine setup
 

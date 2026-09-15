@@ -13,6 +13,7 @@ export interface DesktopInvokeHandlers {
   "publishing:cancel-setup": DesktopApi["publishing"]["cancelSetup"];
   "publishing:reveal-theme": DesktopApi["publishing"]["revealTheme"];
 
+  "publishing:change-design": DesktopApi["publishing"]["changeDesign"];
   "publishing:get-status": DesktopApi["publishing"]["getStatus"];
   "publishing:build": DesktopApi["publishing"]["build"];
   "publishing:publish": DesktopApi["publishing"]["publish"];

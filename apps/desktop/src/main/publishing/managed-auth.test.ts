@@ -15,7 +15,7 @@ it("keeps reconnect polling active and exposes a device code split across output
     capture: vi.fn(), verify: vi.fn(), run: async (_file, args) => args.includes("--include") ? "HTTP/2 200\nx-oauth-scopes: repo, read:org\n" : "user" });
   const starting = await service.startAuth();
   expect(starting).toMatchObject({ authenticated: false, pending: true });
-  expect(spawn.mock.calls[0]?.[1]).toContain("workflow");
+  expect(spawn.mock.calls[0]?.[1]).toContain("workflow,read:org");
   child.stderr.write("First copy your one-time code: ABCD-"); child.stderr.write("EFGH\n");
   expect(await service.getSetupStatus()).toMatchObject({ authenticated: false, pending: true, deviceCode: "ABCD-EFGH", verificationUrl: "https://github.com/login/device" });
   await service.cancelSetup(); expect(child.kill).toHaveBeenCalledOnce();
