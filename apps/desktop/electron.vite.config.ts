@@ -64,6 +64,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: path.resolve(currentDirectory, "src/renderer/index.html"),
+          browser: path.resolve(currentDirectory, "src/renderer/browser.html"),
           "gpu-probe": path.resolve(currentDirectory, "src/renderer/gpu-probe.html"),
         },
       },

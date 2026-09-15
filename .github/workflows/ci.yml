@@ -46,6 +46,11 @@ jobs:
       - name: Electron smoke
         run: pnpm --filter @exograph/desktop exec playwright test tests/e2e/gate-d-gpu-terminal-smoke.spec.ts
 
+      - name: Browser workspace smoke
+        run: |
+          pnpm exec playwright install chromium
+          pnpm --filter @exograph/desktop exec playwright test tests/e2e/browser-workspace.spec.ts
+
       - name: Upload Electron failure traces
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
