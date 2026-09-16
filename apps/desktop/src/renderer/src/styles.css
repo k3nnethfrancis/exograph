@@ -1466,9 +1466,14 @@ button svg,
   pointer-events: auto;
 }
 
+.editor-surface--live-preview .exograph-md-line--outline-parent {
+  position: relative;
+}
+
 .editor-surface--live-preview .exograph-md-outline-fold {
   position: absolute;
-  left: 2px;
+  left: -20px;
+  top: 0;
   display: inline-flex;
   align-items: center;
   width: 14px;

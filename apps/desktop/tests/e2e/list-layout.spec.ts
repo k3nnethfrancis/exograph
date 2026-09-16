@@ -88,6 +88,46 @@ for (const mode of ["desktop", "browser"] as const) {
       } finally { await cleanup(); }
     });
 
+    test("heading folds sit beside their headings and respond to pointer clicks", async () => {
+      const source = "# Parent\nBody\n## Nested\nNested body\n### Deep\nDeep body\n## Sibling\nSibling body\n# Next\nLast body";
+      const { page, cleanup } = await launchListWorkspace(mode === "browser", {
+        mutable: true,
+        prepareWorkspace: async (root) => {
+          await writeFile(path.join(root, "notes/test-notes/heading-folds.md"), source);
+        },
+      });
+      try {
+        await page.getByRole("button", { name: /heading-folds/i }).first().click();
+        await focusLineEnd(page, "Last body");
+        const heading = (text: string) => page.locator(".exograph-md-line--heading").filter({ hasText: text });
+        const nested = heading("Nested");
+        const toggle = nested.getByRole("button");
+        await nested.hover();
+        await expect(toggle).toHaveCSS("opacity", "1");
+        const bounds = await nested.boundingBox();
+        const button = await toggle.boundingBox();
+        expect(bounds).not.toBeNull();
+        expect(button).not.toBeNull();
+        expect(bounds!.x - button!.x).toBeGreaterThan(0);
+        expect(bounds!.x - button!.x).toBeLessThan(30);
+        expect(button!.y).toBeGreaterThanOrEqual(bounds!.y);
+        expect(button!.y + button!.height).toBeLessThanOrEqual(bounds!.y + bounds!.height);
+        await toggle.click();
+        await expect(page.locator(".cm-line").filter({ hasText: "Nested body" })).toBeHidden();
+        await expect(heading("Deep")).toBeHidden();
+        await expect(heading("Sibling")).toBeVisible();
+        await heading("Parent").getByRole("button").click();
+        await expect(heading("Sibling")).toBeHidden();
+        await expect(heading("Next")).toBeVisible();
+        await heading("Parent").getByRole("button").click();
+        await expect(heading("Nested")).toBeVisible();
+        await expect(heading("Deep")).toBeHidden();
+        await nested.getByRole("button").click();
+        await expect(heading("Deep")).toBeVisible();
+        await page.screenshot({ path: test.info().outputPath("heading-folds.png") });
+      } finally { await cleanup(); }
+    });
+
     test("keeps empty bullet and task carets the same height as typed text", async () => {
       const { page, cleanup } = await launchListWorkspace(mode === "browser", {
         mutable: true,

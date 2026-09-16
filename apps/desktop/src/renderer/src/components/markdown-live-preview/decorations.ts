@@ -204,6 +204,11 @@ export function buildDecorations(view: EditorView, options: MarkdownLivePreviewO
     const endsGuide = Boolean(currentList?.isListStart && previousList && previousList.depth > currentList.depth);
     decorateLine(line.from, line.number, text, cursorPos, listContexts, lineDecorations, hasChildren, isFolded, endsGuide, options.onToggleFold);
     if (outlineFold) {
+      lineDecorations.push({
+        from: line.from,
+        to: line.from,
+        decoration: Decoration.line({ class: "exograph-md-line--outline-parent" }),
+      });
       const outlineIsFolded = foldedParentAnchors.has(line.from);
       lineDecorations.push({
         from: line.from,
