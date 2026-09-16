@@ -299,6 +299,20 @@ export function remoteMarkdownImageUrl(target: string): string | null {
     return null;
   }
 }
+// A typographic zero-width anchor gives CodeMirror text-sized caret geometry
+// even when the prefix is the only content on a newly created list line.
+export class ListPrefixWidget extends WidgetType {
+  toDOM() {
+    const span = document.createElement("span");
+    span.textContent = "\u200b";
+    return span;
+  }
+
+  eq(other: WidgetType) {
+    return other instanceof ListPrefixWidget;
+  }
+}
+
 export class TaskPrefixWidget extends WidgetType {
   constructor(
     private readonly checked: boolean,
@@ -317,7 +331,10 @@ export class TaskPrefixWidget extends WidgetType {
     checkbox.className = `exograph-md-checkbox ${this.checked ? "exograph-md-checkbox--checked" : ""}`;
     checkbox.dataset.exographCheckboxPos = String(this.checkboxPos);
     span.appendChild(checkbox);
-    return span;
+    const anchor = document.createElement("span");
+    anchor.textContent = "\u200b";
+    anchor.appendChild(span);
+    return anchor;
   }
 
   eq(other: TaskPrefixWidget) {
