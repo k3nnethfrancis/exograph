@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { isNewTerminalShortcut, shellPanelShortcut } from "./useAppKeybindings";
-import { resolvedWorkspaceShortcutBindings, shortcutBindingIssue, shortcutBindingsHaveConflict } from "../shellHelpModel";
+import { shellPanelShortcut } from "./useAppKeybindings";
+import { codeMirrorShortcutKey, resolvedWorkspaceShortcutBindings, shortcutBindingIssue, shortcutBindingsHaveConflict, shortcutMatches } from "../shellHelpModel";
 
 describe("app keybindings", () => {
   it("maps familiar primary and secondary sidebar shortcuts without accepting noisy variants", () => {
@@ -14,16 +14,22 @@ describe("app keybindings", () => {
     expect(shellPanelShortcut({ code: "KeyN", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, repeat: false })).toBeNull();
   });
 
-  it("recognizes Mod+T as the new terminal shortcut", () => {
-    expect(isNewTerminalShortcut({ key: "t", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, repeat: false })).toBe(true);
-    expect(isNewTerminalShortcut({ key: "T", metaKey: false, ctrlKey: true, shiftKey: false, altKey: false, repeat: false })).toBe(true);
+  it("matches the resolved terminal binding through the live shortcut contract", () => {
+    const terminal = resolvedWorkspaceShortcutBindings({}).terminal;
+    expect(shortcutMatches({ code: "KeyT", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, repeat: false }, terminal)).toBe(true);
+    expect(shortcutMatches({ code: "KeyT", metaKey: false, ctrlKey: true, shiftKey: false, altKey: false, repeat: false }, terminal)).toBe(true);
   });
 
-  it("ignores modified or repeated Mod+T events", () => {
-    expect(isNewTerminalShortcut({ key: "t", metaKey: true, ctrlKey: false, shiftKey: true, altKey: false, repeat: false })).toBe(false);
-    expect(isNewTerminalShortcut({ key: "t", metaKey: true, ctrlKey: false, shiftKey: false, altKey: true, repeat: false })).toBe(false);
-    expect(isNewTerminalShortcut({ key: "t", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, repeat: true })).toBe(false);
-    expect(isNewTerminalShortcut({ key: "n", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, repeat: false })).toBe(false);
+  it("rejects modified, repeated, or wrong terminal events through the live shortcut contract", () => {
+    const terminal = resolvedWorkspaceShortcutBindings({}).terminal;
+    for (const event of [
+      { code: "KeyT", metaKey: true, ctrlKey: false, shiftKey: true, altKey: false, repeat: false },
+      { code: "KeyT", metaKey: true, ctrlKey: false, shiftKey: false, altKey: true, repeat: false },
+      { code: "KeyT", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, repeat: true },
+      { code: "KeyN", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, repeat: false },
+    ]) {
+      expect(shortcutMatches(event, terminal)).toBe(false);
+    }
   });
 
   it("resolves per-workspace overrides and rejects duplicate global bindings", () => {
@@ -32,6 +38,11 @@ describe("app keybindings", () => {
     expect(bindings["daily-note"]).toEqual({ code: "KeyN", shift: true });
     expect(shortcutBindingsHaveConflict({ explorer: { code: "KeyK" }, terminal: { code: "KeyK" } })).toBe(true);
     expect(shortcutBindingsHaveConflict({ explorer: { code: "KeyK" }, terminal: { code: "KeyT" } })).toBe(false);
+  });
+
+  it("converts the canonical Save binding to the editor keymap shape", () => {
+    expect(codeMirrorShortcutKey({ code: "KeyK", alt: true, shift: true })).toBe("Mod-Alt-Shift-k");
+    expect(codeMirrorShortcutKey({ code: "Enter" })).toBe("Mod-Enter");
   });
 });
 

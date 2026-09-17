@@ -189,7 +189,6 @@ button svg,
 }
 
 .tree-node,
-.search-result,
 .footer-item,
 .chrome-tab,
 .toolbar-button,
@@ -2155,64 +2154,6 @@ button svg,
   gap: 8px;
 }
 
-.search-results {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.search-result {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-  background: var(--surface-3);
-  border-radius: 12px;
-  padding: 12px;
-  color: var(--text);
-}
-
-.search-result strong,
-.search-result span {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.search-result span {
-  white-space: nowrap;
-}
-
-.search-result--split {
-  padding: 10px;
-}
-
-.search-result__tag,
-.search-result__file {
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  padding: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.search-result__tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--accent);
-}
-
-.search-result__file span {
-  color: var(--muted);
-  font-size: 12px;
-  word-break: break-word;
-  white-space: normal;
-}
-
 .editor-pane--compact .editor-panel__header {
   min-height: 48px;
   padding-inline: 12px;
@@ -3149,51 +3090,6 @@ select.dialog-card__input {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
-}
-
-.help-tooltip {
-  position: relative;
-  display: inline-grid;
-  place-items: center;
-  color: var(--muted);
-  cursor: default;
-  vertical-align: middle;
-}
-
-.help-tooltip:hover,
-.help-tooltip:focus-visible {
-  color: var(--text);
-}
-
-.help-tooltip::after {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  z-index: 80;
-  width: 280px;
-  max-width: min(280px, calc(100vw - 48px));
-  padding: 9px 10px;
-  border: 1px solid var(--surface-border-strong);
-  border-radius: 9px;
-  background: var(--panel-strong);
-  color: var(--text);
-  box-shadow: var(--shadow);
-  content: attr(data-tooltip);
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0;
-  line-height: 1.4;
-  opacity: 0;
-  pointer-events: none;
-  text-transform: none;
-  transform: translateX(-50%) translateY(2px);
-  transition: opacity 120ms ease, transform 120ms ease;
-}
-
-.help-tooltip:hover::after,
-.help-tooltip:focus-visible::after {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
 }
 
 .path-list {

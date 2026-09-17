@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronLeft, ChevronRight, FileText, Folder, FolderOpen, FolderTree, Hash } from "lucide-react";
-import type { SearchResult, TreeNode } from "@exograph/core";
+import { ChevronDown, ChevronLeft, ChevronRight, FileText, Folder, FolderOpen, FolderTree } from "lucide-react";
+import type { TreeNode } from "@exograph/core";
 import type { CSSProperties } from "react";
 import type { DragManager } from "../hooks/useDragManager";
 import type { ExplorerRootKind } from "./FileTree";
@@ -21,21 +21,6 @@ export interface ContextTarget {
   kind: "file" | "directory";
 }
 
-interface SearchSectionProps {
-  label: string;
-  results: SearchResult[];
-  onOpenFile: (filePath: string, line?: number | null) => void;
-  onOpenFolder?: (directoryPath: string) => void;
-  dragManager: DragManager;
-}
-
-interface TagSearchSectionProps {
-  results: SearchResult[];
-  onOpenFile: (filePath: string, line?: number | null) => void;
-  onOpenTag: (tag: string) => void;
-  dragManager: DragManager;
-}
-
 interface SectionProps {
   label: string;
   sections: RootSection[];
@@ -54,65 +39,6 @@ interface SectionProps {
 }
 
 export const ROOT_GROUP_PREFIX = "__root__:";
-
-export function SearchSection(props: SearchSectionProps) {
-  const { label, results, onOpenFile, dragManager } = props;
-  if (results.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="search-section">
-      <div className="search-section__title">{label}</div>
-      {results.map((result) => (
-        <button
-          key={result.filePath}
-          className="search-result"
-          onClick={() => onOpenFile(result.filePath)}
-          onMouseDown={(event) =>
-            dragManager.startDrag(event, { kind: "document", filePath: result.filePath })
-          }
-          type="button"
-        >
-          <strong>{result.title}</strong>
-          <span>{result.snippet}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export function TagSearchSection(props: TagSearchSectionProps) {
-  const { results, onOpenFile, onOpenTag, dragManager } = props;
-  if (results.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="search-section">
-      <div className="search-section__title">Tags</div>
-      {results.map((result) => (
-        <div key={`${result.filePath}-${result.snippet}`} className="search-result search-result--split">
-          <button className="search-result__tag" onClick={() => onOpenTag(result.snippet)} type="button">
-            <Hash size={12} />
-            {result.snippet}
-          </button>
-          <button
-            className="search-result__file"
-            onClick={() => onOpenFile(result.filePath)}
-            onMouseDown={(event) =>
-              dragManager.startDrag(event, { kind: "document", filePath: result.filePath })
-            }
-            type="button"
-          >
-            <strong>{result.title}</strong>
-            <span>{result.filePath}</span>
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export function Section(props: SectionProps) {
   const {

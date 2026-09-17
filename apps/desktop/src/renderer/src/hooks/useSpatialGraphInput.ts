@@ -35,6 +35,8 @@ interface SpatialGraphInputOptions {
   restoreSelection: (filePath: string) => Promise<void>;
   readSummaries: (indexes: readonly number[], sourceSnapshotId: string) => Promise<void>;
   setRouteNodeCount: (count: number) => void;
+  clearSelectionDetail: () => void;
+  markUserSelection: () => void;
 }
 
 /** Adapts browser input into renderer-neutral graph navigation commands. */
@@ -59,6 +61,7 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
 
   function onPointerDown(event: PointerEvent<HTMLCanvasElement>) {
     event.preventDefault();
+    event.currentTarget.focus();
     if (pointerSessionRef.current.activePointers === 0) options.runtimeRef.current?.cancelMotion();
     pointerSessionRef.current.begin(pointerSample(event), spatialGraphPointerAction({
       button: event.button,
@@ -99,6 +102,7 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
     if (picked >= 0) recentPickRef.current = { index: picked, clientX: event.clientX, clientY: event.clientY, at: performance.now() };
     const scene = options.runtimeRef.current?.getScene();
     const decision = graphNodeClickDecision(picked, scene?.interaction.selected ?? -1, event.shiftKey);
+    if (picked >= 0) options.markUserSelection();
     if (decision.kind === "clear-route") {
       options.runtimeRef.current?.clearRoute();
       options.setRouteNodeCount(0);
@@ -158,8 +162,10 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
       } else if (decision === "restore-editor" && options.graphReturnPath) {
         void options.restoreSelection(options.graphReturnPath);
       } else {
+        options.markUserSelection();
         runtime.setSelection(-1);
         options.setRouteNodeCount(0);
+        options.clearSelectionDetail();
       }
       return;
     }
@@ -179,6 +185,7 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
       if (nodeCount === 0) return;
       const direction = event.key === "]" ? 1 : -1;
       const selected = scene.interaction.selected;
+      options.markUserSelection();
       void options.inspectIndex(selected < 0 ? (direction > 0 ? 0 : nodeCount - 1) : (selected + direction + nodeCount) % nodeCount);
       return;
     }

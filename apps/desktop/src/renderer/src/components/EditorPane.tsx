@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
 
-import type { AgentCommand, InvocationSkillContext, NoteDocument, WorkspaceGraphContext } from "@exograph/core";
+import type { AgentCommand, InvocationSkillContext, NoteDocument, WorkspaceGraphContext, WorkspaceShortcutBinding } from "@exograph/core";
 import type { InvocationFileReviewPayload } from "../../../shared/api";
 import type { InvocationReviewPosition, InvocationReviewQueueProjection } from "./invocation";
 import type { DragManager } from "../hooks/useDragManager";
@@ -57,6 +57,7 @@ interface EditorPaneProps {
   onUpdateFrontmatter: (key: string, value: unknown) => void;
   onBodyChange: (body: string) => void;
   onSave: () => void;
+  saveShortcut?: WorkspaceShortcutBinding;
   onSaveConflictCopy?: () => void;
   onDiscardSaveConflict?: () => Promise<void>;
   onRecoverDeleted: () => void;
@@ -110,6 +111,7 @@ export function EditorPane(props: EditorPaneProps) {
     onUpdateFrontmatter,
     onBodyChange,
     onSave,
+    saveShortcut,
     onSaveConflictCopy,
     onDiscardSaveConflict,
     onRecoverDeleted,
@@ -243,6 +245,7 @@ export function EditorPane(props: EditorPaneProps) {
         onUpdateFrontmatter={onUpdateFrontmatter}
         onBodyChange={onBodyChange}
         onSave={onSave}
+        saveShortcut={saveShortcut}
         onSaveConflictCopy={onSaveConflictCopy}
         onDiscardSaveConflict={onDiscardSaveConflict}
         onRecoverDeleted={onRecoverDeleted}

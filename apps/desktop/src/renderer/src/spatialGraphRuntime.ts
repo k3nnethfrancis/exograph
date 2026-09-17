@@ -93,15 +93,6 @@ export interface GraphSnapshotRefreshSnapshot {
   sourceSnapshotId: string | null;
 }
 
-/** Keeps metadata memory proportional to the current graph snapshot. */
-export function pruneGraphSnapshotCache<T>(cache: Map<string, T>, sourceSnapshotId: string): number {
-  const prefix = `${sourceSnapshotId}:`;
-  for (const key of cache.keys()) {
-    if (!key.startsWith(prefix)) cache.delete(key);
-  }
-  return cache.size;
-}
-
 export function shouldRefreshGraphForWorkspaceChange(event: { filePath: string | null }): boolean {
   return event.filePath === null || /\.md$/iu.test(event.filePath);
 }
