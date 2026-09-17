@@ -158,7 +158,12 @@ test("custom Save remains active in the focused editor", async () => {
     });
 
     const editor = page.locator(".editor-surface .cm-content").first();
-    await editor.click();
+    await editor.evaluate((content) => {
+      const view = (content as any).cmView.view;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      view.focus();
+    });
+    await expect(editor).toBeFocused();
     // Keep the autosave idle/max age at zero without stopping editor frames.
     // Only an explicit Save can produce the IPC calls asserted below.
     await page.evaluate(() => {
@@ -166,6 +171,7 @@ test("custom Save remains active in the focused editor", async () => {
       performance.now = () => now;
     });
     await page.keyboard.type("custom save");
+    await expect(editor).toContainText("custom save");
     await expect(page.getByTestId("editor-save-status")).toHaveText("Unsaved");
     await electronApp.evaluate(() => { (globalThis as unknown as { wiringSaveGate: { armed: boolean } }).wiringSaveGate.armed = true; });
     await page.keyboard.press("Meta+Alt+k");
