@@ -1443,7 +1443,16 @@ button svg,
 .editor-surface--live-preview .exograph-md-list-prefix--task {
   box-sizing: border-box;
   justify-content: flex-end;
-  padding-right: var(--exograph-list-marker-text-gap, 8px);
+  padding-right: calc(var(--exograph-list-marker-text-gap, 8px) - 5px);
+}
+
+.editor-surface--live-preview .exograph-md-list-prefix--task .exograph-md-checkbox {
+  width: 14px;
+  height: 14px;
+}
+
+.editor-surface--live-preview .exograph-md-line--task {
+  --exograph-list-marker-clearance: 10px;
 }
 
 .editor-surface--live-preview .exograph-md-fold-toggle {
@@ -1463,6 +1472,10 @@ button svg,
   flex-shrink: 0;
   opacity: 0;
   pointer-events: auto;
+}
+
+.editor-surface--live-preview .exograph-md-list-prefix--fold .exograph-md-fold-toggle {
+  margin-right: 0;
 }
 
 .editor-surface--live-preview .exograph-md-line--outline-parent {
