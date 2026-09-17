@@ -412,6 +412,9 @@ export function NoteEditor(props: NoteEditorProps) {
           return;
         }
         suppressedWikilinkCompletionRef.current = null;
+        // Do not keep advertising a previous query while its replacement is
+        // being fetched. Enter must never act on a menu for an older range.
+        setWikilinkSuggestions(null);
 
         const cursorCoords = update.view.coordsAtPos(range.head);
         const surface = update.view.dom.closest<HTMLElement>(".editor-surface");
