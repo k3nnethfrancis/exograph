@@ -162,7 +162,7 @@ test("custom Save remains active in the focused editor", async () => {
     // Freeze renderer timers before editing so the 2–5 second autosave cannot
     // satisfy this regression while the configured shortcut is being tested.
     await page.clock.install({ time: new Date("2026-09-16T12:00:00Z") });
-    await page.clock.pauseAt(new Date("2026-09-16T12:00:00Z"));
+    await page.clock.pauseAt(new Date("2026-09-16T12:00:01Z"));
     await page.keyboard.type("custom save");
     await expect(page.getByTestId("editor-save-status")).toHaveText("Unsaved");
     await electronApp.evaluate(() => { (globalThis as unknown as { wiringSaveGate: { armed: boolean } }).wiringSaveGate.armed = true; });
