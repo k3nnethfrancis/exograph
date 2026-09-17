@@ -162,7 +162,8 @@ For every MCP request, the server re-resolves the caller scope and rediscovers
 the desktop app. When the running app belongs to that same resolved Workspace,
 the request uses its configured retrieval. If the app is unavailable, stale, or
 belongs to a different Workspace, that request uses bounded filesystem
-retrieval, so starting or restarting Exograph is picked up by the next request.
+retrieval. A failure after the app passes its workspace check is returned to the
+caller; the next request rediscovers the app and can recover after a restart.
 
 Exograph does not install or maintain provider instruction files or Skills.
 Tool descriptions establish the local search-then-read rule; provider-specific

@@ -306,6 +306,40 @@ describe("Exograph MCP server", () => {
     expect(toolText(responses[1]).results?.[0]).toMatchObject({ path: path.join(root, "New token.md"), title: "New token", source: "qmd" });
   });
 
+  it.each(["status", "search"] as const)("surfaces an in-flight app %s failure and recovers on the next request", async (operation) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-mcp-in-flight-"));
+    temporaryRoots.push(root);
+    let healthy = false;
+    let connections = 0;
+    const requests = operation === "status"
+      ? [toolCall(1, "workspace_status"), toolCall(2, "search_notes", { query: "from healthy app" })]
+      : [toolCall(1, "search_notes", { query: "from failing app" }), toolCall(2, "search_notes", { query: "from healthy app" })];
+    const responses = await invokeMcpAcrossRequests(requests, {
+      env: { EXOGRAPH_WORKSPACE_ROOT: root, EXOGRAPH_NOTE_ROOTS: root },
+      connectApp: async () => {
+        connections += 1;
+        return {
+          getStatus: async () => appStatus(root),
+          getIndexStatus: async () => {
+            if (!healthy) throw new Error("index unavailable during request");
+            return indexStatusResponse();
+          },
+          search: async () => {
+            if (!healthy) throw new Error("search unavailable during request");
+            return { query: "from healthy app", mode: "hybrid" as const, source: "qmd" as const, warnings: [], results: [{ filePath: path.join(root, "healthy.md"), title: "Healthy", snippet: "", score: 1, source: "qmd" as const }] };
+          },
+        };
+      },
+    }, (index) => {
+      if (index === 0) healthy = true;
+    });
+
+    expect(connections).toBe(2);
+    expect(responses[0].result).toMatchObject({ isError: true });
+    expect(resultText(responses[0])).toContain(`${operation === "status" ? "index" : "search"} unavailable during request`);
+    expect(toolText(responses[1]).results?.[0]).toMatchObject({ path: path.join(root, "healthy.md"), source: "qmd" });
+  });
+
   it("uses the same-workspace filesystem fallback when the app becomes mismatched", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "exograph-mcp-mismatch-"));
     const otherRoot = await mkdtemp(path.join(os.tmpdir(), "exograph-mcp-mismatch-other-"));
