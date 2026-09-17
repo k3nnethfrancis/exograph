@@ -544,7 +544,7 @@ export function SpatialGraphView({
         <canvas
           ref={canvasRef}
           aria-describedby={keyboardHelpId}
-          aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight + - [ ] Space Enter Escape"
+          aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight + - Space Enter Escape"
           aria-label="Interactive knowledge graph"
           aria-roledescription="spatial knowledge graph"
           className="spatial-graph__interaction"
@@ -561,7 +561,7 @@ export function SpatialGraphView({
           onWheel={graphInput.onWheel}
           tabIndex={0}
         />
-        <p className="sr-only" id={keyboardHelpId}>Left and right brackets select the previous or next Note. Arrow keys orbit. Plus and minus zoom. Space or F focuses the selected Note. O frames the graph. Enter opens the selected Note. Escape returns to editor context.</p>
+        <p className="sr-only" id={keyboardHelpId}>Arrow keys follow connected nodes in the pressed direction and center the camera on the selection. Plus and minus zoom. Space or F focuses the selected Note. O frames the graph. Enter opens the selected Note. Escape returns to editor context.</p>
         {loading ? <div className="spatial-graph__state spatial-graph__state--building"><GraphBuildingIndicator /></div> : null}
         {error ? (
           <button

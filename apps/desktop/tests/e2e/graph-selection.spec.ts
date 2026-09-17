@@ -50,8 +50,31 @@ test("a mouse-selected graph receives keyboard navigation without programmatic f
   try {
     const canvas = await clickB(fixture.page);
     await expect(canvas).toBeFocused();
+    const a = await pointForLabel(canvas, "Wiring A");
+    const b = await pointForLabel(canvas, "Wiring B");
+    const key = Math.abs(a.x - b.x) >= Math.abs(a.y - b.y)
+      ? (a.x > b.x ? "ArrowRight" : "ArrowLeft") : (a.y > b.y ? "ArrowDown" : "ArrowUp");
+    const camera = await canvas.evaluate((element) => (element as any).__exographGraphSnapshot().camera);
+    await fixture.page.keyboard.press(key);
+    await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveText("Wiring A");
+    await expect.poll(async () => {
+      const point = await pointForLabel(canvas, "Wiring A");
+      const box = await canvas.boundingBox();
+      return Math.hypot(point.x - box!.width / 2, point.y - box!.height / 2);
+    }).toBeLessThan(2);
+    const after = await canvas.evaluate((element) => (element as any).__exographGraphSnapshot().camera);
+    expect(after.yaw).toBe(camera.yaw);
+    expect(after.pitch).toBe(camera.pitch);
+    expect(after.distance).toBe(camera.distance);
     await fixture.page.keyboard.press("]");
-    await expect(fixture.page.locator(".spatial-graph__detail-title")).not.toHaveText("Wiring B");
+    await fixture.page.keyboard.press("[");
+    await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveText("Wiring A");
+    const centeredA = await pointForLabel(canvas, "Wiring A");
+    const neighborB = await pointForLabel(canvas, "Wiring B");
+    await fixture.page.keyboard.press(Math.abs(neighborB.x - centeredA.x) >= Math.abs(neighborB.y - centeredA.y)
+      ? (neighborB.x > centeredA.x ? "ArrowRight" : "ArrowLeft")
+      : (neighborB.y > centeredA.y ? "ArrowDown" : "ArrowUp"));
+    await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveText("Wiring B");
   } finally {
     await fixture.cleanup();
   }

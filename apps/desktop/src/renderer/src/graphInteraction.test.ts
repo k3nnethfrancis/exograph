@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   graphConceptDisplayKind,
+  graphDirectionalNeighbor,
   graphEscapeDecision,
   graphNodeClickDecision,
   graphNodeDoubleClickDecision,
@@ -48,5 +49,53 @@ describe("Graph interaction contract", () => {
     expect(graphEscapeDecision(true, "/notes/source.md", "/notes/target.md")).toBe("clear-route");
     expect(graphEscapeDecision(false, "/notes/source.md", "/notes/target.md")).toBe("restore-editor");
     expect(graphEscapeDecision(false, "/notes/source.md", "/notes/source.md")).toBe("none");
+  });
+});
+
+
+function navigationFixture() {
+  return {
+    topology: {
+      topologyHash: "navigation", layoutEpochId: "navigation", seed: 1,
+      nodes: { seeds: new Uint32Array(5), identityKeys: new Uint32Array(10), groups: new Uint32Array(5),
+        degrees: new Uint32Array(5), visualClasses: new Uint8Array(5) },
+      // Both inbound and outbound connections are traversable; node 3 is unrelated.
+      edges: { endpoints: new Uint32Array([1, 0, 1, 2, 0, 4, 0, 0, 0, 1]), visualClasses: new Uint8Array(5) },
+    },
+    projection: {
+      nodes: new Float32Array([100, 100, .5, 1, 200, 100, .5, 1, 300, 100, .5, 1,
+        110, 100, .5, 1, 120, 150, .5, 1]),
+      viewport: { width: 400, height: 200 },
+      pickIndex: { cellSize: 48, columns: 0, rows: 0, offsets: new Uint32Array(), nodeIndices: new Uint32Array() },
+    },
+  };
+}
+
+describe("directional graph traversal", () => {
+  it("follows successive incident edges rather than closer unrelated nodes", () => {
+    const { topology, projection } = navigationFixture();
+    expect(graphDirectionalNeighbor(topology, projection, 0, "ArrowRight")).toBe(1);
+    expect(graphDirectionalNeighbor(topology, projection, 1, "ArrowRight")).toBe(2);
+    expect(graphDirectionalNeighbor(topology, projection, 2, "ArrowLeft")).toBe(1);
+    expect(graphDirectionalNeighbor(topology, projection, 0, "ArrowDown")).toBe(4);
+  });
+  it("stays put at a directional dead end or isolated node", () => {
+    const { topology, projection } = navigationFixture();
+    expect(graphDirectionalNeighbor(topology, projection, 0, "ArrowLeft")).toBe(-1);
+    expect(graphDirectionalNeighbor(topology, projection, 3, "ArrowRight")).toBe(-1);
+    expect(graphDirectionalNeighbor(topology, projection, 0, "]")).toBe(-1);
+  });
+  it("can reach an offscreen connection but excludes points behind the camera", () => {
+    const { topology, projection } = navigationFixture();
+    projection.nodes.set([500, 100, .5, 0], 4);
+    expect(graphDirectionalNeighbor(topology, projection, 0, "ArrowRight")).toBe(1);
+    projection.nodes.set([0, 0, 0, 0], 4);
+    expect(graphDirectionalNeighbor(topology, projection, 0, "ArrowRight")).toBe(4);
+  });
+  it("starts at the visible node nearest the viewport center", () => {
+    const { topology, projection } = navigationFixture();
+    expect(graphDirectionalNeighbor(topology, projection, -1, "ArrowRight")).toBe(1);
+    projection.nodes.fill(0);
+    expect(graphDirectionalNeighbor(topology, projection, -1, "ArrowRight")).toBe(-1);
   });
 });
