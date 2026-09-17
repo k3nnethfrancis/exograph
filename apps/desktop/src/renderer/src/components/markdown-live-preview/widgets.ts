@@ -363,8 +363,9 @@ export class FoldToggleWidget extends WidgetType {
       ? "exograph-md-list-prefix exograph-md-list-prefix--fold"
       : "exograph-md-outline-fold";
     if (this.placement === "list") {
-      const bulletLeft = LIST_GEOMETRY.baseIndent + this.depth * LIST_GEOMETRY.indentStep - LIST_GEOMETRY.markerLaneWidth;
-      span.style.left = `${bulletLeft - 14}px`;
+      // Put the chevron halfway between this level's guide and its parent's.
+      const bulletCenter = LIST_GEOMETRY.baseIndent + this.depth * LIST_GEOMETRY.indentStep - LIST_GEOMETRY.markerTextGap - 2;
+      span.style.left = `${bulletCenter - LIST_GEOMETRY.indentStep / 2 - 7}px`;
       span.style.width = "14px";
     }
 

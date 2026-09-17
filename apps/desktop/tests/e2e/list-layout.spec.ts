@@ -62,6 +62,18 @@ for (const mode of ["desktop", "browser"] as const) {
         await expect(line("Continuation text")).not.toHaveCSS("background-image", "none");
         await expect(line("After")).not.toHaveCSS("background-image", "none");
         await expect(line("Plain text")).toHaveCSS("background-image", "none");
+        const geometry = await line("Nested parent").evaluate((element) => {
+          const lineBox = element.getBoundingClientRect();
+          const bullet = getComputedStyle(element, "::before");
+          const button = element.querySelector("button")!.getBoundingClientRect();
+          const guideCenters = getComputedStyle(element).backgroundPositionX.split(",")
+            .map((position) => lineBox.x + parseFloat(position) + 0.5);
+          return { guideCenters, bulletCenter: lineBox.x + parseFloat(bullet.left) + parseFloat(bullet.width) / 2,
+            buttonLeft: button.x, buttonRight: button.right };
+        });
+        expect(Math.abs(geometry.guideCenters[1] - geometry.bulletCenter)).toBeLessThan(0.6);
+        expect(geometry.buttonLeft - geometry.guideCenters[0]).toBeGreaterThanOrEqual(4);
+        expect(geometry.guideCenters[1] - geometry.buttonRight).toBeGreaterThanOrEqual(4);
         await page.screenshot({ path: test.info().outputPath("nested-guides.png") });
         await nested.click();
         await expect(line("Grandchild")).toBeHidden();

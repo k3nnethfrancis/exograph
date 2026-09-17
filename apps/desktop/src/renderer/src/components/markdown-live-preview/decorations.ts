@@ -584,13 +584,14 @@ function listLineStyle(depth: number, isListStart = true, expandedParent = false
   // Each descendant carries its ancestors' guides, including wrapped lines.
   // The parent starts its own guide below the marker; folding removes it.
   for (let ancestor = 0; ancestor < depth + Number(!isListStart || expandedParent || endsGuide); ancestor += 1) {
-    const left = LIST_GEOMETRY.baseIndent + ancestor * LIST_GEOMETRY.indentStep - LIST_GEOMETRY.markerTextGap - 2;
+    // Center the one-pixel rule beneath the four-pixel bullet.
+    const left = LIST_GEOMETRY.baseIndent + ancestor * LIST_GEOMETRY.indentStep - LIST_GEOMETRY.markerTextGap - 2.5;
     const ownGuide = ancestor === depth && isListStart;
-    const gradient = ownGuide && endsGuide && !expandedParent
-      ? "var(--exograph-list-guide) 0.5lh, transparent 0.5lh"
-      : ownGuide && !endsGuide
-        ? "transparent 0.5lh, var(--exograph-list-guide) 0.5lh"
-        : "var(--exograph-list-guide), var(--exograph-list-guide)";
+    const above = "calc(0.5lh - var(--exograph-list-marker-clearance, 6px))";
+    const below = "calc(0.5lh + var(--exograph-list-marker-clearance, 6px))";
+    const gradient = ownGuide
+      ? `${endsGuide ? "var(--exograph-list-guide)" : "transparent"} ${above}, transparent ${above}, transparent ${below}, ${expandedParent ? "var(--exograph-list-guide)" : "transparent"} ${below}`
+      : "var(--exograph-list-guide), var(--exograph-list-guide)";
     guides.push(`linear-gradient(to bottom, ${gradient}) ${left}px 0 / 1px 100% no-repeat`);
   }
   return `${listGeometryStyleVariables()};--exograph-list-depth:${depth};padding-left:${padLeft}px;background:${guides.join(",") || "none"};`;
