@@ -78,6 +78,7 @@ test("removing the selected node clears its stale detail after refresh", async (
   try {
     await clickB(fixture.page);
     const previous = await fixture.page.evaluate(async () => (await window.exograph.notes.getGraphTopology()).sourceSnapshotId);
+    await writeFile(path.join(fixture.noteDirectory, "wiring-a.md"), "# Wiring A\n");
     await unlink(path.join(fixture.noteDirectory, "wiring-b.md"));
     await expect.poll(() => fixture.page.evaluate(async () => (await window.exograph.notes.getGraphTopology()).sourceSnapshotId)).not.toBe(previous);
     await fixture.page.getByRole("button", { name: "Refresh graph", exact: true }).click();
