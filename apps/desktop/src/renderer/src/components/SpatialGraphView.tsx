@@ -116,8 +116,11 @@ export function SpatialGraphView({
   const inspectionSequenceRef = useRef(0);
   const inspectedConceptKeyRef = useRef<string | null>(null);
   const inspectedConceptAttemptKeyRef = useRef<string | null>(null);
+  const inspectedConceptAttemptSelectionVersionRef = useRef(0);
   const consumedFocusSequenceRef = useRef(0);
   const focusAttemptSequenceRef = useRef(0);
+  const focusAttemptSelectionVersionRef = useRef(0);
+  const userSelectionVersionRef = useRef(0);
   const generationRef = useRef(0);
   const activeGenerationRef = useRef(0);
   const topologyPendingRef = useRef(false);
@@ -184,6 +187,10 @@ export function SpatialGraphView({
     inspectionSequenceRef.current += 1;
     setSelectedDetail(null);
     setDetailStatus(null);
+  }, []);
+
+  const markUserSelection = useCallback(() => {
+    userSelectionVersionRef.current += 1;
   }, []);
 
   const inspectIndex = useCallback(async (index: number) => {
@@ -439,18 +446,20 @@ export function SpatialGraphView({
     const key = inspectedConceptKey(inspectedConcept);
     if (key === inspectedConceptKeyRef.current) return;
     if (key === inspectedConceptAttemptKeyRef.current
-      && runtimeRef.current?.getScene()?.interaction.selected !== -1) return;
+      && runtimeRef.current?.getScene()?.interaction.selected !== -1
+      && userSelectionVersionRef.current !== inspectedConceptAttemptSelectionVersionRef.current) return;
     inspectedConceptAttemptKeyRef.current = key;
+    inspectedConceptAttemptSelectionVersionRef.current = userSelectionVersionRef.current;
     const sequence = ++inspectionSequenceRef.current;
     let cancelled = false;
     void resolveConcept(inspectedConcept, currentTopology.sourceSnapshotId).then(async (summary) => {
       if (cancelled || !summary || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
       runtimeRef.current?.setSelection(summary.index);
+      inspectedConceptKeyRef.current = key;
       setRouteNodeCount(0);
       const detail = await readDetail(summary.index, currentTopology.sourceSnapshotId);
       if (cancelled || sequence !== inspectionSequenceRef.current || !detail
         || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
-      inspectedConceptKeyRef.current = key;
       setSelectedDetail(detail);
       setDetailStatus(null);
     });
@@ -465,8 +474,10 @@ export function SpatialGraphView({
     if (!focusRequest || !currentTopology) return;
     if (focusRequest.sequence <= consumedFocusSequenceRef.current) return;
     if (focusRequest.sequence === focusAttemptSequenceRef.current
-      && runtimeRef.current?.getScene()?.interaction.selected !== -1) return;
+      && runtimeRef.current?.getScene()?.interaction.selected !== -1
+      && userSelectionVersionRef.current !== focusAttemptSelectionVersionRef.current) return;
     focusAttemptSequenceRef.current = focusRequest.sequence;
+    focusAttemptSelectionVersionRef.current = userSelectionVersionRef.current;
     const sequence = ++inspectionSequenceRef.current;
     let cancelled = false;
     void resolveConcept(focusRequest.concept, currentTopology.sourceSnapshotId).then(async (summary) => {
@@ -524,6 +535,7 @@ export function SpatialGraphView({
     readSummaries,
     setRouteNodeCount,
     clearSelectionDetail,
+    markUserSelection,
   });
 
   return (
