@@ -49,7 +49,7 @@ jobs:
       - name: Browser workspace smoke
         run: |
           pnpm exec playwright install chromium
-          pnpm --filter @exograph/desktop exec playwright test tests/e2e/browser-workspace.spec.ts
+          pnpm --filter @exograph/desktop exec playwright test tests/e2e/browser-workspace.spec.ts tests/e2e/list-layout.spec.ts
 
       - name: Upload Electron failure traces
         if: failure()

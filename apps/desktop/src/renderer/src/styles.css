@@ -53,6 +53,7 @@
   --sans: "IBM Plex Sans", "Helvetica Neue", sans-serif;
   --mono: "IBM Plex Mono", "SF Mono", monospace;
   --exograph-list-bullet: #98a1b2;
+  --exograph-list-guide: #98a1b238;
 }
 
 :root[data-theme="light"] {
@@ -107,6 +108,7 @@
   --warning-border: rgba(166, 113, 31, 0.20);
   --shadow: 0 24px 64px rgba(154, 119, 52, 0.12);
   --exograph-list-bullet: #626a78;
+  --exograph-list-guide: #626a7838;
 }
 
 * {
@@ -1464,9 +1466,14 @@ button svg,
   pointer-events: auto;
 }
 
+.editor-surface--live-preview .exograph-md-line--outline-parent {
+  position: relative;
+}
+
 .editor-surface--live-preview .exograph-md-outline-fold {
   position: absolute;
-  left: 2px;
+  left: -20px;
+  top: 0;
   display: inline-flex;
   align-items: center;
   width: 14px;
@@ -1477,6 +1484,7 @@ button svg,
   opacity: 1;
 }
 
+.editor-surface--live-preview .cm-line:hover .exograph-md-fold-toggle,
 .editor-surface--live-preview .exograph-md-list-prefix:hover .exograph-md-fold-toggle,
 .editor-surface--live-preview .exograph-md-fold-toggle:hover,
 .editor-surface--live-preview .exograph-md-fold-toggle:focus-visible,

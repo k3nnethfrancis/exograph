@@ -24,6 +24,8 @@ Every included Markdown file is a Note. Its filename/path gives it a primary hom
 - Add frontmatter through the property control. `title`, `date`, and `tags` are useful conventional fields, but Exograph preserves arbitrary properties.
 - Type `/today` or `/tomorrow`, then press Enter, to create an ordinary date wikilink. Opening it creates or opens that daily Note through the usual link path.
 
+Hover over a bullet or task with nested items to reveal its fold arrow. Each nesting level folds independently, and vertical guides show the items inside that section. Headings (`#` through `######`) also fold their sections up to the next heading of the same or higher level; hover over the heading to reveal its arrow. Folding changes the view without changing the Markdown.
+
 Double-click a folder to open its Overview. An `index.md` can describe that folder, but viewing never creates one. Create it only when you want durable folder metadata or guidance; Exograph hides it as a duplicate Explorer row, not from the filesystem.
 
 ## Search
