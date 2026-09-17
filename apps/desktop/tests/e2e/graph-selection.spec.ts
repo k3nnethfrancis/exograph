@@ -67,6 +67,7 @@ test("a mouse-selected graph receives keyboard navigation without programmatic f
     expect(after.pitch).toBe(camera.pitch);
     expect(after.distance).toBe(camera.distance);
     await fixture.page.keyboard.press("]");
+    await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveText("Wiring A");
     await fixture.page.keyboard.press("[");
     await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveText("Wiring A");
     const centeredA = await pointForLabel(canvas, "Wiring A");
