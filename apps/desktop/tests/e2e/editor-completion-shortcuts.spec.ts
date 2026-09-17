@@ -159,35 +159,31 @@ test("custom Save remains active in the focused editor", async () => {
 
     const editor = page.locator(".editor-surface .cm-content").first();
     await editor.click();
-    // Freeze renderer timers before editing so the 2–5 second autosave cannot
-    // satisfy this regression while the configured shortcut is being tested.
-    await page.clock.install({ time: new Date("2026-09-16T12:00:00Z") });
-    await page.clock.pauseAt(new Date("2026-09-16T12:00:01Z"));
+    // Keep the autosave idle/max age at zero without stopping editor frames.
+    // Only an explicit Save can produce the IPC calls asserted below.
+    await page.evaluate(() => {
+      const now = performance.now();
+      performance.now = () => now;
+    });
     await page.keyboard.type("custom save");
-    await page.clock.runFor(100);
     await expect(page.getByTestId("editor-save-status")).toHaveText("Unsaved");
     await electronApp.evaluate(() => { (globalThis as unknown as { wiringSaveGate: { armed: boolean } }).wiringSaveGate.armed = true; });
     await page.keyboard.press("Meta+Alt+k");
-    await page.clock.runFor(100);
     await expect.poll(() => electronApp.evaluate(() => (globalThis as unknown as { wiringSaveGate: { held: boolean; armedCalls: number } }).wiringSaveGate)).toMatchObject({ held: true, armedCalls: 1 });
     await electronApp.evaluate(() => (globalThis as unknown as { wiringSaveGate: { release: () => void } }).wiringSaveGate.release());
     await expect(page.getByTestId("editor-save-status")).toHaveText("Saved");
 
     await page.keyboard.press("Enter");
     await page.keyboard.type("@claude");
-    await page.clock.runFor(100);
     await expect(page.getByTestId("agent-suggestions")).toBeVisible();
     await page.keyboard.press("Enter");
-    await page.clock.runFor(100);
     // The composer affordance is a zero-size CodeMirror widget; its send
     // control is positioned outside the widget and may be hidden by the
     // current editor presentation. Presence proves acceptance, while the
     // saved body below proves the composer received and flushed its draft.
     await expect(page.getByTestId("inline-agent-composer")).toHaveCount(1);
     await page.keyboard.type("draft text");
-    await page.clock.runFor(100);
     await page.keyboard.press("Meta+Alt+k");
-    await page.clock.runFor(100);
     await expect.poll(() => electronApp.evaluate(() => (globalThis as unknown as { wiringSaveGate: { bodies: string[] } }).wiringSaveGate.bodies))
       .toContainEqual(expect.stringContaining("@claude draft text"));
     await expect.poll(() => page.evaluate(async () => (await window.exograph.workspace.getSettings()).settings.shortcutBindings))
