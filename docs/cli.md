@@ -158,9 +158,11 @@ Workspace. If no root contains the cwd, Exograph may use the only configured
 Workspace. If there is no unique answer, `workspace_status` reports the
 condition and retrieval refuses rather than guessing.
 
-When the running desktop app belongs to that same resolved Workspace, the MCP
-server reuses its configured retrieval. If the app is unavailable, stale, or
-belongs to a different Workspace, it uses bounded filesystem retrieval.
+For every MCP request, the server re-resolves the caller scope and rediscovers
+the desktop app. When the running app belongs to that same resolved Workspace,
+the request uses its configured retrieval. If the app is unavailable, stale, or
+belongs to a different Workspace, that request uses bounded filesystem
+retrieval, so starting or restarting Exograph is picked up by the next request.
 
 Exograph does not install or maintain provider instruction files or Skills.
 Tool descriptions establish the local search-then-read rule; provider-specific
