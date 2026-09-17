@@ -185,12 +185,8 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
       const next = graphDirectionalNeighbor(scene.topology, scene.projection, scene.interaction.selected, event.key);
       if (next >= 0 && next !== scene.interaction.selected) {
         options.markUserSelection();
-        runtime.cancelMotion();
         void options.inspectIndex(next);
-        // Center the destination while preserving screen directions and zoom.
-        const offset = next * 3;
-        runtime.setCamera({ ...scene.camera, target: [scene.layout.positions[offset],
-          scene.layout.positions[offset + 1], scene.layout.positions[offset + 2]] }, "keyboard-traverse");
+        runtime.centerOnNode(next, prefersReducedMotion());
       }
       return;
     }

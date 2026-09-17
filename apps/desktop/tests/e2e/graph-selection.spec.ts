@@ -48,6 +48,7 @@ async function pointForLabel(canvas: ReturnType<Page["locator"]>, label: string)
 test("a mouse-selected graph receives keyboard navigation without programmatic focus", async () => {
   const fixture = await launchReviewGraph();
   try {
+    await fixture.page.emulateMedia({ reducedMotion: "no-preference" });
     const canvas = await clickB(fixture.page);
     await expect(canvas).toBeFocused();
     const a = await pointForLabel(canvas, "Wiring A");
@@ -55,6 +56,16 @@ test("a mouse-selected graph receives keyboard navigation without programmatic f
     const key = Math.abs(a.x - b.x) >= Math.abs(a.y - b.y)
       ? (a.x > b.x ? "ArrowRight" : "ArrowLeft") : (a.y > b.y ? "ArrowDown" : "ArrowUp");
     const camera = await canvas.evaluate((element) => (element as any).__exographGraphSnapshot().camera);
+    await canvas.evaluate((element) => {
+      const graph = element as any;
+      graph.__panSamples = [];
+      graph.__recordPan = true;
+      const sample = () => {
+        graph.__panSamples.push(graph.__exographGraphSnapshot().camera.target);
+        if (graph.__recordPan) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
     await fixture.page.keyboard.press(key);
     await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveText("Wiring A");
     await expect.poll(async () => {
@@ -62,7 +73,19 @@ test("a mouse-selected graph receives keyboard navigation without programmatic f
       const box = await canvas.boundingBox();
       return Math.hypot(point.x - box!.width / 2, point.y - box!.height / 2);
     }).toBeLessThan(2);
+    await expect.poll(() => canvas.evaluate((element) => (element as any).__exographGraphSnapshot().moving)).toBe(false);
     const after = await canvas.evaluate((element) => (element as any).__exographGraphSnapshot().camera);
+    const samples: number[][] = await canvas.evaluate((element) => {
+      (element as any).__recordPan = false;
+      return (element as any).__panSamples;
+    });
+    const travel = Math.hypot(...after.target.map((v: number, i: number) => v - camera.target[i]));
+    expect(travel).toBeGreaterThan(0);
+    expect(samples.filter((point) => {
+      const fromStart = Math.hypot(...point.map((v, i) => v - camera.target[i]));
+      const toEnd = Math.hypot(...point.map((v, i) => v - after.target[i]));
+      return fromStart > travel * 0.05 && toEnd > travel * 0.05;
+    }).length).toBeGreaterThanOrEqual(2);
     expect(after.yaw).toBe(camera.yaw);
     expect(after.pitch).toBe(camera.pitch);
     expect(after.distance).toBe(camera.distance);

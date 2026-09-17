@@ -273,6 +273,7 @@ interface CameraTransition {
   from: GraphCamera;
   to: GraphCamera;
   startedAt: number | null;
+  duration: number;
 }
 
 /**
@@ -471,14 +472,27 @@ export class SpatialGraphRuntime {
 
   focus(index: number, reducedMotion: boolean): void {
     if (!this.scene || index < 0 || index >= this.scene.topology.nodes.seeds.length) return;
+    this.animateCamera(focusGraphCamera(this.scene.layout.positions, index, this.scene.projection.viewport),
+      reducedMotion, CAMERA_TRANSITION_MILLISECONDS, "focus");
+  }
+
+  centerOnNode(index: number, reducedMotion: boolean): void {
+    if (!this.scene || index < 0 || index >= this.scene.topology.nodes.seeds.length) return;
+    const offset = index * 3;
+    const target: GraphCamera = { ...this.scene.camera, target: [this.scene.layout.positions[offset],
+      this.scene.layout.positions[offset + 1], this.scene.layout.positions[offset + 2]] };
+    this.animateCamera(target, reducedMotion, 240, "keyboard-traverse");
+  }
+
+  private animateCamera(target: GraphCamera, reducedMotion: boolean, duration: number, reason: string): void {
+    if (!this.scene) return;
     this.cameraFramed = false;
-    const target = focusGraphCamera(this.scene.layout.positions, index, this.scene.projection.viewport);
     if (reducedMotion) {
-      this.setCamera(target, "focus");
+      this.setCamera(target, reason);
       return;
     }
-    this.transition = { from: cloneCamera(this.scene.camera), to: target, startedAt: null };
-    this.scheduler.startMotion("focus");
+    this.transition = { from: cloneCamera(this.scene.camera), to: target, startedAt: null, duration };
+    this.scheduler.startMotion(reason);
   }
 
   cancelMotion(): void {
@@ -582,13 +596,13 @@ export class SpatialGraphRuntime {
     if (!this.transition || !this.scene) return false;
     if (this.transition.startedAt === null) this.transition.startedAt = time;
     const elapsed = Math.max(0, time - this.transition.startedAt);
-    if (elapsed >= CAMERA_TRANSITION_MILLISECONDS) {
+    if (elapsed >= this.transition.duration) {
       this.scene.camera = cloneCamera(this.transition.to);
       this.transition = null;
       this.scene.projection = projectGraphScene(this.scene.layout.positions, this.scene.camera, this.scene.projection.viewport);
       return false;
     }
-    const normalized = elapsed / CAMERA_TRANSITION_MILLISECONDS;
+    const normalized = elapsed / this.transition.duration;
     const response = 1 - (1 + 7 * normalized) * Math.exp(-7 * normalized);
     this.scene.camera = interpolateCamera(this.transition.from, this.transition.to, response);
     this.scene.projection = projectGraphScene(this.scene.layout.positions, this.scene.camera, this.scene.projection.viewport);
