@@ -18,7 +18,6 @@ import {
   SpatialGraphPointerSession,
   SpatialGraphRuntime,
   initialGraphSummaryIndexes,
-  pruneGraphSnapshotCache,
   shouldRefreshGraphForWorkspaceChange,
   shouldRevealGraphScene,
   spatialGraphDollyDragScale,
@@ -543,14 +542,6 @@ describe("bounded graph labels", () => {
     expect(cssColorToRgba("rgba(108, 168, 216, 0.5)")).toBe(0x6ca8d880);
   });
 
-  it("bounds metadata caches to the accepted snapshot across repeated refreshes", () => {
-    const cache = new Map<string, number>();
-    for (let snapshot = 0; snapshot < 100; snapshot += 1) {
-      for (let index = 0; index < 64; index += 1) cache.set(`snapshot-${snapshot}:${index}`, index);
-      expect(pruneGraphSnapshotCache(cache, `snapshot-${snapshot}`)).toBe(64);
-    }
-    expect(cache.size).toBe(64);
-  });
 });
 
 describe("graph refresh and wheel policy", () => {

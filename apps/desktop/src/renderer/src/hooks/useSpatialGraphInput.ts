@@ -35,6 +35,7 @@ interface SpatialGraphInputOptions {
   restoreSelection: (filePath: string) => Promise<void>;
   readSummaries: (indexes: readonly number[], sourceSnapshotId: string) => Promise<void>;
   setRouteNodeCount: (count: number) => void;
+  clearSelectionDetail: () => void;
 }
 
 /** Adapts browser input into renderer-neutral graph navigation commands. */
@@ -59,6 +60,7 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
 
   function onPointerDown(event: PointerEvent<HTMLCanvasElement>) {
     event.preventDefault();
+    event.currentTarget.focus();
     if (pointerSessionRef.current.activePointers === 0) options.runtimeRef.current?.cancelMotion();
     pointerSessionRef.current.begin(pointerSample(event), spatialGraphPointerAction({
       button: event.button,
@@ -160,6 +162,7 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
       } else {
         runtime.setSelection(-1);
         options.setRouteNodeCount(0);
+        options.clearSelectionDetail();
       }
       return;
     }

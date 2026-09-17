@@ -114,6 +114,10 @@ export function SpatialGraphView({
   const metadataStoreRef = useRef<GraphMetadataStore | null>(null);
   const loadSequenceRef = useRef(0);
   const inspectionSequenceRef = useRef(0);
+  const inspectedConceptKeyRef = useRef<string | null>(null);
+  const inspectedConceptAttemptKeyRef = useRef<string | null>(null);
+  const consumedFocusSequenceRef = useRef(0);
+  const focusAttemptSequenceRef = useRef(0);
   const generationRef = useRef(0);
   const activeGenerationRef = useRef(0);
   const topologyPendingRef = useRef(false);
@@ -176,12 +180,20 @@ export function SpatialGraphView({
     return metadataStoreRef.current?.resolve(reference, sourceSnapshotId) ?? null;
   }, []);
 
+  const clearSelectionDetail = useCallback(() => {
+    inspectionSequenceRef.current += 1;
+    setSelectedDetail(null);
+    setDetailStatus(null);
+  }, []);
+
   const inspectIndex = useCallback(async (index: number) => {
     const currentTopology = topologyRef.current;
     if (!currentTopology || index < 0 || index >= currentTopology.nodeCount) return;
     const sequence = ++inspectionSequenceRef.current;
     runtimeRef.current?.setSelection(index);
     setRouteNodeCount(0);
+    setSelectedDetail(null);
+    setDetailStatus(null);
     if (!metadataStoreRef.current?.hasSummary(index, currentTopology.sourceSnapshotId)) {
       void readSummaries([index], currentTopology.sourceSnapshotId);
     }
@@ -362,10 +374,8 @@ export function SpatialGraphView({
     void api.notes.getGraphTopology().then((next) => {
       if (request !== loadSequenceRef.current || runtimeRef.current !== runtime) return;
       const previous = topologyRef.current;
-      if (previous?.sourceSnapshotId !== next.sourceSnapshotId) {
-        setSelectedDetail(null);
-        setDetailStatus(null);
-      }
+      const snapshotChanged = previous?.sourceSnapshotId !== next.sourceSnapshotId;
+      if (snapshotChanged) clearSelectionDetail();
       metadataStoreRef.current?.prune(next.sourceSnapshotId);
       topologyRef.current = next;
       setTopology(next);
@@ -377,6 +387,7 @@ export function SpatialGraphView({
       const cachedSummaries = metadataStoreRef.current?.cachedSummaries(next.sourceSnapshotId) ?? [];
       runtime.replaceSummaries(new Map(cachedSummaries.map((summary) => [summary.index, summary])));
       void readSummaries(initialGraphSummaryIndexes(next, scene.interaction.selected), next.sourceSnapshotId);
+      if (snapshotChanged && scene.interaction.selected >= 0) void inspectIndex(scene.interaction.selected);
       const sameLayoutEpoch = previous?.topologyHash === next.topologyHash && previous.layoutEpochId === next.layoutEpochId;
       const needsLayout = !sameLayoutEpoch || !scene.layout.settled;
       const workerAvailable = workerRef.current !== null;
@@ -415,11 +426,21 @@ export function SpatialGraphView({
       updatePendingWork();
     });
     return () => { loadSequenceRef.current += 1; };
-  }, [readSummaries, refreshKey, reloadNonce, runtimeVersion, updatePendingWork]);
+  }, [clearSelectionDetail, inspectIndex, readSummaries, refreshKey, reloadNonce, runtimeVersion, updatePendingWork]);
 
   useEffect(() => {
     const currentTopology = topologyRef.current;
-    if (!inspectedConcept || !currentTopology) return;
+    if (!inspectedConcept) {
+      inspectedConceptKeyRef.current = null;
+      inspectedConceptAttemptKeyRef.current = null;
+      return;
+    }
+    if (!currentTopology) return;
+    const key = inspectedConceptKey(inspectedConcept);
+    if (key === inspectedConceptKeyRef.current) return;
+    if (key === inspectedConceptAttemptKeyRef.current
+      && runtimeRef.current?.getScene()?.interaction.selected !== -1) return;
+    inspectedConceptAttemptKeyRef.current = key;
     const sequence = ++inspectionSequenceRef.current;
     let cancelled = false;
     void resolveConcept(inspectedConcept, currentTopology.sourceSnapshotId).then(async (summary) => {
@@ -429,6 +450,7 @@ export function SpatialGraphView({
       const detail = await readDetail(summary.index, currentTopology.sourceSnapshotId);
       if (cancelled || sequence !== inspectionSequenceRef.current || !detail
         || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
+      inspectedConceptKeyRef.current = key;
       setSelectedDetail(detail);
       setDetailStatus(null);
     });
@@ -441,15 +463,29 @@ export function SpatialGraphView({
   useEffect(() => {
     const currentTopology = topologyRef.current;
     if (!focusRequest || !currentTopology) return;
+    if (focusRequest.sequence <= consumedFocusSequenceRef.current) return;
+    if (focusRequest.sequence === focusAttemptSequenceRef.current
+      && runtimeRef.current?.getScene()?.interaction.selected !== -1) return;
+    focusAttemptSequenceRef.current = focusRequest.sequence;
+    const sequence = ++inspectionSequenceRef.current;
     let cancelled = false;
-    void resolveConcept(focusRequest.concept, currentTopology.sourceSnapshotId).then((summary) => {
-      if (cancelled || !summary || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
+    void resolveConcept(focusRequest.concept, currentTopology.sourceSnapshotId).then(async (summary) => {
+      if (cancelled || sequence !== inspectionSequenceRef.current || !summary
+        || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
       runtimeRef.current?.setSelection(summary.index);
       setRouteNodeCount(0);
+      setSelectedDetail(null);
+      setDetailStatus(null);
       runtimeRef.current?.focus(summary.index, prefersReducedMotion());
+      consumedFocusSequenceRef.current = focusRequest.sequence;
+      const detail = await readDetail(summary.index, currentTopology.sourceSnapshotId);
+      if (cancelled || sequence !== inspectionSequenceRef.current || !detail
+        || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
+      setSelectedDetail(detail);
+      setDetailStatus(null);
     });
     return () => { cancelled = true; };
-  }, [focusRequest?.sequence, resolveConcept, topology?.sourceSnapshotId]);
+  }, [focusRequest?.sequence, readDetail, resolveConcept, topology?.sourceSnapshotId]);
 
   async function openIndex(index: number) {
     const currentTopology = topologyRef.current;
@@ -487,6 +523,7 @@ export function SpatialGraphView({
     restoreSelection: restoreGraphSelection,
     readSummaries,
     setRouteNodeCount,
+    clearSelectionDetail,
   });
 
   return (
@@ -550,6 +587,10 @@ function lookupReference(concept: InspectedConcept): GraphConceptLookupReference
   if (concept.conceptId) return { conceptId: concept.conceptId };
   if (concept.filePath) return { filePath: concept.filePath };
   return null;
+}
+
+function inspectedConceptKey(concept: InspectedConcept): string {
+  return concept.conceptId ? `id:${concept.conceptId}` : `path:${concept.filePath ?? ""}`;
 }
 
 function prefersReducedMotion(): boolean {

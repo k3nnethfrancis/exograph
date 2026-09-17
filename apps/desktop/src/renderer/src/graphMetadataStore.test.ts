@@ -60,4 +60,59 @@ describe("GraphMetadataStore", () => {
     expect(events.stale).toEqual(["one"]);
     expect(events.pending).toEqual([1, 0]);
   });
+
+  it("bounds all metadata caches to the accepted snapshot across repeated refreshes", async () => {
+    let current = "snapshot-0";
+    const detail = (index: number, sourceSnapshotId: string) => ({
+      concept: { id: `${sourceSnapshotId}-${index}`, label: `Note ${index}`, conceptTypes: [], resolution: "resolved" as const, tags: [] },
+      properties: [], relations: [], findings: [], format: {} as never, ontology: {} as never,
+      omitted: { properties: 0, relations: 0, findings: 0, evidence: 0 },
+    });
+    const metadata = new GraphMetadataStore({
+      port: {
+        getGraphConceptSummaries: vi.fn(async (indexes: readonly number[], sourceSnapshotId: string) => ({
+          status: "ok" as const,
+          sourceSnapshotId,
+          summaries: indexes.map((index) => ({ index, label: `Note ${index}` })),
+          payloadBytes: 1,
+        })),
+        getGraphConceptDetailByIndex: vi.fn(async (index: number, sourceSnapshotId: string) => ({
+          status: "ok" as const,
+          sourceSnapshotId,
+          index,
+          detail: detail(index, sourceSnapshotId),
+          payloadBytes: 1,
+        })),
+        graphConceptLookup: vi.fn(async (reference: { filePath: string }, sourceSnapshotId: string) => ({
+          status: "ok" as const,
+          sourceSnapshotId,
+          summary: { index: 0, label: "Note 0", ...("filePath" in reference ? { filePath: reference.filePath } : {}) },
+          payloadBytes: 1,
+        })),
+      },
+      currentSnapshot: () => ({ sourceSnapshotId: current, nodeCount: 4 }),
+      onPendingChange: () => undefined,
+      onStale: () => undefined,
+      onStatus: () => undefined,
+      onSummaries: () => undefined,
+    });
+    for (let snapshot = 0; snapshot < 100; snapshot += 1) {
+      current = `snapshot-${snapshot}`;
+      await metadata.readSummaries([0], current);
+      await metadata.readDetail(0, current);
+      await metadata.resolve({ filePath: "/notes/one.md" }, current);
+      metadata.prune(current);
+      expect(metadata.cacheEntryCount).toBe(3);
+    }
+    expect(metadata.cacheEntryCount).toBe(3);
+  });
+
+  it("reports current snapshot source failures without retaining a detail", async () => {
+    const { metadata, events } = store({
+      getGraphConceptDetailByIndex: vi.fn(async () => { throw new Error("graph source unavailable"); }),
+    });
+    await expect(metadata.readDetail(0, "one")).resolves.toBeNull();
+    expect(events.status).toEqual(["graph source unavailable"]);
+    expect(metadata.cacheEntryCount).toBe(0);
+  });
 });
