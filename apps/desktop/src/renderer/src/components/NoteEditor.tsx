@@ -486,7 +486,7 @@ export function NoteEditor(props: NoteEditorProps) {
   );
   const handleEditorChange = useMemo(
     () =>
-      (value: string, update: ViewUpdate) => {
+      (value: string) => {
         // The open-document model is canonical save input. Commit every body
         // revision in input order; deferring independent snapshots can let an
         // older transition render after a newer autosave has completed.
