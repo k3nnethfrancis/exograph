@@ -114,24 +114,31 @@ test("a late detail response cannot replace a newer mouse selection", async () =
       if (!node) throw new Error("Missing Wiring B fixture node");
       return node.index;
     });
-    await fixture.page.evaluate((heldIndex) => {
-      const notes = window.exograph.notes;
-      const original = notes.getGraphConceptDetailByIndex;
-      (window as Window & { __releaseHeldGraphDetail?: () => void }).__releaseHeldGraphDetail = undefined;
-      notes.getGraphConceptDetailByIndex = (index, sourceSnapshotId) => {
-        if (index !== heldIndex) return original(index, sourceSnapshotId);
-        return new Promise((resolve) => {
-          (window as Window & { __releaseHeldGraphDetail?: () => void }).__releaseHeldGraphDetail = () => {
-            void original(index, sourceSnapshotId).then(resolve);
-          };
-        });
-      };
+    await fixture.electronApp.evaluate(({ ipcMain }, heldIndex) => {
+      const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, (...args: any[]) => Promise<unknown>> })._invokeHandlers;
+      const original = handlers.get("notes:get-graph-concept-detail-by-index");
+      if (!original) throw new Error("Missing graph detail handler");
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const state = { held: false, completed: false, release };
+      (globalThis as unknown as { graphSelectionGate: typeof state }).graphSelectionGate = state;
+      ipcMain.removeHandler("notes:get-graph-concept-detail-by-index");
+      ipcMain.handle("notes:get-graph-concept-detail-by-index", async (event, index, sourceSnapshotId) => {
+        const result = await original(event, index, sourceSnapshotId);
+        if (index === heldIndex && !state.held) {
+          state.held = true;
+          await gate;
+          state.completed = true;
+        }
+        return result;
+      });
     }, bIndex);
     await canvas.click({ position: pointB });
-    await expect.poll(() => fixture.page.evaluate(() => Boolean((window as Window & { __releaseHeldGraphDetail?: unknown }).__releaseHeldGraphDetail))).toBe(true);
+    await expect.poll(() => fixture.electronApp.evaluate(() => (globalThis as unknown as { graphSelectionGate: { held: boolean } }).graphSelectionGate.held)).toBe(true);
     await canvas.click({ position: pointA });
     await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveText("Wiring A");
-    await fixture.page.evaluate(() => (window as Window & { __releaseHeldGraphDetail?: () => void }).__releaseHeldGraphDetail?.());
+    await fixture.electronApp.evaluate(() => (globalThis as unknown as { graphSelectionGate: { release: () => void } }).graphSelectionGate.release());
+    await expect.poll(() => fixture.electronApp.evaluate(() => (globalThis as unknown as { graphSelectionGate: { completed: boolean } }).graphSelectionGate.completed)).toBe(true);
     await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveText("Wiring A");
   } finally {
     await fixture.cleanup();
