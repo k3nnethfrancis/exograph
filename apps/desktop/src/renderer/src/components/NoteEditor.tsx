@@ -10,7 +10,7 @@ import { lintGutter, lintKeymap } from "@codemirror/lint";
 import { EditorSelection, Prec } from "@codemirror/state";
 import { keymap, lineNumbers, EditorView, type ViewUpdate } from "@codemirror/view";
 import { Clock3, Code2, Plus, Save, SlidersHorizontal } from "lucide-react";
-import type { AgentCommand, NoteDocument, WorkspaceGraphContext } from "@exograph/core";
+import type { AgentCommand, NoteDocument, WorkspaceGraphContext, WorkspaceShortcutBinding } from "@exograph/core";
 import { findDocumentAgentEnvelopes } from "@exograph/core/document-agent-protocol";
 import type { InvocationFileReviewPayload } from "../../../shared/api";
 import { exographEditorTheme, exographSyntaxHighlighting } from "../theme/codemirror";
@@ -27,6 +27,7 @@ import {
 } from "./markdownLivePreview";
 import { inlineAgentComposerExtension, isPersistedInvocationPosition, openInlineAgentComposer, type InlineAgentDraft } from "./inlineAgentComposer";
 import { invocationInlineReviewExtension, invocationReviewOriginal } from "../invocationInlineReview";
+import { codeMirrorShortcutKey } from "../shellHelpModel";
 import type { EditorFaultContext } from "./editorFaultDiagnostics";
 import type { AgentComposeRequest } from "./EditorPane";
 import { InvocationReviewControls, type InvocationReviewPosition, type InvocationReviewQueueProjection } from "./invocation";
@@ -68,6 +69,7 @@ const EDITOR_BASIC_SETUP = {
 interface AgentSuggestionState {
   from: number;
   to: number;
+  query: string;
   left: number;
   top: number;
   items: AgentCommand[];
@@ -93,6 +95,7 @@ interface NoteEditorProps {
   onUpdateFrontmatter: (key: string, value: unknown) => void;
   onBodyChange: (body: string) => void;
   onSave: () => void | Promise<void>;
+  saveShortcut?: WorkspaceShortcutBinding;
   onSaveConflictCopy?: () => void;
   onDiscardSaveConflict?: () => Promise<void>;
   onRecoverDeleted: () => void;
@@ -146,6 +149,7 @@ export function NoteEditor(props: NoteEditorProps) {
     onUpdateFrontmatter,
     onBodyChange,
     onSave,
+    saveShortcut,
     onSaveConflictCopy,
     onDiscardSaveConflict,
     onRecoverDeleted,
@@ -214,11 +218,17 @@ export function NoteEditor(props: NoteEditorProps) {
   useEffect(() => {
     setRawMarkdownMode(false);
     setChromeVisible(false);
+    wikilinkSuggestionRequestRef.current += 1;
     setWikilinkSuggestions(null);
     setAgentSuggestions(null);
     setWikilinkPreview(null);
     suppressedWikilinkCompletionRef.current = null;
   }, [document?.filePath]);
+
+  useEffect(() => {
+    wikilinkSuggestionRequestRef.current += 1;
+    setWikilinkSuggestions(null);
+  }, [rawMarkdownMode]);
 
   useEffect(() => {
     if (!agentComposeRequest || !document || document.kind !== "markdown" || document.readOnly) return;
@@ -243,6 +253,9 @@ export function NoteEditor(props: NoteEditorProps) {
   const documentPath = document?.filePath ?? "";
   if (renderedDocumentPathRef.current !== documentPath) {
     renderedDocumentPathRef.current = documentPath;
+    // Invalidate before effects run so a completion from the previous Note
+    // cannot publish while this render is waiting for its new CodeMirror view.
+    wikilinkSuggestionRequestRef.current += 1;
     pendingDocumentSyncRef.current = document ? { filePath: document.filePath, body: document.body } : null;
   }
   const useMarkdownEditing = shouldUseMarkdownRenderer(document);
@@ -376,6 +389,7 @@ export function NoteEditor(props: NoteEditorProps) {
   const maybeUpdateWikilinkSuggestions = useMemo(
     () =>
       (update: ViewUpdate) => {
+        const requestId = ++wikilinkSuggestionRequestRef.current;
         if (!useMarkdownEditing || rawMarkdownMode) {
           setWikilinkSuggestions(null);
           return;
@@ -399,7 +413,6 @@ export function NoteEditor(props: NoteEditorProps) {
         }
         suppressedWikilinkCompletionRef.current = null;
 
-        const requestId = ++wikilinkSuggestionRequestRef.current;
         const cursorCoords = update.view.coordsAtPos(range.head);
         const surface = update.view.dom.closest<HTMLElement>(".editor-surface");
         const surfaceRect = surface?.getBoundingClientRect();
@@ -411,7 +424,12 @@ export function NoteEditor(props: NoteEditorProps) {
           }
           const currentRange = update.view.state.selection.main;
           const currentContext = currentRange.empty ? getWikilinkCompletionContext(update.view.state, currentRange.head) : null;
-          if (!currentContext || currentContext.query !== linkContext.query) {
+          if (
+            !currentContext
+            || currentContext.from !== linkContext.from
+            || currentContext.to !== linkContext.to
+            || currentContext.query !== linkContext.query
+          ) {
             setWikilinkSuggestions(null);
             return;
           }
@@ -473,9 +491,16 @@ export function NoteEditor(props: NoteEditorProps) {
         // revision in input order; deferring independent snapshots can let an
         // older transition render after a newer autosave has completed.
         bodyChangeRef.current(value);
+      },
+    [],
+  );
+  const completionTracker = useMemo(
+    () => EditorView.updateListener.of((update) => {
+      if (update.docChanged || update.selectionSet) {
         maybeUpdateWikilinkSuggestions(update);
         maybeUpdateAgentSuggestions(update);
-      },
+      }
+    }),
     [maybeUpdateAgentSuggestions, maybeUpdateWikilinkSuggestions],
   );
   const acceptAgentSuggestion = useMemo(
@@ -484,6 +509,17 @@ export function NoteEditor(props: NoteEditorProps) {
         const view = codeMirrorRef.current?.view;
         const active = agentSuggestions;
         if (!view || !active) return;
+        const currentRange = view.state.selection.main;
+        const currentContext = currentRange.empty ? getAgentCompletionContext(view.state.doc, currentRange.head) : null;
+        if (
+          !currentContext
+          || currentContext.from !== active.from
+          || currentContext.to !== active.to
+          || currentContext.query !== active.query
+        ) {
+          setAgentSuggestions(null);
+          return;
+        }
         openInlineAgentComposer(view, { from: active.from, to: active.to, handle: command.handle });
         setInlineComposerActive(true);
         setInlineComposerHandle(command.handle);
@@ -497,6 +533,17 @@ export function NoteEditor(props: NoteEditorProps) {
         const view = codeMirrorRef.current?.view;
         const active = wikilinkSuggestions;
         if (!view || !active) {
+          return;
+        }
+        const currentRange = view.state.selection.main;
+        const currentContext = currentRange.empty ? getWikilinkCompletionContext(view.state, currentRange.head) : null;
+        if (
+          !currentContext
+          || currentContext.from !== active.from
+          || currentContext.to !== active.to
+          || currentContext.query !== active.query
+        ) {
+          setWikilinkSuggestions(null);
           return;
         }
         const edit = wikilinkSuggestionEdit(active, suggestion);
@@ -614,7 +661,7 @@ export function NoteEditor(props: NoteEditorProps) {
     () =>
       keymap.of([
         {
-          key: "Mod-s",
+          key: codeMirrorShortcutKey(saveShortcut ?? { code: "KeyS" }),
           run: (view) => {
             if (inlineComposerActive) flushSync(() => bodyChangeRef.current(view.state.doc.toString()));
             saveRef.current();
@@ -652,7 +699,7 @@ export function NoteEditor(props: NoteEditorProps) {
         indentWithTab,
         ...lintKeymap,
       ]),
-    [inlineComposerActive],
+    [inlineComposerActive, saveShortcut],
   );
 
   const markdownPreviewExtensions = useMemo(
@@ -705,6 +752,7 @@ export function NoteEditor(props: NoteEditorProps) {
           markdownFormattingKeymap,
           saveKeymap,
           selectionTracker,
+          completionTracker,
           agentComposer,
           ...(!rawMarkdownMode ? markdownPreviewExtensions : []),
           ...invocationReviewExtensions,
@@ -718,13 +766,14 @@ export function NoteEditor(props: NoteEditorProps) {
           lintGutter(),
           saveKeymap,
           selectionTracker,
+          completionTracker,
           agentComposer,
           ...(codeLanguage?.extensions ?? []),
           ...invocationReviewExtensions,
           cmTheme,
           syntaxTheme,
         ],
-    [agentComposer, cmTheme, codeLanguage?.extensions, invocationReviewExtensions, markdownFormattingKeymap, markdownPreviewExtensions, markdownSpellcheck, rawMarkdownMode, saveKeymap, selectionTracker, syntaxTheme, useMarkdownEditing],
+    [agentComposer, cmTheme, codeLanguage?.extensions, completionTracker, invocationReviewExtensions, markdownFormattingKeymap, markdownPreviewExtensions, markdownSpellcheck, rawMarkdownMode, saveKeymap, selectionTracker, syntaxTheme, useMarkdownEditing],
   );
 
   useLayoutEffect(() => {
