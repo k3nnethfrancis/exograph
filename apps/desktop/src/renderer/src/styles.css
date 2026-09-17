@@ -3151,51 +3151,6 @@ select.dialog-card__input {
   color: var(--muted);
 }
 
-.help-tooltip {
-  position: relative;
-  display: inline-grid;
-  place-items: center;
-  color: var(--muted);
-  cursor: default;
-  vertical-align: middle;
-}
-
-.help-tooltip:hover,
-.help-tooltip:focus-visible {
-  color: var(--text);
-}
-
-.help-tooltip::after {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  z-index: 80;
-  width: 280px;
-  max-width: min(280px, calc(100vw - 48px));
-  padding: 9px 10px;
-  border: 1px solid var(--surface-border-strong);
-  border-radius: 9px;
-  background: var(--panel-strong);
-  color: var(--text);
-  box-shadow: var(--shadow);
-  content: attr(data-tooltip);
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0;
-  line-height: 1.4;
-  opacity: 0;
-  pointer-events: none;
-  text-transform: none;
-  transform: translateX(-50%) translateY(2px);
-  transition: opacity 120ms ease, transform 120ms ease;
-}
-
-.help-tooltip:hover::after,
-.help-tooltip:focus-visible::after {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
-
 .path-list {
   display: grid;
   gap: 7px;
