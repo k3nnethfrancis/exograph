@@ -3,6 +3,7 @@ import type { GraphTopology } from "@exograph/core";
 
 import {
   graphEscapeDecision,
+  graphDirectionalNeighbor,
   graphNodeClickDecision,
   graphNodeDoubleClickIndex,
 } from "../graphInteraction";
@@ -179,17 +180,21 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
       if (scene.interaction.selected >= 0) void options.openIndex(scene.interaction.selected);
       return;
     }
-    if (event.key === "[" || event.key === "]") {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
       event.preventDefault();
-      const nodeCount = options.topologyRef.current?.nodeCount ?? 0;
-      if (nodeCount === 0) return;
-      const direction = event.key === "]" ? 1 : -1;
-      const selected = scene.interaction.selected;
-      options.markUserSelection();
-      void options.inspectIndex(selected < 0 ? (direction > 0 ? 0 : nodeCount - 1) : (selected + direction + nodeCount) % nodeCount);
+      const next = graphDirectionalNeighbor(scene.topology, scene.projection, scene.interaction.selected, event.key);
+      if (next >= 0 && next !== scene.interaction.selected) {
+        options.markUserSelection();
+        runtime.cancelMotion();
+        void options.inspectIndex(next);
+        // Center the destination while preserving screen directions and zoom.
+        const offset = next * 3;
+        runtime.setCamera({ ...scene.camera, target: [scene.layout.positions[offset],
+          scene.layout.positions[offset + 1], scene.layout.positions[offset + 2]] }, "keyboard-traverse");
+      }
       return;
     }
-    const intent = graphKeyboardIntent(scene.camera, event.key, scene.projection.viewport, event.shiftKey);
+    const intent = graphKeyboardIntent(scene.camera, event.key, scene.projection.viewport);
     if (intent.kind !== "none") event.preventDefault();
     if (intent.kind === "camera") runtime.setCamera(intent.camera, "keyboard");
     if (intent.kind === "frame") runtime.frameAll();
