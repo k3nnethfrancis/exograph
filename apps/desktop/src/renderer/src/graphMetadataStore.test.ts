@@ -34,11 +34,9 @@ describe("GraphMetadataStore", () => {
 
   it("rejects a late detail from an obsolete snapshot", async () => {
     let current = "one";
+    let release!: (result: Awaited<ReturnType<GraphMetadataPort["getGraphConceptDetailByIndex"]>>) => void;
     const port = {
-      getGraphConceptDetailByIndex: vi.fn(async () => {
-        current = "two";
-        return { status: "ok" as const, sourceSnapshotId: "one", index: 0, detail: { concept: { id: "one", label: "One", conceptTypes: [], resolution: "resolved", tags: [] }, properties: [], relations: [], findings: [], format: {} as never, ontology: {} as never, omitted: { properties: 0, relations: 0, findings: 0, evidence: 0 } }, payloadBytes: 1 };
-      }),
+      getGraphConceptDetailByIndex: vi.fn(() => new Promise((resolve) => { release = resolve; })),
     };
     const metadata = new GraphMetadataStore({
       port: port as unknown as GraphMetadataPort,
@@ -48,7 +46,11 @@ describe("GraphMetadataStore", () => {
       onStatus: () => undefined,
       onSummaries: () => undefined,
     });
-    await expect(metadata.readDetail(0, "one")).resolves.toBeNull();
+    const pending = metadata.readDetail(0, "one");
+    current = "two";
+    metadata.prune("two");
+    release({ status: "ok", sourceSnapshotId: "one", index: 0, detail: { concept: { id: "one", label: "One", conceptTypes: [], resolution: "resolved", tags: [] }, properties: [], relations: [], findings: [], format: {} as never, ontology: {} as never, omitted: { properties: 0, relations: 0, findings: 0, evidence: 0 } }, payloadBytes: 1 });
+    await expect(pending).resolves.toBeNull();
     expect(metadata.cacheEntryCount).toBe(0);
   });
 

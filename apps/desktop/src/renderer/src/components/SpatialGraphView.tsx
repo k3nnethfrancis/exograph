@@ -453,7 +453,8 @@ export function SpatialGraphView({
     const sequence = ++inspectionSequenceRef.current;
     let cancelled = false;
     void resolveConcept(inspectedConcept, currentTopology.sourceSnapshotId).then(async (summary) => {
-      if (cancelled || !summary || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
+      if (cancelled || sequence !== inspectionSequenceRef.current || !summary
+        || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
       runtimeRef.current?.setSelection(summary.index);
       inspectedConceptKeyRef.current = key;
       setRouteNodeCount(0);
@@ -465,7 +466,6 @@ export function SpatialGraphView({
     });
     return () => {
       cancelled = true;
-      inspectionSequenceRef.current += 1;
     };
   }, [inspectedConcept?.conceptId, inspectedConcept?.filePath, readDetail, resolveConcept, topology?.sourceSnapshotId]);
 

@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { launchExographWorkspaceFixture } from "../helpers";
@@ -68,6 +68,26 @@ test("a fresh graph snapshot retains the node selected after opening from an edi
       return snapshot.sourceSnapshotId !== previousSnapshot && snapshot.pendingWork === 0;
     }, previous)).toBe(true);
     await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveText("Wiring B");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("removing the selected node clears its stale detail after refresh", async () => {
+  const fixture = await launchReviewGraph();
+  try {
+    await clickB(fixture.page);
+    const previous = await fixture.page.evaluate(async () => (await window.exograph.notes.getGraphTopology()).sourceSnapshotId);
+    await unlink(path.join(fixture.noteDirectory, "wiring-b.md"));
+    await expect.poll(() => fixture.page.evaluate(async () => (await window.exograph.notes.getGraphTopology()).sourceSnapshotId)).not.toBe(previous);
+    await fixture.page.getByRole("button", { name: "Refresh graph", exact: true }).click();
+    await expect.poll(() => fixture.page.locator(".spatial-graph__interaction").evaluate((element, previousSnapshot) => {
+      const snapshot = (element as HTMLCanvasElement & {
+        __exographGraphSnapshot: () => { sourceSnapshotId: string; pendingWork: number; selected: number };
+      }).__exographGraphSnapshot();
+      return snapshot.sourceSnapshotId !== previousSnapshot && snapshot.pendingWork === 0 && snapshot.selected === -1;
+    }, previous)).toBe(true);
+    await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveCount(0);
   } finally {
     await fixture.cleanup();
   }
