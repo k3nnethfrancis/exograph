@@ -164,20 +164,26 @@ test("custom Save remains active in the focused editor", async () => {
     await page.clock.install({ time: new Date("2026-09-16T12:00:00Z") });
     await page.clock.pauseAt(new Date("2026-09-16T12:00:01Z"));
     await page.keyboard.type("custom save");
+    await page.clock.runFor(100);
     await expect(page.getByTestId("editor-save-status")).toHaveText("Unsaved");
     await electronApp.evaluate(() => { (globalThis as unknown as { wiringSaveGate: { armed: boolean } }).wiringSaveGate.armed = true; });
     await page.keyboard.press("Meta+Alt+k");
+    await page.clock.runFor(100);
     await expect.poll(() => electronApp.evaluate(() => (globalThis as unknown as { wiringSaveGate: { held: boolean; armedCalls: number } }).wiringSaveGate)).toMatchObject({ held: true, armedCalls: 1 });
     await electronApp.evaluate(() => (globalThis as unknown as { wiringSaveGate: { release: () => void } }).wiringSaveGate.release());
     await expect(page.getByTestId("editor-save-status")).toHaveText("Saved");
 
     await page.keyboard.press("Enter");
     await page.keyboard.type("@claude");
+    await page.clock.runFor(100);
     await expect(page.getByTestId("agent-suggestions")).toBeVisible();
     await page.keyboard.press("Enter");
+    await page.clock.runFor(100);
     await expect(page.getByTestId("inline-agent-composer")).toBeVisible();
     await page.keyboard.type("draft text");
+    await page.clock.runFor(100);
     await page.keyboard.press("Meta+Alt+k");
+    await page.clock.runFor(100);
     await expect.poll(() => electronApp.evaluate(() => (globalThis as unknown as { wiringSaveGate: { bodies: string[] } }).wiringSaveGate.bodies))
       .toContainEqual(expect.stringContaining("@claude draft text"));
     await expect.poll(() => page.evaluate(async () => (await window.exograph.workspace.getSettings()).settings.shortcutBindings))
