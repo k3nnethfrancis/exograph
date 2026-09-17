@@ -24,21 +24,25 @@ async function launchReviewGraph() {
 async function clickB(page: Page) {
   await page.getByRole("button", { name: "Frame graph", exact: true }).click();
   const canvas = page.locator(".spatial-graph__interaction");
-  const point = await canvas.evaluate(async (element) => {
-    const topology = await window.exograph.notes.getGraphTopology();
-    const result = await window.exograph.notes.getGraphConceptSummaries(
-      Array.from({ length: topology.nodeCount }, (_, index) => index), topology.sourceSnapshotId,
-    );
-    const node = result.summaries.find((summary) => summary.label === "Wiring B");
-    if (!node) throw new Error("Missing Wiring B fixture node");
-    return (element as HTMLCanvasElement & {
-      __exographGraphPointForIndex: (index: number) => { x: number; y: number; visible: boolean };
-    }).__exographGraphPointForIndex(node.index);
-  });
+  const point = await pointForLabel(canvas, "Wiring B");
   expect(point.visible).toBe(true);
   await canvas.click({ position: point });
   await expect(page.locator(".spatial-graph__detail-title")).toHaveText("Wiring B");
   return canvas;
+}
+
+async function pointForLabel(canvas: ReturnType<Page["locator"]>, label: string) {
+  return canvas.evaluate(async (element, expectedLabel) => {
+    const topology = await window.exograph.notes.getGraphTopology();
+    const result = await window.exograph.notes.getGraphConceptSummaries(
+      Array.from({ length: topology.nodeCount }, (_, index) => index), topology.sourceSnapshotId,
+    );
+    const node = result.summaries.find((summary) => summary.label === expectedLabel);
+    if (!node) throw new Error(`Missing ${expectedLabel} fixture node`);
+    return (element as HTMLCanvasElement & {
+      __exographGraphPointForIndex: (index: number) => { x: number; y: number; visible: boolean };
+    }).__exographGraphPointForIndex(node.index);
+  }, label);
 }
 
 test("a mouse-selected graph receives keyboard navigation without programmatic focus", async () => {
@@ -89,6 +93,46 @@ test("removing the selected node clears its stale detail after refresh", async (
       return snapshot.sourceSnapshotId !== previousSnapshot && snapshot.pendingWork === 0 && snapshot.selected === -1;
     }, previous)).toBe(true);
     await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveCount(0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("a late detail response cannot replace a newer mouse selection", async () => {
+  const fixture = await launchReviewGraph();
+  try {
+    const canvas = fixture.page.locator(".spatial-graph__interaction");
+    await fixture.page.getByRole("button", { name: "Frame graph", exact: true }).click();
+    const pointB = await pointForLabel(canvas, "Wiring B");
+    const pointA = await pointForLabel(canvas, "Wiring A");
+    const bIndex = await canvas.evaluate(async () => {
+      const topology = await window.exograph.notes.getGraphTopology();
+      const result = await window.exograph.notes.getGraphConceptSummaries(
+        Array.from({ length: topology.nodeCount }, (_, index) => index), topology.sourceSnapshotId,
+      );
+      const node = result.summaries.find((summary) => summary.label === "Wiring B");
+      if (!node) throw new Error("Missing Wiring B fixture node");
+      return node.index;
+    });
+    await fixture.page.evaluate((heldIndex) => {
+      const notes = window.exograph.notes;
+      const original = notes.getGraphConceptDetailByIndex;
+      (window as Window & { __releaseHeldGraphDetail?: () => void }).__releaseHeldGraphDetail = undefined;
+      notes.getGraphConceptDetailByIndex = (index, sourceSnapshotId) => {
+        if (index !== heldIndex) return original(index, sourceSnapshotId);
+        return new Promise((resolve) => {
+          (window as Window & { __releaseHeldGraphDetail?: () => void }).__releaseHeldGraphDetail = () => {
+            void original(index, sourceSnapshotId).then(resolve);
+          };
+        });
+      };
+    }, bIndex);
+    await canvas.click({ position: pointB });
+    await expect.poll(() => fixture.page.evaluate(() => Boolean((window as Window & { __releaseHeldGraphDetail?: unknown }).__releaseHeldGraphDetail))).toBe(true);
+    await canvas.click({ position: pointA });
+    await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveText("Wiring A");
+    await fixture.page.evaluate(() => (window as Window & { __releaseHeldGraphDetail?: () => void }).__releaseHeldGraphDetail?.());
+    await expect(fixture.page.locator(".spatial-graph__detail-title")).toHaveText("Wiring A");
   } finally {
     await fixture.cleanup();
   }
