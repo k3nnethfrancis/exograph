@@ -587,8 +587,8 @@ function listLineStyle(depth: number, isListStart = true, expandedParent = false
     // Center the one-pixel rule beneath the four-pixel bullet.
     const left = LIST_GEOMETRY.baseIndent + ancestor * LIST_GEOMETRY.indentStep - LIST_GEOMETRY.markerTextGap - 2.5;
     const ownGuide = ancestor === depth && isListStart;
-    const above = "calc(0.5lh - var(--exograph-list-marker-clearance, 6px))";
-    const below = "calc(0.5lh + var(--exograph-list-marker-clearance, 6px))";
+    const above = "calc(0.5lh - var(--exograph-list-marker-clearance, 8px))";
+    const below = "calc(0.5lh + var(--exograph-list-marker-clearance, 8px))";
     const gradient = ownGuide
       ? `${endsGuide ? "var(--exograph-list-guide)" : "transparent"} ${above}, transparent ${above}, transparent ${below}, ${expandedParent ? "var(--exograph-list-guide)" : "transparent"} ${below}`
       : "var(--exograph-list-guide), var(--exograph-list-guide)";
