@@ -62,6 +62,14 @@ export function shortcutMatches(event: Pick<KeyboardEvent, "code" | "metaKey" | 
   return mod && !event.repeat && event.code === binding.code && Boolean(event.shiftKey) === Boolean(binding.shift) && Boolean(event.altKey) === Boolean(binding.alt);
 }
 
+/** Convert the canonical workspace shortcut shape to CodeMirror's keymap syntax. */
+export function codeMirrorShortcutKey(binding: WorkspaceShortcutBinding): string {
+  const key = binding.code === "Enter" ? "Enter" : binding.code.replace(/^Key/, "").toLowerCase();
+  return ["Mod", binding.alt ? "Alt" : null, binding.shift ? "Shift" : null, key]
+    .filter((part): part is string => part !== null)
+    .join("-");
+}
+
 export function shortcutBindingFromEvent(event: Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">): WorkspaceShortcutBinding | null {
   if (!(event.metaKey || event.ctrlKey) || !/^(?:Key[A-Z]|Enter)$/.test(event.code)) return null;
   return { code: event.code, shift: event.shiftKey, alt: event.altKey };

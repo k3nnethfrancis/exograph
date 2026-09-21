@@ -705,7 +705,6 @@ export function graphKeyboardIntent(
   camera: GraphCamera,
   key: string,
   viewport: GraphViewport,
-  shiftKey = false,
 ): GraphKeyboardIntent {
   if (key === "Escape") return { kind: "clear" };
   if (key.toLowerCase() === "o") return { kind: "frame" };
@@ -716,14 +715,7 @@ export function graphKeyboardIntent(
   if (key === "-" || key === "_") {
     return { kind: "camera", camera: zoomGraphCameraAt(camera, viewport, viewport.width / 2, viewport.height / 2, 1 / 1.22) };
   }
-  const step = shiftKey ? 0.16 : 0.055;
-  const delta = key === "ArrowLeft" ? [-step, 0]
-    : key === "ArrowRight" ? [step, 0]
-      : key === "ArrowUp" ? [0, -step]
-        : key === "ArrowDown" ? [0, step]
-          : null;
-  if (!delta) return { kind: "none" };
-  return { kind: "camera", camera: orbitGraphCamera(camera, delta[0] / 0.0048, delta[1] / 0.0048) };
+  return { kind: "none" };
 }
 
 export function graphSphereBounds(positions: Float32Array): { center: [number, number, number]; radius: number } {

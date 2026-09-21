@@ -299,6 +299,20 @@ export function remoteMarkdownImageUrl(target: string): string | null {
     return null;
   }
 }
+// A typographic zero-width anchor gives CodeMirror text-sized caret geometry
+// even when the prefix is the only content on a newly created list line.
+export class ListPrefixWidget extends WidgetType {
+  toDOM() {
+    const span = document.createElement("span");
+    span.textContent = "\u200b";
+    return span;
+  }
+
+  eq(other: WidgetType) {
+    return other instanceof ListPrefixWidget;
+  }
+}
+
 export class TaskPrefixWidget extends WidgetType {
   constructor(
     private readonly checked: boolean,
@@ -317,7 +331,10 @@ export class TaskPrefixWidget extends WidgetType {
     checkbox.className = `exograph-md-checkbox ${this.checked ? "exograph-md-checkbox--checked" : ""}`;
     checkbox.dataset.exographCheckboxPos = String(this.checkboxPos);
     span.appendChild(checkbox);
-    return span;
+    const anchor = document.createElement("span");
+    anchor.textContent = "\u200b";
+    anchor.appendChild(span);
+    return anchor;
   }
 
   eq(other: TaskPrefixWidget) {
@@ -346,8 +363,9 @@ export class FoldToggleWidget extends WidgetType {
       ? "exograph-md-list-prefix exograph-md-list-prefix--fold"
       : "exograph-md-outline-fold";
     if (this.placement === "list") {
-      const bulletLeft = LIST_GEOMETRY.baseIndent + this.depth * LIST_GEOMETRY.indentStep - LIST_GEOMETRY.markerLaneWidth;
-      span.style.left = `${bulletLeft - 14}px`;
+      // Put the chevron halfway between this level's guide and its parent's.
+      const bulletCenter = LIST_GEOMETRY.baseIndent + this.depth * LIST_GEOMETRY.indentStep - LIST_GEOMETRY.markerTextGap - 2;
+      span.style.left = `${bulletCenter - LIST_GEOMETRY.indentStep / 2 - 7}px`;
       span.style.width = "14px";
     }
 

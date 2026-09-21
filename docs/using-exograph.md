@@ -24,6 +24,8 @@ Every included Markdown file is a Note. Its filename/path gives it a primary hom
 - Add frontmatter through the property control. `title`, `date`, and `tags` are useful conventional fields, but Exograph preserves arbitrary properties.
 - Type `/today` or `/tomorrow`, then press Enter, to create an ordinary date wikilink. Opening it creates or opens that daily Note through the usual link path.
 
+Hover over a bullet or task with nested items to reveal its fold arrow. Each nesting level folds independently, and vertical guides show the items inside that section. Headings (`#` through `######`) also fold their sections up to the next heading of the same or higher level; hover over the heading to reveal its arrow. Folding changes the view without changing the Markdown.
+
 Double-click a folder to open its Overview. An `index.md` can describe that folder, but viewing never creates one. Create it only when you want durable folder metadata or guidance; Exograph hides it as a duplicate Explorer row, not from the filesystem.
 
 ## Search
@@ -36,7 +38,7 @@ Read [Search](search.md) before changing index settings or interpreting embeddin
 
 Open **Note context** for the active Note's outline, inbound and outbound links, Artifacts, Tags, and earned invocation history. Select an Outline heading to focus the editor and reveal that exact section. Open **Graph** from the utility rail or the editor's Graph action to explore the production workspace graph, with the active Note selected inside an elevated overview of the settled graph. Drag to orbit; right-drag or modified drag to pan; and use the mouse wheel, trackpad scroll, or trackpad pinch to zoom. Panning follows the grabbed content on both axes. Zoom keeps the graph point under the pointer fixed, while keyboard zoom uses the center of the graph viewport. Two-finger touch gestures combine that same pointer-centered zoom with direct pan. Select a node to inspect it, and double-click a Note node to open it. **Settings → Graph** can reverse the drag-orbit direction.
 
-When the Graph canvas has keyboard focus, brackets select the previous or next Note, arrow keys orbit, `+` and `-` zoom, Space or `F` focuses the selection, `O` frames the graph, Enter opens the selection, and Escape returns to the prior editor context. The same controls remain available after Canvas fallback.
+When the Graph canvas has keyboard focus, arrow keys follow a connected node in the pressed screen direction and center it in the viewport, `+` and `-` zoom, Space or `F` focuses the selection, `O` frames the graph, Enter opens the selection, and Escape returns to the prior editor context. If there is no connection in that direction, selection stays put. With no selection, an arrow selects the visible node closest to the center. A quick camera pan follows each hop, preserving the viewing direction and zoom. Reduced-motion preferences make centering immediate. Each subsequent hop follows connections from the currently selected node. The same controls remain available after Canvas fallback.
 
 A framed graph fits again when the pane changes size. After you pan, orbit, zoom, or focus, resizing preserves your camera direction and target, moving back within the zoom range when needed to keep a previously visible selection in view. Use **Frame graph** to restore the overview.
 

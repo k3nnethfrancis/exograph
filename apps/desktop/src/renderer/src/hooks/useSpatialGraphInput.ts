@@ -3,6 +3,7 @@ import type { GraphTopology } from "@exograph/core";
 
 import {
   graphEscapeDecision,
+  graphDirectionalNeighbor,
   graphNodeClickDecision,
   graphNodeDoubleClickIndex,
 } from "../graphInteraction";
@@ -35,6 +36,8 @@ interface SpatialGraphInputOptions {
   restoreSelection: (filePath: string) => Promise<void>;
   readSummaries: (indexes: readonly number[], sourceSnapshotId: string) => Promise<void>;
   setRouteNodeCount: (count: number) => void;
+  clearSelectionDetail: () => void;
+  markUserSelection: () => void;
 }
 
 /** Adapts browser input into renderer-neutral graph navigation commands. */
@@ -59,6 +62,7 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
 
   function onPointerDown(event: PointerEvent<HTMLCanvasElement>) {
     event.preventDefault();
+    event.currentTarget.focus();
     if (pointerSessionRef.current.activePointers === 0) options.runtimeRef.current?.cancelMotion();
     pointerSessionRef.current.begin(pointerSample(event), spatialGraphPointerAction({
       button: event.button,
@@ -99,6 +103,7 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
     if (picked >= 0) recentPickRef.current = { index: picked, clientX: event.clientX, clientY: event.clientY, at: performance.now() };
     const scene = options.runtimeRef.current?.getScene();
     const decision = graphNodeClickDecision(picked, scene?.interaction.selected ?? -1, event.shiftKey);
+    if (picked >= 0) options.markUserSelection();
     if (decision.kind === "clear-route") {
       options.runtimeRef.current?.clearRoute();
       options.setRouteNodeCount(0);
@@ -158,8 +163,10 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
       } else if (decision === "restore-editor" && options.graphReturnPath) {
         void options.restoreSelection(options.graphReturnPath);
       } else {
+        options.markUserSelection();
         runtime.setSelection(-1);
         options.setRouteNodeCount(0);
+        options.clearSelectionDetail();
       }
       return;
     }
@@ -173,16 +180,17 @@ export function useSpatialGraphInput(options: SpatialGraphInputOptions) {
       if (scene.interaction.selected >= 0) void options.openIndex(scene.interaction.selected);
       return;
     }
-    if (event.key === "[" || event.key === "]") {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
       event.preventDefault();
-      const nodeCount = options.topologyRef.current?.nodeCount ?? 0;
-      if (nodeCount === 0) return;
-      const direction = event.key === "]" ? 1 : -1;
-      const selected = scene.interaction.selected;
-      void options.inspectIndex(selected < 0 ? (direction > 0 ? 0 : nodeCount - 1) : (selected + direction + nodeCount) % nodeCount);
+      const next = graphDirectionalNeighbor(scene.topology, scene.projection, scene.interaction.selected, event.key);
+      if (next >= 0 && next !== scene.interaction.selected) {
+        options.markUserSelection();
+        void options.inspectIndex(next);
+        runtime.centerOnNode(next, prefersReducedMotion());
+      }
       return;
     }
-    const intent = graphKeyboardIntent(scene.camera, event.key, scene.projection.viewport, event.shiftKey);
+    const intent = graphKeyboardIntent(scene.camera, event.key, scene.projection.viewport);
     if (intent.kind !== "none") event.preventDefault();
     if (intent.kind === "camera") runtime.setCamera(intent.camera, "keyboard");
     if (intent.kind === "frame") runtime.frameAll();

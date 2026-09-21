@@ -61,6 +61,7 @@ import {
 import { pathLabel } from "./workspaceTree";
 import { getPreviewTitle, markdownPreviewExcerpt } from "./graphAffordances";
 import { workspaceBreadcrumb, type WorkspaceBreadcrumbSegment } from "./workspaceBreadcrumb";
+import { resolvedWorkspaceShortcutBindings } from "./shellHelpModel";
 import { DEFAULT_UTILITY_SURFACE_STATE, reduceUtilitySurface, type UtilityDestination } from "./utilitySurfaceModel";
 import { addPreviewTab, closePreviewTab, EMPTY_PREVIEW_TABS, selectPreviewTab, updatePreviewTabTarget } from "./previewTabsModel";
 import { routeMarkdownLink } from "./markdownLinkRouting";
@@ -104,6 +105,7 @@ export function App() {
   const { noteTrees } = workspaceTrees;
   const [exploreIndexSearchOnEnter, setExploreIndexSearchOnEnter] = useState(false);
   const [shortcutBindings, setShortcutBindings] = useState<WorkspaceShortcutBindings>({});
+  const saveShortcut = useMemo(() => resolvedWorkspaceShortcutBindings(shortcutBindings).save, [shortcutBindings]);
   const [qmdSearchSelected, setQmdSearchSelected] = useState(false);
   const workspaceSearch = useWorkspaceSearch({ indexedOnEnter: exploreIndexSearchOnEnter, qmdSelected: qmdSearchSelected });
   const graphInspection = useInspectedConcept();
@@ -1183,6 +1185,7 @@ export function App() {
                 }
               }}
               onSave={() => void (leaf.content.kind === "editor" && leaf.content.activePath ? saveDocument(leaf.content.activePath) : Promise.resolve()).catch(() => {})}
+              saveShortcut={saveShortcut}
               onSaveConflictCopy={() => { if (pane.activePath) workspaceMutations.saveConflictCopy(pane.activePath); }}
               onDiscardSaveConflict={async () => {
                 if (pane.activePath && await openDocumentsState.discardSaveConflict(pane.activePath) === "closed") canvasNavigation.removeDeletedPaths(pane.activePath);
