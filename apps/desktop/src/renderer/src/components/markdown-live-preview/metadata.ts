@@ -260,6 +260,18 @@ function listMetadataBlockRange(doc: Text, from: number, to: number): { startLin
   return { startLine, endLine };
 }
 
+/** Last line concealed when a list parent is collapsed. */
+export function listSubtreeEndLine(contexts: ReadonlyMap<number, ListContext>, parentLine: number): number {
+  const parent = contexts.get(parentLine);
+  if (!parent?.isListStart) return parentLine;
+  let endLine = parentLine;
+  for (let line = parentLine + 1; ; line += 1) {
+    const context = contexts.get(line);
+    if (!context || (context.isListStart && context.depth <= parent.depth)) return endLine;
+    endLine = line;
+  }
+}
+
 export function collectListMetadata(
   doc: Text,
   startLine = 1,

@@ -1,4 +1,5 @@
-import { EditorState, StateField } from "@codemirror/state";
+import { EditorSelection, EditorState, StateField } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 
 import { advanceMarkdownPreviewProjection, markdownLivePreview } from "./index";
@@ -24,6 +25,28 @@ function stateWithFoldedParent(doc: string, lineNumber: number) {
 }
 
 describe("markdown live preview folded-list identity", () => {
+  it("routes Enter through fold state and retains the collapsed parent and children", () => {
+    const { field, state: initial } = stateWithFoldedParent("- parent\n  - child\n- after", 1);
+    let state = EditorState.create({
+      doc: initial.doc,
+      selection: EditorSelection.cursor(initial.doc.line(1).to),
+      extensions: [markdownLivePreview({
+        onOpenTarget: () => {},
+        onOpenTag: () => {},
+        onResolveImage: async () => ({ url: "" }),
+      }), field.init(() => initial.field(field))],
+    });
+    const view = {
+      get state() { return state; },
+      dispatch(spec: Parameters<typeof state.update>[0]) { state = state.update(spec).state; },
+    } as EditorView;
+    const handled = state.facet(keymap).flat().some((binding) => binding.key === "Enter" && binding.run?.(view));
+    expect(handled).toBe(true);
+    expect(state.doc.toString()).toBe("- parent\n  - child\n- \n- after");
+    expect(state.selection.main.head).toBe(state.doc.line(3).to);
+    expect(state.field(field)).toEqual(new Set([0]));
+  });
+
   it("keeps heading and tag fold anchors through edits to their children", () => {
     for (const doc of ["# Parent\nchild", "#project\n  child"]) {
       const { field, state } = stateWithFoldedParent(doc, 1);
