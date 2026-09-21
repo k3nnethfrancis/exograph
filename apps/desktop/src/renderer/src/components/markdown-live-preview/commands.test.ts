@@ -29,6 +29,30 @@ describe("markdown editor list behavior", () => {
     expect(listEnterEdit(state, state.doc.length)).toEqual({ from: 0, to: state.doc.length, insert: "", selection: 0, exitList: true });
   });
 
+  it.each([
+    { doc: "- parent\n  - child\n    - grandchild\n  - child two\n- after", parent: 1, end: 4, prefix: "- " },
+    { doc: "- outer\n  - parent\n    continuation\n    - child\n      child continuation\n  - after", parent: 2, end: 5, prefix: "  - " },
+    { doc: "- outer\n  - [x] parent\n    - [ ] child", parent: 2, end: 3, prefix: "  - [ ] " },
+    { doc: "9. parent\n   - child\n10. after", parent: 1, end: 2, prefix: "10. " },
+    { doc: "- parent\n  - child\n\nParagraph", parent: 1, end: 2, prefix: "- " },
+  ])("continues a folded item after its entire hidden subtree: $doc", ({ doc, parent, end, prefix }) => {
+    const state = EditorState.create({ doc });
+    const line = state.doc.line(parent);
+    const insertAt = state.doc.line(end).to;
+    const edit = listEnterEdit(state, line.to, new Set([line.from]));
+    expect(edit).toEqual({ from: insertAt, to: insertAt, insert: `\n${prefix}`, selection: insertAt + prefix.length + 1, exitList: false });
+    const next = state.update({ changes: edit! }).state;
+    expect(next.doc.sliceString(0, insertAt)).toBe(state.doc.sliceString(0, insertAt));
+    expect(next.doc.line(end + 1).text).toBe(prefix);
+  });
+
+  it("preserves Enter at an expanded parent and in the middle of folded text", () => {
+    const state = EditorState.create({ doc: "- parent\n  - child" });
+    const end = state.doc.line(1).to;
+    expect(listEnterEdit(state, end)?.from).toBe(end);
+    expect(listEnterEdit(state, 5, new Set([0]))).toMatchObject({ from: 5, to: 5, insert: "\n- " });
+  });
+
   it("clamps shortcut selections to rendered list text", () => {
     const state = EditorState.create({ doc: "- some important text" });
     const anchor = state.doc.length;

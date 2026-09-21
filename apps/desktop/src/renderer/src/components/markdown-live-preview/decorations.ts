@@ -2,7 +2,7 @@ import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import { RangeSetBuilder, type Text } from "@codemirror/state";
 
 import { LIST_GEOMETRY, listGeometryStyleVariables } from "../listGeometry";
-import { listPrefixPattern, type ListContext, type MarkdownPreviewMetadata, visibleLineNumbers } from "./metadata";
+import { listPrefixPattern, listSubtreeEndLine, type ListContext, type MarkdownPreviewMetadata, visibleLineNumbers } from "./metadata";
 import { FoldToggleWidget, ListPrefixWidget, MarkdownImageWidget, markdownImageTarget, TaskPrefixWidget, TableWidget, WikilinkWidget } from "./widgets";
 import { wikilinkPresentation } from "./wikilinks";
 
@@ -55,12 +55,8 @@ export function buildDecorations(view: EditorView, options: MarkdownLivePreviewO
   // Compute which lines are hidden due to folding
   const hiddenLines = new Set<number>();
   for (const foldedLine of foldedLines) {
-    const foldedCtx = listContexts.get(foldedLine);
-    if (!foldedCtx) continue;
-    const foldDepth = foldedCtx.depth;
-    for (let ln = foldedLine + 1; ln <= view.state.doc.lines; ln++) {
-      const ctx = listContexts.get(ln);
-      if (!ctx || (ctx.isListStart && ctx.depth <= foldDepth)) break;
+    const endLine = listSubtreeEndLine(listContexts, foldedLine);
+    for (let ln = foldedLine + 1; ln <= endLine; ln++) {
       hiddenLines.add(ln);
     }
   }

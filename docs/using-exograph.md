@@ -26,6 +26,8 @@ Every included Markdown file is a Note. Its filename/path gives it a primary hom
 
 Hover over a bullet or task with nested items to reveal its fold arrow. Each nesting level folds independently, and vertical guides show the items inside that section. Headings (`#` through `######`) also fold their sections up to the next heading of the same or higher level; hover over the heading to reveal its arrow. Folding changes the view without changing the Markdown.
 
+Press Enter at the end of a collapsed list item to create a sibling at the same indentation, after its hidden children. The children remain attached to the original item and stay collapsed.
+
 Double-click a folder to open its Overview. An `index.md` can describe that folder, but viewing never creates one. Create it only when you want durable folder metadata or guidance; Exograph hides it as a duplicate Explorer row, not from the filesystem.
 
 ## Search

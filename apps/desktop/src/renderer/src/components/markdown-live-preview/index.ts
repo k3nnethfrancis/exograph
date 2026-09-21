@@ -179,7 +179,7 @@ export function markdownLivePreview(options: MarkdownLivePreviewOptions): Extens
     referenceVisibilityExtension,
     plugin,
     wikilinkExitKeymap,
-    listContinuationOutdentKeymap,
+    listContinuationOutdentKeymap((state) => state.field(foldedListParentAnchorsField)),
     listPrefixNavigationKeymap,
     EditorView.domEventHandlers({
       mousedown(event, view) {
