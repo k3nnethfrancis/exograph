@@ -27,6 +27,17 @@ When **Use QMD when I press Enter in Explore** is enabled, Enter in the search f
 
 Indexing runs outside the Electron main process. During maintenance, foreground retrieval can fall back to filesystem search rather than waiting behind the writer. Pending embeddings do not make Notes unavailable: lexical retrieval continues to work.
 
+Indexed paths preserve exact filenames, including spaces, underscores, and
+Unicode. Existing QMD indexes created with normalized filenames are reconciled
+once when opened by the updated app. This repairs derived document identities
+without renaming Notes; interrupted repairs retry on the next open. Changed or
+new content may still need **Build embeddings** afterward.
+
+If search reports dropped invalid or stale results, run **Sync documents** to
+reconcile renamed or deleted Notes. A scan-limit warning means the bounded
+search could not establish a complete result page; it is distinct from stale
+documents and remains visible rather than silently claiming complete results.
+
 The QMD database is local derived state under the workspace `.exograph/` runtime. It can be rebuilt; it is not the source of truth. See [Durable state](durable-state.md) and [Performance contracts](performance-contracts.md) for the implementation and latency boundaries.
 
 ## Why Search is separate
