@@ -2,7 +2,7 @@ import { Annotation, EditorSelection, EditorState, Prec, RangeSetBuilder, Transa
 import { indentLess, indentMore } from "@codemirror/commands";
 import { Decoration, EditorView, keymap } from "@codemirror/view";
 
-import { collectListMetadata, listPrefixPattern, visibleLineNumbers } from "./metadata";
+import { collectListMetadata, listPrefixPattern, listSubtreeEndLine, visibleLineNumbers } from "./metadata";
 
 const taskListPrefixPattern = /^(\s*)([-*+])\s+\[[ xX]\]\s+/;
 const allowListPrefixRawSelection = Annotation.define<boolean>();
@@ -77,24 +77,26 @@ export const listPrefixNavigationKeymap = Prec.highest(keymap.of([
   },
 ]));
 
-export const listContinuationOutdentKeymap = Prec.highest(keymap.of([
-  {
-    key: "Enter",
-    run: continueOrExitList,
-  },
-  {
-    key: "Shift-Tab",
-    run: (view) => outdentBlankListContinuation(view) || indentSelectedLines(view, "outdent"),
-  },
-  {
-    key: "Tab",
-    run: (view) => indentSelectedLines(view, "indent"),
-  },
-  {
-    key: "Mod-[",
-    run: (view) => outdentBlankListContinuation(view) || indentLess(view),
-  },
-]));
+export function listContinuationOutdentKeymap(foldedParents: (state: EditorState) => ReadonlySet<number>) {
+  return Prec.highest(keymap.of([
+    {
+      key: "Enter",
+      run: (view) => continueOrExitList(view, foldedParents(view.state)),
+    },
+    {
+      key: "Shift-Tab",
+      run: (view) => outdentBlankListContinuation(view) || indentSelectedLines(view, "outdent"),
+    },
+    {
+      key: "Tab",
+      run: (view) => indentSelectedLines(view, "indent"),
+    },
+    {
+      key: "Mod-[",
+      run: (view) => outdentBlankListContinuation(view) || indentLess(view),
+    },
+  ]));
+}
 
 export const selectAllMarkdownKeymap = Prec.highest(keymap.of([
   {
@@ -351,13 +353,13 @@ export function wikilinkExitEdit(state: EditorState, pos: number): { insertAt: n
   return null;
 }
 
-function continueOrExitList(view: EditorView): boolean {
+function continueOrExitList(view: EditorView, foldedParents: ReadonlySet<number>): boolean {
   const range = view.state.selection.main;
   if (!range.empty) {
     return false;
   }
 
-  const edit = listEnterEdit(view.state, range.head);
+  const edit = listEnterEdit(view.state, range.head, foldedParents);
   if (!edit) {
     return outdentBlankListContinuation(view);
   }
@@ -371,12 +373,18 @@ function continueOrExitList(view: EditorView): boolean {
   return true;
 }
 
-export function listEnterEdit(state: EditorState, pos: number): { from: number; to: number; insert: string; selection: number; exitList: boolean } | null {
+export function listEnterEdit(state: EditorState, pos: number, foldedParents?: ReadonlySet<number>): { from: number; to: number; insert: string; selection: number; exitList: boolean } | null {
   const line = state.doc.lineAt(pos);
   const match = line.text.match(listPrefixPattern);
   if (!match) {
     return null;
   }
+
+  // A collapsed item is one visible row. Continue after its hidden subtree so
+  // its children remain attached to the same parent and the new item is visible.
+  const insertAt = pos === line.to && foldedParents?.has(line.from)
+    ? state.doc.line(listSubtreeEndLine(collectListMetadata(state.doc), line.number)).to
+    : pos;
 
   const taskMatch = line.text.match(taskListPrefixPattern);
   if (taskMatch) {
@@ -393,10 +401,10 @@ export function listEnterEdit(state: EditorState, pos: number): { from: number; 
     }
     const nextPrefix = `${taskMatch[1]}${taskMatch[2]} [ ] `;
     return {
-      from: pos,
-      to: pos,
+      from: insertAt,
+      to: insertAt,
       insert: `\n${nextPrefix}`,
-      selection: pos + nextPrefix.length + 1,
+      selection: insertAt + nextPrefix.length + 1,
       exitList: false,
     };
   }
@@ -416,10 +424,10 @@ export function listEnterEdit(state: EditorState, pos: number): { from: number; 
 
   const nextPrefix = `${match[1]}${nextListMarker(marker)} `;
   return {
-    from: pos,
-    to: pos,
+    from: insertAt,
+    to: insertAt,
     insert: `\n${nextPrefix}`,
-    selection: pos + nextPrefix.length + 1,
+    selection: insertAt + nextPrefix.length + 1,
     exitList: false,
   };
 }

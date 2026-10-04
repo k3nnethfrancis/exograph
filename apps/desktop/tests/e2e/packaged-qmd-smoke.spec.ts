@@ -8,6 +8,7 @@ import { launchExographWorkspaceFixture } from "../helpers";
 test.skip(!process.env.EXOGRAPH_PACKAGED_APP_PATH, "Requires an exact packaged Exograph executable.");
 
 test("indexes and retrieves a Note through packaged QMD lexical search", async () => {
+  const exactPaths = ["client engagement.md", "client-engagement.md", "_archive/note_one.md", "Café 🐘.md", "part___one.md"];
   const fixture = await launchExographWorkspaceFixture({
     mutable: true,
     initialNoteLabel: "qmd-focus",
@@ -20,6 +21,11 @@ test("indexes and retrieves a Note through packaged QMD lexical search", async (
         "utf8",
       );
       await writeFile(path.join(noteRoot, "neighbor.md"), "# Neighbor\n\nA second indexed Note.\n", "utf8");
+      for (const [index, relativePath] of exactPaths.entries()) {
+        const filePath = path.join(noteRoot, relativePath);
+        await mkdir(path.dirname(filePath), { recursive: true });
+        await writeFile(filePath, `# Exact path ${index}\n\nExactpathsentinel body ${index}.\n`, "utf8");
+      }
     },
     prepareSettings: async ({ settingsPath, workspaceRoot }) => {
       const noteRoot = path.join(workspaceRoot, "notes/qmd-smoke");
@@ -54,7 +60,7 @@ test("indexes and retrieves a Note through packaged QMD lexical search", async (
     expect(sync.status).toMatchObject({
       backend: "qmd",
       mode: "lexical",
-      documentCount: 2,
+      documentCount: 2 + exactPaths.length,
       errors: [],
     });
 
@@ -64,6 +70,16 @@ test("indexes and retrieves a Note through packaged QMD lexical search", async (
     ));
     expect(result).toMatchObject({ source: "qmd", mode: "lexical", warnings: [] });
     expect(result.results.map((entry) => entry.title)).toContain("QMD focus");
+
+    const paths = await fixture.page.evaluate(() => window.exograph.workspace.searchIndex(
+      "Exactpathsentinel", { limit: 10, forceMode: "lexical" },
+    ));
+    expect(paths).toMatchObject({ source: "qmd", mode: "lexical", warnings: [] });
+    expect(paths.results).toHaveLength(exactPaths.length);
+    for (const [index, relativePath] of exactPaths.entries()) {
+      expect(paths.results.find((entry) => entry.filePath.endsWith(`/notes/qmd-smoke/${relativePath}`)))
+        .toMatchObject({ title: `Exact path ${index}`, snippet: expect.stringContaining(`Exactpathsentinel body ${index}`) });
+    }
   } finally {
     await fixture.cleanup();
   }

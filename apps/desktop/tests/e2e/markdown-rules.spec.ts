@@ -801,6 +801,40 @@ test("keeps generated graph references stable, scroll-owned, and outside editabl
   await cleanup();
 });
 
+test("Enter on a collapsed bullet creates a visible sibling after its hidden children", async () => {
+  const source = "- Parent\n  - Child\n    - Grandchild\n- Following\n";
+  const { page, workspaceRoot, cleanup } = await launchExographWorkspaceFixture({
+    mutable: true,
+    prepareWorkspace: async (root) => {
+      await writeFile(path.join(root, "notes/test-notes/collapsed-enter.md"), source, "utf8");
+    },
+  });
+  try {
+    await page.getByRole("button", { name: /collapsed-enter/i }).first().click();
+    const parent = page.locator(".cm-line", { hasText: "Parent" });
+    await parent.locator("[data-exograph-fold-anchor]").click();
+    await expect(page.locator(".cm-line", { hasText: /\bChild\b/ })).toBeHidden();
+    await parent.click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Sibling");
+    const expected = "- Parent\n  - Child\n    - Grandchild\n- Sibling\n- Following\n";
+    await expect.poll(() => page.locator(".cm-content").evaluate((content) => {
+      const view = (content as HTMLElement & { cmView?: { view?: any } }).cmView?.view;
+      return view?.state.doc.toString();
+    })).toBe(expected);
+    await expect(page.locator(".cm-line", { hasText: "Sibling" })).toBeVisible();
+    await expect(page.locator(".cm-line", { hasText: /\bChild\b/ })).toBeHidden();
+    await expect(page.locator(".cm-line", { hasText: "Grandchild" })).toBeHidden();
+    await expect.poll(() => readFile(path.join(workspaceRoot, "notes/test-notes/collapsed-enter.md"), "utf8")).toBe(expected);
+    await parent.locator("[data-exograph-fold-anchor]").click();
+    await expect(page.locator(".cm-line", { hasText: /\bChild\b/ })).toBeVisible();
+    await expect(page.locator(".cm-line", { hasText: "Grandchild" })).toBeVisible();
+  } finally {
+    await cleanup();
+  }
+});
+
 test("folds heading sections and leading-tag groups without changing Markdown", async () => {
   const source = [
     "# Parent",

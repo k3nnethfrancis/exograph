@@ -1,6 +1,7 @@
-import { ChevronDown, ChevronLeft, ChevronRight, FileText, Folder, FolderOpen, FolderTree, Hash } from "lucide-react";
-import type { SearchResult, TreeNode } from "@exograph/core";
+import { ChevronDown, ChevronLeft, ChevronRight, FileText, Folder, FolderOpen, FolderTree } from "lucide-react";
+import type { TreeNode } from "@exograph/core";
 import type { CSSProperties } from "react";
+import type { ExplorerSelection } from "../hooks/useExplorerSelection";
 import type { DragManager } from "../hooks/useDragManager";
 import type { ExplorerRootKind } from "./FileTree";
 
@@ -21,30 +22,15 @@ export interface ContextTarget {
   kind: "file" | "directory";
 }
 
-interface SearchSectionProps {
-  label: string;
-  results: SearchResult[];
-  onOpenFile: (filePath: string, line?: number | null) => void;
-  onOpenFolder?: (directoryPath: string) => void;
-  dragManager: DragManager;
-}
-
-interface TagSearchSectionProps {
-  results: SearchResult[];
-  onOpenFile: (filePath: string, line?: number | null) => void;
-  onOpenTag: (tag: string) => void;
-  dragManager: DragManager;
-}
-
 interface SectionProps {
   label: string;
   sections: RootSection[];
   rootKind: ExplorerRootKind;
   expandedPaths: Set<string>;
   onTogglePath: (path: string, rootKind?: ExplorerRootKind) => void;
-  onOpenFile: (filePath: string, line?: number | null) => void;
   onOpenFolder?: (directoryPath: string) => void;
   dragManager: DragManager;
+  selection: ExplorerSelection;
   onContextMenu?: (event: React.MouseEvent, target: ContextTarget) => void;
   showHeader?: boolean;
   alwaysShowRoots?: boolean;
@@ -55,65 +41,6 @@ interface SectionProps {
 
 export const ROOT_GROUP_PREFIX = "__root__:";
 
-export function SearchSection(props: SearchSectionProps) {
-  const { label, results, onOpenFile, dragManager } = props;
-  if (results.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="search-section">
-      <div className="search-section__title">{label}</div>
-      {results.map((result) => (
-        <button
-          key={result.filePath}
-          className="search-result"
-          onClick={() => onOpenFile(result.filePath)}
-          onMouseDown={(event) =>
-            dragManager.startDrag(event, { kind: "document", filePath: result.filePath })
-          }
-          type="button"
-        >
-          <strong>{result.title}</strong>
-          <span>{result.snippet}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export function TagSearchSection(props: TagSearchSectionProps) {
-  const { results, onOpenFile, onOpenTag, dragManager } = props;
-  if (results.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="search-section">
-      <div className="search-section__title">Tags</div>
-      {results.map((result) => (
-        <div key={`${result.filePath}-${result.snippet}`} className="search-result search-result--split">
-          <button className="search-result__tag" onClick={() => onOpenTag(result.snippet)} type="button">
-            <Hash size={12} />
-            {result.snippet}
-          </button>
-          <button
-            className="search-result__file"
-            onClick={() => onOpenFile(result.filePath)}
-            onMouseDown={(event) =>
-              dragManager.startDrag(event, { kind: "document", filePath: result.filePath })
-            }
-            type="button"
-          >
-            <strong>{result.title}</strong>
-            <span>{result.filePath}</span>
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function Section(props: SectionProps) {
   const {
     label,
@@ -121,9 +48,9 @@ export function Section(props: SectionProps) {
     rootKind,
     expandedPaths,
     onTogglePath,
-    onOpenFile,
     onOpenFolder,
     dragManager,
+    selection,
     onContextMenu,
     showHeader = true,
     alwaysShowRoots = false,
@@ -148,9 +75,9 @@ export function Section(props: SectionProps) {
           rootKind={rootKind}
           expandedPaths={expandedPaths}
           onTogglePath={onTogglePath}
-          onOpenFile={onOpenFile}
           onOpenFolder={onOpenFolder}
           dragManager={dragManager}
+          selection={selection}
           onContextMenu={onContextMenu}
           mirrored={mirrored}
           revealedPath={revealedPath}
@@ -174,7 +101,7 @@ export function Section(props: SectionProps) {
         return (
           <div key={section.path} className="root-group">
             <button
-              className="root-group__toggle"
+              className={`root-group__toggle${dragManager.hoverEdge?.kind === "explorer" && dragManager.hoverEdge.targetPath === section.path ? " tree-node--drop-target" : ""}`}
               data-explorer-drop-path={rootKind === "notes" ? section.path : undefined}
               onClick={() => onTogglePath(rootKey)}
               type="button"
@@ -189,9 +116,9 @@ export function Section(props: SectionProps) {
                 rootKind={rootKind}
                 expandedPaths={expandedPaths}
                 onTogglePath={onTogglePath}
-                onOpenFile={onOpenFile}
                 onOpenFolder={onOpenFolder}
                 dragManager={dragManager}
+                selection={selection}
                 onContextMenu={onContextMenu}
                 mirrored={mirrored}
                 revealedPath={revealedPath}
@@ -211,9 +138,9 @@ function TreeNodes({
   rootKind,
   expandedPaths,
   onTogglePath,
-  onOpenFile,
   onOpenFolder,
   dragManager,
+  selection,
   onContextMenu,
   mirrored,
   revealedPath,
@@ -224,9 +151,9 @@ function TreeNodes({
   rootKind: ExplorerRootKind;
   expandedPaths: Set<string>;
   onTogglePath: (path: string, rootKind?: ExplorerRootKind) => void;
-  onOpenFile: (filePath: string, line?: number | null) => void;
   onOpenFolder?: (directoryPath: string) => void;
   dragManager: DragManager;
+  selection: ExplorerSelection;
   onContextMenu?: (event: React.MouseEvent, target: ContextTarget) => void;
   mirrored: boolean;
   revealedPath: string | null;
@@ -243,7 +170,7 @@ function TreeNodes({
           return (
             <div key={node.path}>
               <button
-                className={`tree-node tree-node--directory${node.path === revealedPath ? " tree-node--revealed" : ""}`}
+                className={`tree-node tree-node--directory${dragManager.hoverEdge?.kind === "explorer" && dragManager.hoverEdge.targetPath === node.path ? " tree-node--drop-target" : ""}${node.path === revealedPath ? " tree-node--revealed" : ""}`}
                 data-explorer-path={node.path}
                 data-explorer-drop-path={rootKind === "notes" ? node.path : undefined}
                 data-explorer-root-kind={rootKind}
@@ -268,9 +195,9 @@ function TreeNodes({
                   rootKind={rootKind}
                   expandedPaths={expandedPaths}
                   onTogglePath={onTogglePath}
-                  onOpenFile={onOpenFile}
                   onOpenFolder={onOpenFolder}
                   dragManager={dragManager}
+                  selection={selection}
                   onContextMenu={onContextMenu}
                   mirrored={mirrored}
                   revealedPath={revealedPath}
@@ -285,16 +212,17 @@ function TreeNodes({
         return (
           <button
             key={node.path}
-            className={`tree-node tree-node--file${node.path === revealedPath ? " tree-node--revealed" : ""}`}
+            className={`tree-node tree-node--file${selection.paths.includes(node.path) ? " tree-node--selected" : ""}${node.path === revealedPath ? " tree-node--revealed" : ""}`}
             data-explorer-path={node.path}
             data-explorer-drop-path={rootKind === "notes" ? node.path : undefined}
             data-explorer-drop-kind={rootKind === "notes" ? "file" : undefined}
             data-explorer-root-kind={rootKind}
             style={depthStyle}
             aria-label={`${fileLabel}, file`}
-            onClick={() => { onTreeInteraction?.(); onOpenFile(node.path); }}
+            aria-pressed={selection.paths.includes(node.path)}
+            onClick={(event) => { onTreeInteraction?.(); selection.click(event, node.path); }}
             onMouseDown={rootKind === "notes" ? (event) =>
-              dragManager.startDrag(event, { kind: "workspace-path", path: node.path, nodeKind: "file" })
+              selection.mouseDown(event, node.path)
             : undefined}
             onContextMenu={onContextMenu ? (event) => onContextMenu(event, { path: node.path, kind: "file" }) : undefined}
             type="button"

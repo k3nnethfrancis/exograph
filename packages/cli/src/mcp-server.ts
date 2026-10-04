@@ -53,8 +53,7 @@ export async function runExographMcpServer(options: {
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
   const error = options.error ?? process.stderr;
-  const scope = await resolveWorkspaceScope(env, options.cwd ?? process.cwd());
-  const operations = await createOperations(env, scope, options.connectApp ?? AppClient.connect);
+  const operations = await createOperations(env, options.cwd ?? process.cwd(), options.connectApp ?? AppClient.connect);
   const lines = readline.createInterface({ input, crlfDelay: Infinity });
 
   for await (const line of lines) {
@@ -78,38 +77,61 @@ interface ExographMcpOperations {
 
 async function createOperations(
   env: NodeJS.ProcessEnv,
-  scope: WorkspaceScope,
+  cwd: string,
   connectApp: (runtimeRoot: string, env: NodeJS.ProcessEnv) => Promise<AppClientLike | null>,
 ): Promise<ExographMcpOperations> {
-  if (scope.status !== "resolved") {
+  async function currentOperations(): Promise<ExographMcpOperations> {
+    const scope = await resolveWorkspaceScope(env, cwd);
+    if (scope.status !== "resolved") {
+      return {
+        status: async () => workspaceStatus(scope, false, null),
+        search: async () => {
+          throw new Error(scopeError(scope));
+        },
+      };
+    }
+
+    const { model } = scope;
+    const runtimeRoot = env.EXOGRAPH_RUNTIME_ROOT ?? path.join(model.workspaceRoot, WORKSPACE_RUNTIME_DIRECTORY);
+    const client = await connectApp(runtimeRoot, env).catch(() => null);
+    if (client && (await clientMatchesWorkspace(client, model))) {
+      return {
+        status: async () => workspaceStatus(scope, true, await client.getIndexStatus()),
+        search: async (query, input) => {
+          const offset = parseSearchCursor(input.cursor, query);
+          const response = await client.search(query, { limit: input.limit, offset });
+          return agentSearchResponse(model, response, { limit: input.limit, offset });
+        },
+      };
+    }
     return {
-      status: async () => workspaceStatus(scope, false, null),
-      search: async () => {
-        throw new Error(scopeError(scope));
-      },
-    };
-  }
-  const { model } = scope;
-  const runtimeRoot = env.EXOGRAPH_RUNTIME_ROOT ?? path.join(model.workspaceRoot, WORKSPACE_RUNTIME_DIRECTORY);
-  const client = await connectApp(runtimeRoot, env).catch(() => null);
-  if (client && (await clientMatchesWorkspace(client, model))) {
-    return {
-      status: async () => workspaceStatus(scope, true, await client.getIndexStatus()),
+      status: async () => filesystemStatus(scope, model, runtimeRoot),
       search: async (query, input) => {
         const offset = parseSearchCursor(input.cursor, query);
-        const response = await client.search(query, { limit: input.limit, offset });
-        return agentSearchResponse(model, response, { limit: input.limit, offset });
+        return filesystemSearch(model, runtimeRoot, query, input.limit, offset);
       },
     };
   }
+
   return {
-    status: async () => workspaceStatus(scope, false, await filesystemSearchProvider.getStatus(model, runtimeRoot)),
-    search: async (query, input) => {
-      const offset = parseSearchCursor(input.cursor, query);
-      const response = await filesystemSearchProvider.search(model, runtimeRoot, query, { limit: input.limit, offset });
-      return agentSearchResponse(model, response, { limit: input.limit, offset });
-    },
+    status: async () => (await currentOperations()).status(),
+    search: async (query, input) => (await currentOperations()).search(query, input),
   };
+}
+
+async function filesystemStatus(scope: Extract<WorkspaceScope, { status: "resolved" }>, model: WorkspaceModel, runtimeRoot: string): Promise<JsonRecord> {
+  return workspaceStatus(scope, false, await filesystemSearchProvider.getStatus(model, runtimeRoot));
+}
+
+async function filesystemSearch(
+  model: WorkspaceModel,
+  runtimeRoot: string,
+  query: string,
+  limit: number,
+  offset: number,
+): Promise<object> {
+  const response = await filesystemSearchProvider.search(model, runtimeRoot, query, { limit, offset });
+  return agentSearchResponse(model, response, { limit, offset });
 }
 
 async function clientMatchesWorkspace(client: AppClientLike, model: WorkspaceModel): Promise<boolean> {

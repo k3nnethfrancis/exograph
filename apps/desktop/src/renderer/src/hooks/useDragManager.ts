@@ -19,7 +19,7 @@ export type DragPayload =
   | { kind: "document"; filePath: string; sourcePaneId?: string }
   | { kind: "terminal"; terminalId: string; sourcePaneId?: string }
   | { kind: "preview"; previewId: string; sourcePaneId?: string }
-  | { kind: "workspace-path"; path: string; nodeKind: "file" | "directory" };
+  | { kind: "workspace-path"; path: string; nodeKind: "file" | "directory"; paths?: string[] };
 
 export interface DragState {
   payload: DragPayload;
@@ -219,6 +219,7 @@ export function useDragManager(
           };
           dragRef.current = state;
           setDrag(state);
+          setHoverEdge(findDropTarget(event.clientX, event.clientY, state.payload));
           document.body.style.cursor = "grabbing";
         }
         return;

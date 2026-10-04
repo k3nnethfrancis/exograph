@@ -224,6 +224,52 @@ describe("QMD index adapter", () => {
     expect(await fileExists(pendingQmdCollectionReindexPath(root))).toBe(false);
   });
 
+  it("recognizes a short lexical result as exhausted when its collection owns the entire index", async () => {
+    const root = await fixtureRoot();
+    const model = indexedModel(root, "lexical");
+    const runtime = path.join(root, ".exograph");
+    await qmdSearchProvider.search(model, runtime, "focus");
+    const collection = configuredCollectionForPath(stores[0], path.join(root, "notes"));
+    storeStatusOverride = {
+      totalDocuments: 2000, needsEmbedding: 0, hasVectorIndex: false,
+      collections: [{ name: collection, documents: 2000, lastUpdated: "2026-09-21" }],
+    };
+    searchLexResultsOverride = [{ filepath: `qmd://${collection}/focus.md`, title: "Focus", score: 1 }];
+
+    const result = await qmdSearchProvider.search(model, runtime, "focus");
+    expect(result.warnings).toEqual([]);
+    expect(result.hasMore).toBe(false);
+    expect(result.results).toHaveLength(1);
+    expect(stores.at(-1)?.searchLexCalls).toHaveLength(1);
+  });
+
+  it("reconciles legacy lossy paths once even when the collection identity is unchanged", async () => {
+    const root = await fixtureRoot();
+    const model = indexedModel(root, "lexical");
+    const runtime = path.join(root, ".exograph");
+    await qmdSearchProvider.search(model, runtime, "focus");
+    const collection = configuredCollectionForPath(stores[0], path.join(root, "notes"));
+    await writeFile(path.join(runtime, "qmd", "index.sqlite"), "", "utf8");
+    await rm(path.join(runtime, "qmd", "exact-paths-v1"), { force: true });
+    existingQmdCollections = [{ name: collection, pwd: path.join(root, "notes") }];
+    updateError = new Error("interrupted path migration");
+
+    const failed = await qmdSearchProvider.search(model, runtime, "focus");
+    expect(failed.source).toBe("filesystem");
+    expect(await fileExists(path.join(runtime, "qmd", "exact-paths-v1"))).toBe(false);
+    expect(await fileExists(pendingQmdCollectionReindexPath(root))).toBe(true);
+
+    updateError = null;
+    const repaired = await qmdSearchProvider.search(model, runtime, "focus");
+    expect(repaired.source).toBe("qmd");
+    expect(stores.at(-1)?.updateOptions).toEqual([{ collections: [collection] }]);
+    expect(await fileExists(path.join(runtime, "qmd", "exact-paths-v1"))).toBe(true);
+    expect(await fileExists(pendingQmdCollectionReindexPath(root))).toBe(false);
+
+    await qmdSearchProvider.search(model, runtime, "focus");
+    expect(stores.at(-1)?.updateOptions).toEqual([]);
+  });
+
   it("rejects duplicate collection identities instead of collapsing root policies", async () => {
     const root = await fixtureRoot();
     const notesPath = path.join(root, "notes");

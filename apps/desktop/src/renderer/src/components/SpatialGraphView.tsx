@@ -109,11 +109,15 @@ export function SpatialGraphView({
   const topologyRef = useRef<GraphTopology | null>(null);
   const graphReturnPathRef = useRef(graphReturnPath ?? null);
   const inspectedConceptRef = useRef(inspectedConcept);
+  const focusRequestRef = useRef(focusRequest);
   graphReturnPathRef.current = graphReturnPath ?? null;
   inspectedConceptRef.current = inspectedConcept;
+  focusRequestRef.current = focusRequest;
   const metadataStoreRef = useRef<GraphMetadataStore | null>(null);
   const loadSequenceRef = useRef(0);
   const inspectionSequenceRef = useRef(0);
+  const inspectedConceptKeyRef = useRef<string | null>(null);
+  const consumedFocusSequenceRef = useRef(0);
   const generationRef = useRef(0);
   const activeGenerationRef = useRef(0);
   const topologyPendingRef = useRef(false);
@@ -176,12 +180,26 @@ export function SpatialGraphView({
     return metadataStoreRef.current?.resolve(reference, sourceSnapshotId) ?? null;
   }, []);
 
+  const clearSelectionDetail = useCallback(() => {
+    inspectionSequenceRef.current += 1;
+    setSelectedDetail(null);
+    setDetailStatus(null);
+  }, []);
+
+  const markUserSelection = useCallback(() => {
+    if (inspectedConceptRef.current) inspectedConceptKeyRef.current = inspectedConceptKey(inspectedConceptRef.current);
+    if (focusRequestRef.current) consumedFocusSequenceRef.current = focusRequestRef.current.sequence;
+    inspectionSequenceRef.current += 1;
+  }, []);
+
   const inspectIndex = useCallback(async (index: number) => {
     const currentTopology = topologyRef.current;
     if (!currentTopology || index < 0 || index >= currentTopology.nodeCount) return;
     const sequence = ++inspectionSequenceRef.current;
     runtimeRef.current?.setSelection(index);
     setRouteNodeCount(0);
+    setSelectedDetail(null);
+    setDetailStatus(null);
     if (!metadataStoreRef.current?.hasSummary(index, currentTopology.sourceSnapshotId)) {
       void readSummaries([index], currentTopology.sourceSnapshotId);
     }
@@ -362,10 +380,8 @@ export function SpatialGraphView({
     void api.notes.getGraphTopology().then((next) => {
       if (request !== loadSequenceRef.current || runtimeRef.current !== runtime) return;
       const previous = topologyRef.current;
-      if (previous?.sourceSnapshotId !== next.sourceSnapshotId) {
-        setSelectedDetail(null);
-        setDetailStatus(null);
-      }
+      const snapshotChanged = previous?.sourceSnapshotId !== next.sourceSnapshotId;
+      if (snapshotChanged) clearSelectionDetail();
       metadataStoreRef.current?.prune(next.sourceSnapshotId);
       topologyRef.current = next;
       setTopology(next);
@@ -377,6 +393,7 @@ export function SpatialGraphView({
       const cachedSummaries = metadataStoreRef.current?.cachedSummaries(next.sourceSnapshotId) ?? [];
       runtime.replaceSummaries(new Map(cachedSummaries.map((summary) => [summary.index, summary])));
       void readSummaries(initialGraphSummaryIndexes(next, scene.interaction.selected), next.sourceSnapshotId);
+      if (snapshotChanged && scene.interaction.selected >= 0) void inspectIndex(scene.interaction.selected);
       const sameLayoutEpoch = previous?.topologyHash === next.topologyHash && previous.layoutEpochId === next.layoutEpochId;
       const needsLayout = !sameLayoutEpoch || !scene.layout.settled;
       const workerAvailable = workerRef.current !== null;
@@ -415,16 +432,24 @@ export function SpatialGraphView({
       updatePendingWork();
     });
     return () => { loadSequenceRef.current += 1; };
-  }, [readSummaries, refreshKey, reloadNonce, runtimeVersion, updatePendingWork]);
+  }, [clearSelectionDetail, inspectIndex, readSummaries, refreshKey, reloadNonce, runtimeVersion, updatePendingWork]);
 
   useEffect(() => {
     const currentTopology = topologyRef.current;
-    if (!inspectedConcept || !currentTopology) return;
+    if (!inspectedConcept) {
+      inspectedConceptKeyRef.current = null;
+      return;
+    }
+    if (!currentTopology) return;
+    const key = inspectedConceptKey(inspectedConcept);
+    if (key === inspectedConceptKeyRef.current) return;
     const sequence = ++inspectionSequenceRef.current;
     let cancelled = false;
     void resolveConcept(inspectedConcept, currentTopology.sourceSnapshotId).then(async (summary) => {
-      if (cancelled || !summary || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
+      if (cancelled || sequence !== inspectionSequenceRef.current || !summary
+        || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
       runtimeRef.current?.setSelection(summary.index);
+      inspectedConceptKeyRef.current = key;
       setRouteNodeCount(0);
       const detail = await readDetail(summary.index, currentTopology.sourceSnapshotId);
       if (cancelled || sequence !== inspectionSequenceRef.current || !detail
@@ -434,22 +459,32 @@ export function SpatialGraphView({
     });
     return () => {
       cancelled = true;
-      inspectionSequenceRef.current += 1;
     };
   }, [inspectedConcept?.conceptId, inspectedConcept?.filePath, readDetail, resolveConcept, topology?.sourceSnapshotId]);
 
   useEffect(() => {
     const currentTopology = topologyRef.current;
     if (!focusRequest || !currentTopology) return;
+    if (focusRequest.sequence <= consumedFocusSequenceRef.current) return;
+    const sequence = ++inspectionSequenceRef.current;
     let cancelled = false;
-    void resolveConcept(focusRequest.concept, currentTopology.sourceSnapshotId).then((summary) => {
-      if (cancelled || !summary || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
+    void resolveConcept(focusRequest.concept, currentTopology.sourceSnapshotId).then(async (summary) => {
+      if (cancelled || sequence !== inspectionSequenceRef.current || !summary
+        || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
       runtimeRef.current?.setSelection(summary.index);
       setRouteNodeCount(0);
+      setSelectedDetail(null);
+      setDetailStatus(null);
       runtimeRef.current?.focus(summary.index, prefersReducedMotion());
+      consumedFocusSequenceRef.current = focusRequest.sequence;
+      const detail = await readDetail(summary.index, currentTopology.sourceSnapshotId);
+      if (cancelled || sequence !== inspectionSequenceRef.current || !detail
+        || topologyRef.current?.sourceSnapshotId !== currentTopology.sourceSnapshotId) return;
+      setSelectedDetail(detail);
+      setDetailStatus(null);
     });
     return () => { cancelled = true; };
-  }, [focusRequest?.sequence, resolveConcept, topology?.sourceSnapshotId]);
+  }, [focusRequest?.sequence, readDetail, resolveConcept, topology?.sourceSnapshotId]);
 
   async function openIndex(index: number) {
     const currentTopology = topologyRef.current;
@@ -487,6 +522,8 @@ export function SpatialGraphView({
     restoreSelection: restoreGraphSelection,
     readSummaries,
     setRouteNodeCount,
+    clearSelectionDetail,
+    markUserSelection,
   });
 
   return (
@@ -507,7 +544,7 @@ export function SpatialGraphView({
         <canvas
           ref={canvasRef}
           aria-describedby={keyboardHelpId}
-          aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight + - [ ] Space Enter Escape"
+          aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight + - Space Enter Escape"
           aria-label="Interactive knowledge graph"
           aria-roledescription="spatial knowledge graph"
           className="spatial-graph__interaction"
@@ -524,7 +561,7 @@ export function SpatialGraphView({
           onWheel={graphInput.onWheel}
           tabIndex={0}
         />
-        <p className="sr-only" id={keyboardHelpId}>Left and right brackets select the previous or next Note. Arrow keys orbit. Plus and minus zoom. Space or F focuses the selected Note. O frames the graph. Enter opens the selected Note. Escape returns to editor context.</p>
+        <p className="sr-only" id={keyboardHelpId}>Arrow keys follow connected nodes in the pressed direction and center the camera on the selection. Plus and minus zoom. Space or F focuses the selected Note. O frames the graph. Enter opens the selected Note. Escape returns to editor context.</p>
         {loading ? <div className="spatial-graph__state spatial-graph__state--building"><GraphBuildingIndicator /></div> : null}
         {error ? (
           <button
@@ -550,6 +587,10 @@ function lookupReference(concept: InspectedConcept): GraphConceptLookupReference
   if (concept.conceptId) return { conceptId: concept.conceptId };
   if (concept.filePath) return { filePath: concept.filePath };
   return null;
+}
+
+function inspectedConceptKey(concept: InspectedConcept): string {
+  return concept.conceptId ? `id:${concept.conceptId}` : `path:${concept.filePath ?? ""}`;
 }
 
 function prefersReducedMotion(): boolean {

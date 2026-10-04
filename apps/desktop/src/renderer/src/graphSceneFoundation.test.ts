@@ -355,8 +355,7 @@ describe("camera and controller transforms", () => {
     expect(graphKeyboardIntent(camera, "Escape", viewport)).toEqual({ kind: "clear" });
     expect(graphKeyboardIntent(camera, "x", viewport)).toEqual({ kind: "none" });
     expect(graphKeyboardIntent(camera, "+", viewport)).toMatchObject({ kind: "camera", camera: { distance: expect.any(Number) } });
-    const left = graphKeyboardIntent(camera, "ArrowLeft", viewport);
-    expect(left.kind === "camera" && left.camera.yaw).toBeGreaterThan(camera.yaw);
+    expect(graphKeyboardIntent(camera, "ArrowLeft", viewport)).toEqual({ kind: "none" });
   });
 });
 

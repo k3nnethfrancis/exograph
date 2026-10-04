@@ -87,7 +87,7 @@ export function useWorkspaceSearch(options: { indexedOnEnter: boolean; qmdSelect
     setResultQuery(trimmedQuery);
     setMessage(null);
     try {
-      const response = await window.exograph.workspace.searchIndex(trimmedQuery, { limit: 30, forceMode: "lexical" });
+      const response = await window.exograph.workspace.searchIndex(trimmedQuery, { limit: 30 });
       if (runRef.current !== runId) {
         return;
       }

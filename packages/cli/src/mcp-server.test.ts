@@ -53,6 +53,35 @@ async function invokeMcp(
     .map((line) => JSON.parse(line));
 }
 
+async function invokeMcpAcrossRequests(
+  requests: object[],
+  options: Omit<Parameters<typeof runExographMcpServer>[0], "input" | "output" | "error">,
+  afterResponse?: (index: number) => void,
+): Promise<Record<string, unknown>[]> {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const responses: Record<string, unknown>[] = [];
+  let buffered = "";
+  let wake: (() => void) | undefined;
+  output.on("data", (chunk) => {
+    buffered += chunk.toString();
+    const lines = buffered.split("\n");
+    buffered = lines.pop() ?? "";
+    for (const line of lines.filter(Boolean)) responses.push(JSON.parse(line));
+    wake?.();
+    wake = undefined;
+  });
+  const server = runExographMcpServer({ ...options, input, output, error: new PassThrough() });
+  for (const [index, request] of requests.entries()) {
+    input.write(`${JSON.stringify(request)}\n`);
+    if (responses.length <= index) await new Promise<void>((resolve) => { wake = resolve; });
+    afterResponse?.(index);
+  }
+  input.end();
+  await server;
+  return responses;
+}
+
 function toolCall(id: number, name: string, arguments_: Record<string, unknown> = {}): object {
   return { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: arguments_ } };
 }
@@ -228,6 +257,110 @@ describe("Exograph MCP server", () => {
     expect(toolText(responses[1]).results?.[0]).toMatchObject({ path: path.join(root, "app.md"), source: "qmd" });
   });
 
+  it("rediscovers the app for each request as it starts after MCP", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-mcp-lifecycle-"));
+    temporaryRoots.push(root);
+    const filesystemPath = path.join(root, "filesystem.md");
+    await writeFile(filesystemPath, "# Filesystem\n\nAvailable before the app starts.\n", "utf8");
+    let appAvailable = false;
+    let connections = 0;
+    const responses = await invokeMcpAcrossRequests([
+      toolCall(1, "workspace_status"),
+      toolCall(2, "search_notes", { query: "Available" }),
+      toolCall(3, "search_notes", { query: "from app" }),
+    ], {
+      env: { EXOGRAPH_WORKSPACE_ROOT: root, EXOGRAPH_NOTE_ROOTS: root },
+      connectApp: async () => {
+        connections += 1;
+        return appAvailable ? mcpAppClient(root, "Started") : null;
+      },
+    }, (index) => {
+      if (index === 1) appAvailable = true;
+    });
+
+    expect(connections).toBe(3);
+    expect(toolText(responses[0])).toMatchObject({ app: { available: false } });
+    expect(toolText(responses[1]).results?.[0]).toMatchObject({ path: filesystemPath, source: "filesystem" });
+    expect(toolText(responses[2]).results?.[0]).toMatchObject({ path: path.join(root, "Started.md"), source: "qmd" });
+  });
+
+  it("rediscovers a replacement app client after a restart", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-mcp-restart-"));
+    temporaryRoots.push(root);
+    let activeClient = mcpAppClient(root, "Old token");
+    let connections = 0;
+    const responses = await invokeMcpAcrossRequests([
+      toolCall(1, "workspace_status"),
+      toolCall(2, "search_notes", { query: "from new app" }),
+    ], {
+      env: { EXOGRAPH_WORKSPACE_ROOT: root, EXOGRAPH_NOTE_ROOTS: root },
+      connectApp: async () => {
+        connections += 1;
+        return activeClient;
+      },
+    }, (index) => {
+      if (index === 0) activeClient = mcpAppClient(root, "New token");
+    });
+
+    expect(connections).toBe(2);
+    expect(toolText(responses[1]).results?.[0]).toMatchObject({ path: path.join(root, "New token.md"), title: "New token", source: "qmd" });
+  });
+
+  it.each(["status", "search"] as const)("surfaces an in-flight app %s failure and recovers on the next request", async (operation) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-mcp-in-flight-"));
+    temporaryRoots.push(root);
+    let healthy = false;
+    let connections = 0;
+    const requests = operation === "status"
+      ? [toolCall(1, "workspace_status"), toolCall(2, "search_notes", { query: "from healthy app" })]
+      : [toolCall(1, "search_notes", { query: "from failing app" }), toolCall(2, "search_notes", { query: "from healthy app" })];
+    const responses = await invokeMcpAcrossRequests(requests, {
+      env: { EXOGRAPH_WORKSPACE_ROOT: root, EXOGRAPH_NOTE_ROOTS: root },
+      connectApp: async () => {
+        connections += 1;
+        return {
+          getStatus: async () => appStatus(root),
+          getIndexStatus: async () => {
+            if (!healthy) throw new Error("index unavailable during request");
+            return indexStatusResponse();
+          },
+          search: async () => {
+            if (!healthy) throw new Error("search unavailable during request");
+            return { query: "from healthy app", mode: "hybrid" as const, source: "qmd" as const, warnings: [], results: [{ filePath: path.join(root, "healthy.md"), title: "Healthy", snippet: "", score: 1, source: "qmd" as const }] };
+          },
+        };
+      },
+    }, (index) => {
+      if (index === 0) healthy = true;
+    });
+
+    expect(connections).toBe(2);
+    expect(responses[0].result).toMatchObject({ isError: true });
+    expect(resultText(responses[0])).toContain(`${operation === "status" ? "index" : "search"} unavailable during request`);
+    expect(toolText(responses[1]).results?.[0]).toMatchObject({ path: path.join(root, "healthy.md"), source: "qmd" });
+  });
+
+  it("uses the same-workspace filesystem fallback when the app becomes mismatched", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-mcp-mismatch-"));
+    const otherRoot = await mkdtemp(path.join(os.tmpdir(), "exograph-mcp-mismatch-other-"));
+    temporaryRoots.push(root, otherRoot);
+    const filesystemPath = path.join(root, "scoped.md");
+    await writeFile(filesystemPath, "# Scoped\n\nThe caller scope remains authoritative.\n", "utf8");
+    let appRoot = root;
+    const responses = await invokeMcpAcrossRequests([
+      toolCall(1, "workspace_status"),
+      toolCall(2, "search_notes", { query: "caller scope" }),
+    ], {
+      env: { EXOGRAPH_WORKSPACE_ROOT: root, EXOGRAPH_NOTE_ROOTS: root },
+      connectApp: async () => mcpAppClient(appRoot, "Wrong app"),
+    }, (index) => {
+      if (index === 0) appRoot = otherRoot;
+    });
+
+    expect(toolText(responses[0])).toMatchObject({ app: { available: true } });
+    expect(toolText(responses[1]).results?.[0]).toMatchObject({ path: filesystemPath, source: "filesystem" });
+  });
+
   it("returns tool errors as MCP tool results rather than crashing the protocol", async () => {
     const [response] = await invokeMcp([toolCall(1, "read_note")], {
       env: { EXOGRAPH_WORKSPACE_ROOT: process.cwd(), EXOGRAPH_NOTE_ROOTS: process.cwd() },
@@ -276,6 +409,14 @@ function indexStatusResponse() {
     lastUpdated: "2026-07-24T00:00:00.000Z",
     warnings: [],
     errors: [],
+  };
+}
+
+function mcpAppClient(root: string, title: string) {
+  return {
+    getStatus: async () => appStatus(root),
+    getIndexStatus: async () => indexStatusResponse(),
+    search: async () => ({ query: "from app", mode: "hybrid" as const, source: "qmd" as const, warnings: [], results: [{ filePath: path.join(root, `${title}.md`), title, snippet: "", score: 1, source: "qmd" as const }] }),
   };
 }
 

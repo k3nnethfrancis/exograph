@@ -29,7 +29,11 @@ export function usePaneDropOrchestration(options: UsePaneDropOrchestrationOption
     if (target.kind === "explorer") {
       if (payload.kind === "workspace-path") {
         const targetDirectoryPath = target.targetKind === "file" ? directoryOf(target.targetPath) : target.targetPath;
-        void options.moveWorkspacePathIntoDirectory(payload.path, targetDirectoryPath).catch((error) => {
+        void (async () => {
+          for (const sourcePath of payload.paths ?? [payload.path]) {
+            await options.moveWorkspacePathIntoDirectory(sourcePath, targetDirectoryPath);
+          }
+        })().catch((error) => {
           console.error("[workspace] move failed", error);
         });
       }

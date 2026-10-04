@@ -1,3 +1,16 @@
+diff --git a/dist/cli/qmd.js b/dist/cli/qmd.js
+index eeb077d373bed30e6cdaada7812d05f162a5850c..77d173d9c242f4e819a6c317791f4c4037fa33c7 100755
+--- a/dist/cli/qmd.js
++++ b/dist/cli/qmd.js
+@@ -1570,7 +1570,7 @@ async function indexFiles(pwd, globPattern = DEFAULT_GLOB, collectionName, suppr
+     const startTime = Date.now();
+     for (const relativeFile of files) {
+         const filepath = getRealPath(resolve(resolvedPwd, relativeFile));
+-        const path = handelize(relativeFile); // Normalize path for token-friendliness
++        const path = relativeFile; // Preserve the filesystem identity; lossy handles can collide.
+         seenPaths.add(path);
+         let content;
+         try {
 diff --git a/dist/db.js b/dist/db.js
 index 88b6e034c0d9cf6353df1947f2276c0eda5dba9c..db38b92d76474baedd56dd19fbaeb119544e5280 100644
 --- a/dist/db.js
@@ -72,9 +85,18 @@ index 740a4f24a1ba9e4b3f2fcf18170413d39f0b8b35..3b189f7ed714ef44ca43f229bd9c8086
   * vectors_vec uses DELETE + INSERT instead of INSERT OR REPLACE because sqlite-vec's
   * vec0 virtual tables silently ignore the OR REPLACE conflict clause.
 diff --git a/dist/store.js b/dist/store.js
-index 918126323d6ca56ecbadcacff097c3a78938cfe7..631cc178328636a68f20b6ae1e1c17fe860db4c6 100644
+index 918126323d6ca56ecbadcacff097c3a78938cfe7..8a5571ef03e6cd8added2d8205ef4159a51b9e9c 100644
 --- a/dist/store.js
 +++ b/dist/store.js
+@@ -966,7 +966,7 @@ export async function reindexCollection(store, collectionPath, globPattern, coll
+     const seenPaths = new Set();
+     for (const relativeFile of files) {
+         const filepath = getRealPath(resolve(collectionPath, relativeFile));
+-        const path = handelize(relativeFile);
++        const path = relativeFile; // Preserve the filesystem identity; lossy handles can collide.
+         seenPaths.add(path);
+         let content;
+         try {
 @@ -1034,6 +1034,10 @@ function resolveEmbedOptions(options) {
      return {
          maxDocsPerBatch: validatePositiveIntegerOption("maxDocsPerBatch", options?.maxDocsPerBatch, DEFAULT_EMBED_MAX_DOCS_PER_BATCH),

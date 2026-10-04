@@ -69,6 +69,7 @@ const DEFAULT_CONTENT_LINES = 80;
 const MAX_QMD_REFILL_SLACK_PER_STREAM = 100;
 const QMD_DIRECTORY_NAME = "qmd";
 const QMD_PENDING_COLLECTION_REINDEX_FILE = "pending-collection-reindex";
+const QMD_EXACT_PATHS_FILE = "exact-paths-v1";
 
 class QmdCollectionConfigurationError extends Error {
   constructor(message: string) {
@@ -334,6 +335,7 @@ async function searchIndex(
     const effectiveMode = options.forceMode ?? model.indexing.mode;
     let actualMode = effectiveMode;
     let lexicalExhaustionScanLimit: number | null = null;
+    const completeLexicalCollections = new Set<string>();
     try {
       const qmdStatus = await qmdStore.getStatus();
       const totalDocuments = Number(qmdStatus.totalDocuments ?? 0);
@@ -342,6 +344,14 @@ async function searchIndex(
         // its collection filter. Once that window covers every indexed document,
         // a short collection result is a truthful exhaustion signal.
         lexicalExhaustionScanLimit = Math.ceil(totalDocuments / 10);
+        // If this collection contains the entire index, the global candidate
+        // window cannot lose matches to another collection. A short response
+        // then proves exhaustion without scanning 10% of a large corpus.
+        for (const collection of qmdStatus.collections ?? []) {
+          if (Number(collection.documents) === totalDocuments) {
+            completeLexicalCollections.add(collection.name);
+          }
+        }
       }
       const pendingEmbeddings = Number(qmdStatus.needsEmbedding ?? 0);
       if (
@@ -357,7 +367,7 @@ async function searchIndex(
     const lexicalStreams = (): QmdStream[] => collections.map(
       (collection) => ({
         fetch: (scanLimit) => qmdStore.searchLex(trimmedQuery, { limit: scanLimit, collection }),
-        shortResultTerminalScanLimit: lexicalExhaustionScanLimit,
+        shortResultTerminalScanLimit: completeLexicalCollections.has(collection) ? 0 : lexicalExhaustionScanLimit,
       }),
     );
 
@@ -696,18 +706,21 @@ async function openQmdStore(model: WorkspaceModel, runtimeRoot: string): Promise
       collections: collectionConfig,
     },
   });
-  if (rootsNeedingReindex.length > 0 || hasPendingReindex) {
-    // QMD 2.5.3 syncs inline collection configuration but does not transfer
-    // document collection names. A pending marker is deliberately only a
-    // presence bit: after interrupted work, rebuild every *current* root so
-    // root additions/removals cannot leave a shadow registry to reconcile.
-    try {
+  try {
+    if (rootsNeedingReindex.length > 0 || hasPendingReindex) {
+      // Reconcile all current roots after an interrupted collection/path repair.
       await store.update({ collections: model.indexedRoots.map((root) => collections.nameFor(root)) });
-      await clearPendingQmdCollectionReindex(runtimeRoot);
-    } catch (error) {
-      await store.close();
-      throw error;
     }
+    // Only publish this after successful reconciliation; failed repairs must retry.
+    const exactPathsPath = path.join(getQmdRuntimePath(runtimeRoot), QMD_EXACT_PATHS_FILE);
+    if (!(await pathExists(exactPathsPath))) {
+      await writeFile(`${exactPathsPath}.tmp`, "1\n", "utf8");
+      await rename(`${exactPathsPath}.tmp`, exactPathsPath);
+    }
+    await clearPendingQmdCollectionReindex(runtimeRoot);
+  } catch (error) {
+    await store.close();
+    throw error;
   }
   return store;
 }
@@ -864,6 +877,12 @@ async function rootsNeedingQmdCollectionReindex(
   try {
     store = await qmd.createStore({ dbPath: getQmdDbPath(runtimeRoot) });
     const existing = await store.listCollections();
+    // QMD 2.5.3 used handelize() for persisted paths, merging distinct names
+    // and losing spaces/underscores. The bundled patch now preserves exact
+    // relative filenames; existing collections need one document reconciliation.
+    if (existing.length > 0 && !(await pathExists(path.join(getQmdRuntimePath(runtimeRoot), QMD_EXACT_PATHS_FILE)))) {
+      return roots;
+    }
     const reindex = await Promise.all(roots.map(async (root) => {
       const matches = await Promise.all(existing
         .filter((collection) => collection.name !== collections.nameFor(root))
@@ -935,7 +954,7 @@ function mapQmdResult(rawResult: unknown, collections: QmdCollectionIdentity): I
   }
 
   const title = stringValue(result.title) ?? path.basename(filePath, path.extname(filePath));
-  const snippet = stringValue(result.snippet) ?? stringValue(result.bestChunk) ?? "";
+  const snippet = stringValue(result.snippet) ?? stringValue(result.bestChunk) ?? stringValue(result.body) ?? "";
   return {
     filePath,
     title,

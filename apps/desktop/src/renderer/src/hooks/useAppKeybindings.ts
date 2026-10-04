@@ -90,7 +90,6 @@ function isCodeMirrorEvent(event: KeyboardEvent): boolean {
   return event.composedPath().some((entry) => entry instanceof Element && entry.closest(".cm-editor"));
 }
 
-type ShortcutEvent = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "repeat">;
 type ShellPanelShortcutEvent = Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "repeat">;
 export type ShellPanelShortcut = "explorer" | "utility";
 
@@ -99,10 +98,6 @@ export function shellPanelShortcut(event: ShellPanelShortcutEvent, bindings?: Wo
   if (shortcutMatches(event, resolved.explorer)) return "explorer";
   if (shortcutMatches(event, resolved.utility)) return "utility";
   return null;
-}
-
-export function isNewTerminalShortcut(event: ShortcutEvent, bindings?: WorkspaceShortcutBindings): boolean {
-  return shortcutMatches({ ...event, code: event.key.length === 1 ? `Key${event.key.toUpperCase()}` : event.key }, resolvedWorkspaceShortcutBindings(bindings).terminal);
 }
 
 function isZoomKey(key: string): boolean {
