@@ -44,7 +44,7 @@ jobs:
         run: pnpm ci:check
 
       - name: Electron smoke
-        run: pnpm --filter @exograph/desktop exec playwright test tests/e2e/gate-d-gpu-terminal-smoke.spec.ts
+        run: pnpm --filter @exograph/desktop exec playwright test tests/e2e/gate-d-gpu-terminal-smoke.spec.ts tests/e2e/explorer-selection.spec.ts
 
       - name: Browser workspace smoke
         run: |

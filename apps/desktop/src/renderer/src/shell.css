@@ -879,6 +879,7 @@
   font-weight: 400;
 }
 
+.tree-node--selected,
 .tree-node--revealed {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--text);
@@ -1830,4 +1831,10 @@ body.pane-resize-active .browser-pane__frame {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.tree-node--drop-target {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }

@@ -195,6 +195,8 @@ export function useWorkspaceMutations(options: UseWorkspaceMutationsOptions) {
           message: `${sourceLabel} cannot be moved into ${targetLabel} because ${pathLabel(nextPath)} already exists there. Exograph will not merge or overwrite folders automatically.`,
           confirmLabel: "OK",
         });
+      } else {
+        setDialog({ kind: "move-conflict", title: "Move failed", message: `Could not move ${sourceLabel}: ${message}`, confirmLabel: "OK" });
       }
       throw error;
     }
