@@ -99,3 +99,9 @@ The command is a native process with the permissions available to your local use
 
 Read [Agent invocations](document-agent-protocol.md) for response envelopes,
 review behavior, failed runs, and session resume.
+
+### Selecting and moving notes
+
+In the Explorer, Shift-click selects a range of visible files. Command-click on macOS (Ctrl-click elsewhere) adds or removes individual files. Drag any selected file onto a folder to move the selected group; the folder highlights before you release. A regular click returns to one selected file and opens it. Collapsed folders do not contribute hidden files to the selection.
+
+Moves preserve existing destination files. If a move fails, Exograph stops the group at that file and shows the error; files already moved stay in their destination.

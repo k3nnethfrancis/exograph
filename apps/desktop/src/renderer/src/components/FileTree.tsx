@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { WorkspaceSearchResults } from "@exograph/core";
 import type { AppearanceMode, ResolvedAppearance } from "../appearance";
+import { useExplorerSelection, visibleExplorerFiles } from "../hooks/useExplorerSelection";
 import type { DragManager } from "../hooks/useDragManager";
 import type { WorkspaceSearchResultMode } from "../hooks/useWorkspaceSearch";
 import {
@@ -67,6 +68,9 @@ export function FileTree(props: FileTreeProps) {
   const [rootAction, setRootAction] = useState<"file" | "directory" | null>(null);
   const [revealedPath, setRevealedPath] = useState<string | null>(null);
   const processedRevealNonceRef = useRef<number | null>(null);
+  const visibleFiles = noteRoots.flatMap((root) => noteRoots.length === 1 || expandedPaths.has(`${ROOT_GROUP_PREFIX}${root.path}`)
+    ? visibleExplorerFiles(root.nodes, expandedPaths) : []);
+  const selection = useExplorerSelection(visibleFiles, dragManager, onOpenFile);
 
   const defaultExpandedPaths = useMemo(() => {
     const next = new Set<string>();
@@ -220,13 +224,13 @@ export function FileTree(props: FileTreeProps) {
             data-explorer-drop-path={noteRoots.length === 1 ? noteRoots[0].path : undefined}
           >
             <Section
+              selection={selection}
               label="Notes"
               rootKind="notes"
               showHeader={false}
               sections={noteRoots}
               expandedPaths={expandedPaths}
               onTogglePath={togglePath}
-              onOpenFile={onOpenFile}
               onOpenFolder={onOpenFolder}
               dragManager={dragManager}
               onContextMenu={openContextMenu}
@@ -237,6 +241,12 @@ export function FileTree(props: FileTreeProps) {
           </div>
         </div>
       </div>
+
+      {dragManager.drag?.payload.kind === "workspace-path" ? (
+        <div className="drag-ghost" style={{ left: dragManager.drag.mouseX, top: dragManager.drag.mouseY }}>
+          {(dragManager.drag.payload.paths?.length ?? 1) > 1 ? `${dragManager.drag.payload.paths!.length} files` : dragManager.drag.payload.path.split("/").at(-1)}
+        </div>
+      ) : null}
 
       {contextTarget && contextMenuPosition ? (
         <>
