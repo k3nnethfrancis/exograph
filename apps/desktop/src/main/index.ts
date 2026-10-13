@@ -383,8 +383,9 @@ function isPathWithin(rootPath: string, candidatePath: string): boolean {
 function registerIpcHandlers() {
   githubSyncService = new GitHubSyncService({
     stateRoot: path.join(app.getPath("userData"), "github-sync"),
-    toolsRoot: path.join(app.getPath("userData"), "publishing-tools"),
+    toolsRoot: path.join(app.getPath("userData"), "published-sites", ".tools"),
     noteRoots: () => workspaceModel.noteRoots.map((root) => root.path),
+    canSchedule: () => appLifecycle.isRendererReady() && !quitFlushStarted,
     withDocumentsFlushed: async (operation) => {
       if (!appLifecycle.isRendererReady()) throw new Error("Open Exograph and wait for your Workspace to load before syncing.");
       if (invocationRunner.hasWorkspaceWriter() || (await invocationRunner.listPendingReviews()).length) {
@@ -392,9 +393,7 @@ function registerIpcHandlers() {
       }
       return appLifecycle.withDocumentsFlushed(operation);
     },
-    publishStatus: (status) => {
-      if (workspaceModel.noteRoots.some((root) => root.path === status.root)) sendToRenderer("github-sync:status", status);
-    },
+    publishStatus: (status) => sendToRenderer("github-sync:status", status),
   });
   registerGitHubSyncIpc(githubSyncService);
   githubSyncService.start();

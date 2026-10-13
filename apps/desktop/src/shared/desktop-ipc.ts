@@ -7,6 +7,7 @@ type TerminalsApi = DesktopApi["terminals"];
 type ShellApi = DesktopApi["shell"];
 
 export interface DesktopInvokeHandlers {
+  "github-sync:cancel": DesktopApi["githubSync"]["cancel"];
   "github-sync:get-status": DesktopApi["githubSync"]["getStatus"];
   "github-sync:configure": DesktopApi["githubSync"]["configure"];
   "github-sync:sync-now": DesktopApi["githubSync"]["syncNow"];

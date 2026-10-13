@@ -6,18 +6,19 @@ import { GitSyncRepository, runSyncCommand, SYNC_EXCLUSIONS, SyncConflict } from
 
 const interval = (cadence: GitHubSyncConfig["cadence"]) => cadence === "hourly" ? 3_600_000 : cadence === "daily" ? 86_400_000 : 0;
 const active = new Set<GitHubSyncStatus["phase"]>(["checking", "saving", "fetching", "merging", "pushing"]);
-interface SavedState { version: 1; config: GitHubSyncConfig; lastAttempt?: string; lastSuccess?: string; message?: string; phase?: GitHubSyncStatus["phase"]; repository?: string; conflicts?: string[] }
+interface SavedState { version: 1; config: GitHubSyncConfig; lastAttempt?: string; lastSuccess?: string; lastSyncedCommit?: string; hasLocalChanges?: boolean; message?: string; phase?: GitHubSyncStatus["phase"]; repository?: string; conflicts?: string[] }
 export interface GitHubSyncServiceOptions {
   stateRoot: string;
   toolsRoot: string;
   noteRoots: () => string[];
   withDocumentsFlushed: <T>(operation: () => Promise<T>) => Promise<T>;
   publishStatus: (status: GitHubSyncStatus) => void;
-  repository?: Pick<GitSyncRepository, "inspect" | "sync">;
+  repository?: Pick<GitSyncRepository, "inspect" | "sync"> & Partial<Pick<GitSyncRepository, "cancel">>;
   now?: () => number;
+  canSchedule?: () => boolean;
 }
 export class GitHubSyncService {
-  private readonly repository: Pick<GitSyncRepository, "inspect" | "sync">;
+  private readonly repository: Pick<GitSyncRepository, "inspect" | "sync"> & Partial<Pick<GitSyncRepository, "cancel">>;
   private readonly now: () => number;
   private states = new Map<string, GitHubSyncStatus>();
   private pending: Promise<GitHubSyncStatus> | null = null;
@@ -52,7 +53,7 @@ export class GitHubSyncService {
     const status: GitHubSyncStatus = {
       root, config: saved?.config ?? { enabled: false, cadence: "manual", remote: "origin", branch },
       phase: saved?.phase && !active.has(saved.phase) ? saved.phase : "idle",
-      lastAttempt: saved?.lastAttempt, lastSuccess: saved?.lastSuccess, repository: saved?.repository,
+      lastAttempt: saved?.lastAttempt, lastSuccess: saved?.lastSuccess, lastSyncedCommit: saved?.lastSyncedCommit, hasLocalChanges: saved?.hasLocalChanges, repository: saved?.repository,
       message: saved?.phase && active.has(saved.phase) ? "The previous sync was interrupted. Sync now to check and continue safely." : saved?.message,
       conflicts: saved?.conflicts,
       excluded: [...SYNC_EXCLUSIONS],
@@ -65,24 +66,25 @@ export class GitHubSyncService {
     if (this.busy) throw new Error("Wait for the current sync to finish before changing its configuration.");
     this.busy = true;
     try {
-    validateConfig(input.config);
-    const root = await this.assertRoot(input.root);
-    const current = await this.getStatus();
-    const info = input.config.enabled ? await this.repository.inspect(root, input.config) : undefined;
-    await this.assertRoot(root);
-    const status: GitHubSyncStatus = { ...current, config: { ...input.config }, phase: "idle", repository: info?.repository, message: input.config.enabled ? "Ready to sync." : "Automatic sync is off.", conflicts: undefined };
-    this.updateNext(status);
-    await this.persist(status);
-    this.states.set(root, status);
-    this.options.publishStatus(structuredClone(status));
-    return structuredClone(status);
+      validateConfig(input.config);
+      const root = await this.assertRoot(input.root);
+      const current = await this.getStatus();
+      const info = input.config.enabled ? await this.repository.inspect(root, input.config) : undefined;
+      await this.assertRoot(root);
+      const destinationChanged = current.repository !== info?.repository || current.config.branch !== input.config.branch;
+      const status: GitHubSyncStatus = { ...current, ...(destinationChanged && input.config.enabled ? { lastAttempt: undefined, lastSuccess: undefined, lastSyncedCommit: undefined, hasLocalChanges: undefined } : {}), config: { ...input.config }, phase: "idle", repository: info?.repository, message: input.config.enabled ? "Ready to sync." : "Automatic sync is off.", conflicts: undefined };
+      this.updateNext(status);
+      await this.persist(status);
+      this.states.set(root, status);
+      this.options.publishStatus(structuredClone(status));
+      return structuredClone(status);
     } finally { this.busy = false; }
   }
   async syncNow(input: { root: string }): Promise<GitHubSyncStatus> {
     if (this.busy) throw new Error("A sync is already running. Wait for it to finish.");
     this.busy = true;
     try {
-      const root = await this.assertRoot(input.root);
+      await this.assertRoot(input.root);
       const status = await this.getStatus();
       if (!status.config.enabled) throw new Error("Save and enable GitHub sync before syncing.");
       const run = this.perform(status);
@@ -91,8 +93,15 @@ export class GitHubSyncService {
     } finally { this.pending = null; this.busy = false; }
   }
 
+  async cancel(): Promise<GitHubSyncStatus> {
+    const status = await this.getStatus();
+    if (!["checking", "fetching", "pushing"].includes(status.phase)) throw new Error("Wait for the local save or merge to finish before stopping sync.");
+    this.repository.cancel?.();
+    await this.idle();
+    return this.getStatus();
+  }
   async tick(): Promise<void> {
-    if (this.disposed || this.busy) return;
+    if (this.disposed || this.busy || this.options.canSchedule?.() === false) return;
     try {
       const status = await this.getStatus();
       if (!status.config.enabled || !interval(status.config.cadence)) return;
@@ -109,13 +118,14 @@ export class GitHubSyncService {
     await this.persist(status);
     this.publish(status);
     try {
-      await this.options.withDocumentsFlushed(async () => {
-        await this.assertRoot(status.root);
-        status.repository = await this.repository.sync(status.root, status.config, (phase) => { status.phase = phase; this.publish(status); });
-      });
+      const result = await this.repository.sync(status.root, status.config, (phase) => { status.phase = phase; this.publish(status); },
+        (operation) => this.options.withDocumentsFlushed(async () => { await this.assertRoot(status.root); return operation(); }), status.repository);
+      status.repository = result.repository;
       status.phase = "synced";
       status.lastSuccess = new Date(this.now()).toISOString();
-      status.message = "Saved work and remote changes are synced.";
+      status.lastSyncedCommit = result.commit;
+      status.hasLocalChanges = result.hasLocalChanges;
+      status.message = result.hasLocalChanges ? "Saved snapshot uploaded. Newer local edits will sync next time." : "Saved snapshot uploaded. Changes made afterward will sync next time.";
     } catch (error) {
       status.phase = error instanceof SyncConflict ? "conflict" : "error";
       status.message = error instanceof Error ? error.message : String(error);
@@ -144,9 +154,9 @@ export class GitHubSyncService {
   private statePath(root: string) { return path.join(this.options.stateRoot, `${createHash("sha256").update(root).digest("hex")}.json`); }
   private async persist(status: GitHubSyncStatus) {
     await mkdir(this.options.stateRoot, { recursive: true });
-    const { config, lastAttempt, lastSuccess, message, phase, repository, conflicts } = status;
+    const { config, lastAttempt, lastSuccess, lastSyncedCommit, hasLocalChanges, message, phase, repository, conflicts } = status;
     const temporary = `${this.statePath(status.root)}.${randomUUID()}.tmp`;
-    await writeFile(temporary, JSON.stringify({ version: 1, config, lastAttempt, lastSuccess, message, phase, repository, conflicts } satisfies SavedState, null, 2), { mode: 0o600 });
+    await writeFile(temporary, JSON.stringify({ version: 1, config, lastAttempt, lastSuccess, lastSyncedCommit, hasLocalChanges, message, phase, repository, conflicts } satisfies SavedState, null, 2), { mode: 0o600 });
     await rename(temporary, this.statePath(status.root));
   }
 }

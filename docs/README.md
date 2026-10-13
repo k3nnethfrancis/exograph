@@ -38,3 +38,5 @@ contracts are linked from there.
 The repository root has [setup and contribution guidance](../README.md) plus
 [agent guidance](../AGENTS.md). `docs/internal/`, when it exists locally, is
 ignored maintainer context; it is never public product documentation.
+
+- [GitHub sync](github-sync.md) — private notes synchronization, cadence, exclusions and another-Mac setup.

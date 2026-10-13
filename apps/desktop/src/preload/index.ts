@@ -38,6 +38,7 @@ const api: DesktopApi = {
   },
   ...(process.env.EXOGRAPH_TEST === "1" ? { test: { graphHooks: true as const } } : {}),
   githubSync: {
+    cancel: () => invokeDesktop("github-sync:cancel"),
     getStatus: () => invokeDesktop("github-sync:get-status"),
     configure: (input) => invokeDesktop("github-sync:configure", input),
     syncNow: (input) => invokeDesktop("github-sync:sync-now", input),

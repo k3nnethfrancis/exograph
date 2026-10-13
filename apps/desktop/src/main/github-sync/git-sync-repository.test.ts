@@ -67,6 +67,20 @@ describe("GitHub notes synchronization against two real clones", () => {
     expect(tracked).not.toContain(".env"); expect(tracked).not.toContain(".obsidian"); expect(tracked).not.toContain("runtime.json"); expect(tracked).not.toContain("ignored.md");
     expect(await readFile(path.join(f.a, ".env"), "utf8")).toBe("PRIVATE SENTINEL");
   });
+  it("syncs portable Obsidian configuration while excluding original credential-capable plugin state", async () => {
+    const f = await fixture();
+    await mkdir(path.join(f.a, ".obsidian/plugins/example"), { recursive: true });
+    await writeFile(path.join(f.a, ".obsidian/app.json"), '{"theme":"dark"}');
+    await writeFile(path.join(f.a, ".obsidian/plugins/example/main.js"), "// Plugin code");
+    await writeFile(path.join(f.a, ".obsidian/plugins/example/data.portable.json"), '{"history":[]}');
+    await writeFile(path.join(f.a, ".obsidian/plugins/example/data.json"), '{"apiKey":"secret"}');
+    await writeFile(path.join(f.a, ".obsidian/workspace.json.bak"), '{}');
+    await f.sync(f.a);
+    const tracked = await git(f.a, "ls-files");
+    expect(tracked).toContain(".obsidian/app.json"); expect(tracked).toContain("main.js"); expect(tracked).toContain("data.portable.json");
+    expect(tracked).not.toContain("example/data.json"); expect(tracked).not.toContain("workspace.json");
+    await f.sync(f.a); // Safe already-tracked Obsidian files remain accepted.
+  });
   it("refuses pre-staged changes without changing the index", async () => {
     const f = await fixture(); await writeFile(path.join(f.a, "note.md"), "Staged\n"); await git(f.a, "add", "note.md");
     const staged = await git(f.a, "diff", "--cached");
@@ -104,6 +118,44 @@ describe("GitHub notes synchronization against two real clones", () => {
   it("preserves an in-progress Git operation", async () => {
     const f = await fixture(); await writeFile(path.join(f.a, ".git/CHERRY_PICK_HEAD"), "existing");
     await expect(f.sync(f.a)).rejects.toThrow("existing Git operation"); expect(await readFile(path.join(f.a, ".git/CHERRY_PICK_HEAD"), "utf8")).toBe("existing");
+  });
+  it("uploads the captured snapshot and leaves edits made during upload for the next run", async () => {
+    const f = await fixture(); let checks = 0;
+    const repo = new GitSyncRepository({ toolsRoot: f.dir, verifyRemote: async () => {
+      if (++checks === 2) await writeFile(path.join(f.a, "note.md"), "Edited during upload\n");
+      return "owner/private";
+    } });
+    await writeFile(path.join(f.a, "note.md"), "Captured wording\n");
+    const result = await repo.sync(f.a, config, () => {});
+    expect(result.hasLocalChanges).toBe(true);
+    expect(await git(f.remote, "show", "main:note.md")).toBe("Captured wording\n");
+    expect(await readFile(path.join(f.a, "note.md"), "utf8")).toBe("Edited during upload\n");
+    await repo.sync(f.a, config, () => {});
+    expect(await git(f.remote, "show", "main:note.md")).toBe("Edited during upload\n");
+  });
+  it("rejects a remote advance after fetch without overwriting either history", async () => {
+    const f = await fixture(); let checks = 0;
+    const repo = new GitSyncRepository({ toolsRoot: f.dir, verifyRemote: async () => {
+      if (++checks === 2) { await writeFile(path.join(f.b, "remote.md"), "Remote late edit"); await git(f.b, "add", "."); await git(f.b, "commit", "-m", "Remote late edit"); await git(f.b, "push"); }
+      return "owner/private";
+    } });
+    await writeFile(path.join(f.a, "local.md"), "Local edit");
+    await expect(repo.sync(f.a, config, () => {})).rejects.toThrow();
+    expect(await readFile(path.join(f.a, "local.md"), "utf8")).toBe("Local edit");
+    expect(await git(f.remote, "show", "main:remote.md")).toBe("Remote late edit");
+    expect(await git(f.a, "status", "--porcelain")).toBe("");
+    await repo.sync(f.a, config, () => {}); expect(await git(f.remote, "show", "main:local.md")).toBe("Local edit");
+  });
+  it("stops safely during network phases with no author file changes", async () => {
+    const f = await fixture(); const before = await git(f.a, "rev-parse", "HEAD");
+    await expect(f.repo.sync(f.a, config, (phase) => { if (phase === "fetching") f.repo.cancel(); })).rejects.toThrow("Sync stopped");
+    expect(await git(f.a, "rev-parse", "HEAD")).toBe(before);
+    expect(await readFile(path.join(f.a, "note.md"), "utf8")).toBe("Initial note\n");
+    await f.sync(f.a); // Cancellation released the repository lock.
+  });
+  it("requires reconfiguration when the selected remote points at a different private repository", async () => {
+    const f = await fixture();
+    await expect(f.repo.sync(f.a, config, () => {}, undefined, "owner/different-private")).rejects.toThrow("different repository");
   });
   it("rejects credential-bearing URLs and public host lookalikes", () => {
     expect(githubRepository("git@github.com:owner/private.git")).toBe("owner/private");

@@ -12,6 +12,8 @@ export interface GitHubSyncStatus {
   repository?: string;
   lastAttempt?: string;
   lastSuccess?: string;
+  lastSyncedCommit?: string;
+  hasLocalChanges?: boolean;
   nextRun?: string;
   message?: string;
   conflicts?: string[];
@@ -21,5 +23,6 @@ export interface GitHubSyncApi {
   getStatus: () => Promise<GitHubSyncStatus>;
   configure: (input: { root: string; config: GitHubSyncConfig }) => Promise<GitHubSyncStatus>;
   syncNow: (input: { root: string }) => Promise<GitHubSyncStatus>;
+  cancel: () => Promise<GitHubSyncStatus>;
   onStatus: (callback: (status: GitHubSyncStatus) => void) => () => void;
 }

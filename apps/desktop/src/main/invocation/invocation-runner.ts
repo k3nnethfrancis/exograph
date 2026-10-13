@@ -181,6 +181,7 @@ const DEFAULT_SETTLEMENT_MAX_WAIT_MS = 2_000;
 /** The single lifecycle boundary for agent processes and their review records. */
 export class InvocationRunner extends EventEmitter {
   private readonly active = new Map<string, ActiveObservation>();
+  private readonly starting = new Set<string>();
   private readonly byTerminal = new Map<string, string>();
   private readonly continuityLocks = new Map<string, { invocationId: string; workspaceRoot: string; commandId: string }>();
   private readonly changesetLocks = new Map<string, { invocationId: string; noteRoots: string[] }>();
@@ -214,7 +215,7 @@ export class InvocationRunner extends EventEmitter {
     });
   }
 
-  hasWorkspaceWriter(): boolean { return this.active.size > 0 || this.changesetLocks.size > 0 || this.reviewDecisionTails.size > 0; }
+  hasWorkspaceWriter(): boolean { return this.starting.size > 0 || this.active.size > 0 || this.changesetLocks.size > 0 || this.reviewDecisionTails.size > 0; }
 
   async prepare(request: InvocationRequest): Promise<PreparedInvocation> {
     this.options.assertWorkspaceWritable?.();
@@ -326,6 +327,16 @@ export class InvocationRunner extends EventEmitter {
   }
 
   async authorizeAndStart(
+    prepared: PreparedInvocation,
+    authorization: InvocationAuthorization,
+  ): Promise<InvocationStartResult> {
+    this.options.assertWorkspaceWritable?.();
+    this.starting.add(prepared.id);
+    try { return await this.startAuthorized(prepared, authorization); }
+    finally { this.starting.delete(prepared.id); }
+  }
+
+  private async startAuthorized(
     prepared: PreparedInvocation,
     authorization: InvocationAuthorization,
   ): Promise<InvocationStartResult> {
