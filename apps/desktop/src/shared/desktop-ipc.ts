@@ -7,6 +7,15 @@ type TerminalsApi = DesktopApi["terminals"];
 type ShellApi = DesktopApi["shell"];
 
 export interface DesktopInvokeHandlers {
+  "github-sync:get-account-status": DesktopApi["githubSync"]["getAccountStatus"];
+  "github-sync:start-account-auth": DesktopApi["githubSync"]["startAccountAuth"];
+  "github-sync:inspect-setup": DesktopApi["githubSync"]["inspectSetup"];
+  "github-sync:list-repositories": DesktopApi["githubSync"]["listRepositories"];
+  "github-sync:inspect-repository": DesktopApi["githubSync"]["inspectRepository"];
+  "github-sync:create-and-sync": DesktopApi["githubSync"]["createAndSync"];
+  "github-sync:connect-existing": DesktopApi["githubSync"]["connectExisting"];
+  "github-sync:download-repository": DesktopApi["githubSync"]["downloadRepository"];
+  "github-sync:cancel-setup": DesktopApi["githubSync"]["cancelSetup"];
   "github-sync:cancel": DesktopApi["githubSync"]["cancel"];
   "github-sync:get-status": DesktopApi["githubSync"]["getStatus"];
   "github-sync:configure": DesktopApi["githubSync"]["configure"];
@@ -109,6 +118,7 @@ export interface DesktopInvokeHandlers {
 }
 
 export interface DesktopEventPayloads {
+  "github-sync:setup-progress": Parameters<Parameters<DesktopApi["githubSync"]["onSetupProgress"]>[0]>[0];
   "github-sync:status": Awaited<ReturnType<DesktopApi["githubSync"]["getStatus"]>>;
   "editorial:changed": import("./api/editorial").EditorialChangedEvent;
   "publishing:status": Awaited<ReturnType<DesktopApi["publishing"]["getStatus"]>>;

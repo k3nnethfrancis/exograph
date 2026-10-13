@@ -1,3 +1,4 @@
+import { GitHubSyncSetupService } from "./github-sync/github-sync-setup";
 import { GitHubSyncService } from "./github-sync/github-sync-service";
 import { registerGitHubSyncIpc } from "./github-sync/github-sync-ipc";
 import { prepareAppProfile } from "./runtime/app-profile";
@@ -399,7 +400,23 @@ function registerIpcHandlers() {
     },
     publishStatus: (status) => sendToRenderer("github-sync:status", status),
   });
-  registerGitHubSyncIpc(githubSyncService);
+  const githubSyncSetup = new GitHubSyncSetupService({
+    service: githubSyncService,
+    stateRoot: path.join(app.getPath("userData"), "github-sync"),
+    toolsRoot: path.join(app.getPath("userData"), "published-sites", ".tools"),
+    noteRoots: () => workspaceModel.noteRoots.map((root) => root.path),
+    chooseParent: async () => {
+      if (process.env.EXOGRAPH_TEST === "1" && process.env.EXOGRAPH_TEST_SELECT_FOLDER_CANCEL === "1") return null;
+      if (process.env.EXOGRAPH_TEST === "1" && process.env.EXOGRAPH_TEST_SELECT_FOLDER_PATH) return process.env.EXOGRAPH_TEST_SELECT_FOLDER_PATH;
+      const result = await dialog.showOpenDialog({ title: "Choose where to download your notes", buttonLabel: "Download here", properties: ["openDirectory", "createDirectory"] });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+    publishProgress: (progress) => sendToRenderer("github-sync:setup-progress", progress),
+  });
+  registerGitHubSyncIpc(githubSyncService, githubSyncSetup, () => {
+    if (!managedSiteSetup) throw new Error("GitHub connection is starting. Retry shortly.");
+    return managedSiteSetup;
+  });
   githubSyncService.start();
   powerMonitor.on("resume", () => void githubSyncService?.tick());
   publishingService = new PublishingService({

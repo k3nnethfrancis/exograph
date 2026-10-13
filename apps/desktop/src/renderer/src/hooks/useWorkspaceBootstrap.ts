@@ -287,16 +287,16 @@ export function useWorkspaceBootstrap(options: UseWorkspaceBootstrapOptions) {
     }));
   }
 
-  async function openWorkspaceSwitcher() {
+  async function openWorkspaceSwitcher(downloadedDirectory?: string) {
     const current = workspaceSettingsRef.current;
     const workspaces = await window.exograph.workspace.listWorkspaces();
     setOnboardingState({
       mode: "switch",
-      step: "select",
+      step: downloadedDirectory ? "configure" : "select",
       workspaces,
       selectedWorkspaceId: workspaces.find((workspace) => workspace.notesFolder === current?.noteRoots[0])?.id ?? workspaces[0]?.id ?? null,
-      notesFolder: current?.noteRoots[0] ?? "",
-      defaultTerminalCwd: current?.defaultTerminalCwd ?? current?.noteRoots[0] ?? "",
+      notesFolder: downloadedDirectory ?? current?.noteRoots[0] ?? "",
+      defaultTerminalCwd: downloadedDirectory ? defaultTerminalCwdForNotesFolder(downloadedDirectory) : current?.defaultTerminalCwd ?? current?.noteRoots[0] ?? "",
       contentPolicy: current?.contentPolicy ?? defaultWorkspaceContentPolicy(),
       contentPolicyChoice: "explicit",
       contentInspection: null,

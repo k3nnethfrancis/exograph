@@ -16,3 +16,16 @@
 .github-sync-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .github-sync-section [data-testid="github-sync-status"] { display: grid; gap: 6px; }
 .github-sync-section ul { padding-left: 20px; overflow-wrap: anywhere; }
+.github-sync-repository, .github-sync-schedule { display: flex; align-items: center; gap: 12px; }
+.github-sync-schedule select { width: auto; }
+.github-sync-link { color: var(--text); font: inherit; font-weight: 600; border: 0; padding: 0; background: none; cursor: pointer; text-align: left; }
+.github-sync-link:hover { text-decoration: underline; }
+.github-sync-section details > :not(summary) { margin-top: 12px; }
+.github-sync-section details small { display: block; }
+.github-repository-list { display: grid; gap: 4px; max-height: 240px; overflow: auto; }
+.github-repository-option { padding: 10px 12px; border: 1px solid var(--surface-border); border-radius: 6px; background: transparent; color: inherit; display: flex; justify-content: space-between; gap: 12px; cursor: pointer; text-align: left; }
+.github-repository-option:hover:not(:disabled) { background: var(--surface-hover); }
+.github-repository-option:disabled { opacity: .5; cursor: not-allowed; }
+.github-connection { display: grid; gap: 8px; }
+.github-sync-section h2 { font-size: 16px; margin: 0; }
+.github-sync-section :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

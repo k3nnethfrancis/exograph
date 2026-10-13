@@ -28,7 +28,7 @@ interface WorkspaceSettingsDialogProps {
   indexStatus: IndexStatus | null;
   onChooseFolder: (target: "workspaceRoot" | "defaultTerminalCwd" | "noteRoot") => void | Promise<void>;
   onClose: () => void;
-  onOpenWorkspaceSwitcher: () => void | Promise<void>;
+  onOpenWorkspaceSwitcher: (downloadedDirectory?: string) => void | Promise<void>;
   onRunIndexUpdate: (kind: Exclude<IndexBusyState, null>) => void | Promise<void>;
   onSave: (settingsDialog: WorkspaceSettingsDialogState, options: { includeStructural: boolean }) => void | Promise<void>;
   settings: WorkspaceSettingsDialogState;
@@ -146,7 +146,7 @@ export function WorkspaceSettingsDialog({
             {settings.section === "graph" ? <GraphSection settings={settings} setSettings={setSettings} /> : null}
             {settings.section === "terminal" ? <TerminalSection settings={settings} setSettings={setSettings} /> : null}
             {settings.section === "shortcuts" ? <ShortcutsSection bindings={settings.shortcutBindings} onChange={(shortcutBindings) => setSettings((current) => current ? { ...current, shortcutBindings, saveStatus: "idle" } : current)} /> : null}
-            {settings.section === "github-sync" ? <GitHubSyncSection key={JSON.stringify([settings.workspaceRoot, settings.noteRoots])} disabled={hasStructuralChanges || settings.applyStatus === "applying"} /> : null}
+            {settings.section === "github-sync" ? <GitHubSyncSection onDownloaded={onOpenWorkspaceSwitcher} key={JSON.stringify([settings.workspaceRoot, settings.noteRoots])} disabled={hasStructuralChanges || settings.applyStatus === "applying"} /> : null}
             {settings.section === "publishing" ? <PublishingSection settings={settings} setSettings={setSettings} /> : null}
             {settings.section === "agents" ? <AgentsSection settings={settings} setSettings={setSettings} /> : null}
           </div>

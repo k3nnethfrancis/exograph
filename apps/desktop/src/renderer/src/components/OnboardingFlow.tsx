@@ -15,6 +15,7 @@ import { AgentIcon } from "./AgentIcon";
 import { AgentInvocationPromptEditor } from "./AgentInvocationPromptEditor";
 import { DefaultAgentSelector } from "./DefaultAgentSelector";
 import { PathList } from "./PathList";
+import { GitHubDownload } from "./GitHubRepositoryPicker";
 
 export interface OnboardingFlowActions {
   activateSelectedWorkspace: () => Promise<void>;
@@ -48,6 +49,7 @@ const EMPTY_MCP_SETUP: McpSetupState = {
 };
 
 export function OnboardingFlow({ actions, onDismiss, onEditState, state }: OnboardingFlowProps) {
+  const [openGitHub, setOpenGitHub] = useState(false);
   const [mcpSetup, setMcpSetup] = useState<McpSetupState>(EMPTY_MCP_SETUP);
   const [cliInstallation, setCliInstallation] = useState<CliInstallationStatus | null>(null);
   const [cliInstallStatus, setCliInstallStatus] = useState<"idle" | "saving" | "error">("idle");
@@ -115,7 +117,10 @@ export function OnboardingFlow({ actions, onDismiss, onEditState, state }: Onboa
         <div className="onboarding-card__eyebrow">
           {state.mode === "first-run" ? "Set up Exograph" : "Switch workspace"}
         </div>
-        {state.step === "recovery" ? (
+        {openGitHub ? <GitHubDownload onClose={() => setOpenGitHub(false)} onDownloaded={(directory) => {
+          onEditState(current => ({ ...current, step: "configure", notesFolder: directory, defaultTerminalCwd: "", selectedWorkspaceId: null, status: "idle", errorMessage: null }));
+          setOpenGitHub(false);
+        }} /> : state.step === "recovery" ? (
           <>
             <div className="onboarding-card__body" data-testid="onboarding-recovery">
               <h1 className="onboarding-card__title">Setup progress needs recovery</h1>
@@ -191,6 +196,7 @@ export function OnboardingFlow({ actions, onDismiss, onEditState, state }: Onboa
               >
                 New main wiki
               </button>
+              <button className="toolbar-button" data-testid="workspace-picker-github" type="button" onClick={() => setOpenGitHub(true)}>Open from GitHub</button>
               <button
                 className="toolbar-button toolbar-button--primary"
                 data-testid="workspace-picker-open"
@@ -211,6 +217,7 @@ export function OnboardingFlow({ actions, onDismiss, onEditState, state }: Onboa
               <p className="onboarding-card__copy">
                 Pick the Markdown folder Exograph should treat as this workspace. You can make another Workspace for a separate wiki later.
               </p>
+              <button className="toolbar-button" data-testid="onboarding-open-github" type="button" onClick={() => setOpenGitHub(true)}>Open from GitHub</button>
               <div className="onboarding-grid">
                 <div className="onboarding-section onboarding-section--primary">
                   <div className="onboarding-section__header">

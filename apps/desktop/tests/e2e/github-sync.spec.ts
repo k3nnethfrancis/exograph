@@ -41,6 +41,9 @@ case "$*" in
  '--version') echo 'gh fixture';;
  'repo view fixture/private-notes --json nameWithOwner,isPrivate') echo '{"nameWithOwner":"fixture/private-notes","isPrivate":true}';;
  'api user --jq .login') echo 'fixture';;
+ 'api user') echo '{"login":"fixture","id":42,"name":"Fixture"}';;
+ 'api repos/fixture/private-notes') echo '{"full_name":"fixture/private-notes","clone_url":"https://github.com/fixture/private-notes.git","private":true,"permissions":{"push":true},"default_branch":"main","size":1}';;
+ 'api repos/fixture/private-notes/git/matching-refs/heads') echo '[{"ref":"refs/heads/main"}]';;
  'api --include user') echo 'x-oauth-scopes: repo, workflow, read:org';;
  *) exit 1;;
 esac
@@ -54,16 +57,13 @@ esac
     const page = fixture.page;
     await page.getByTestId("workspace-menu-toggle").click(); await page.getByTestId("workspace-menu-settings").click();
     await page.getByTestId("workspace-settings-tab-github-sync").click();
-    await expect(page.getByTestId("github-sync-now")).toBeDisabled();
-    await page.getByTestId("github-sync-enabled").check();
-    await page.getByTestId("github-sync-cadence").selectOption("hourly");
-    await expect(page.getByTestId("github-sync-now")).toBeDisabled();
-    await page.getByTestId("github-sync-save").click();
-    await expect(page.getByText("fixture/private-notes · Private", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("github-sync-enable")).toBeVisible();
+    await page.getByTestId("github-sync-enable").click();
+    await expect(page.getByText("fixture/private-notes ↗", { exact: true })).toBeVisible();
     await expect(page.getByTestId("github-sync-now")).toBeEnabled();
-    // A wake event performs an overdue scheduled sync through the production scheduler.
+    // Setup has already synced; subsequent saved notes upload on the next manual request.
     await writeFile(path.join(notes, "scheduled.md"), "# Saved while this Mac slept\n");
-    await fixture.electronApp.evaluate(({ powerMonitor }) => { powerMonitor.emit("resume"); });
+    await page.getByTestId("github-sync-now").click();
     await expect.poll(async () => git(remote, "show", "main:scheduled.md").catch(() => "")).toContain("Saved while this Mac slept");
     await expect(page.getByTestId("github-sync-now")).toBeEnabled();
     // The first annotation-only pull must update the already-open note without a reload.
@@ -103,7 +103,7 @@ esac
     await page.getByTestId("workspace-settings-close").click();
     await page.getByTestId("workspace-menu-toggle").click(); await page.getByTestId("workspace-menu-settings").click();
     await page.getByTestId("workspace-settings-tab-github-sync").click();
-    await expect(page.getByTestId("github-sync-enabled")).toBeChecked();
+    await expect(page.getByTestId("github-sync-pause")).toHaveText("Pause sync");
     await expect(page.getByTestId("github-sync-cadence")).toHaveValue("hourly");
     await page.getByTestId("workspace-settings-close").click();
     // A newer remote passage must not overwrite an unsaved editor buffer.

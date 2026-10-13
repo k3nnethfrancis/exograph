@@ -35,6 +35,14 @@ describe("GitHub notes synchronization against two real clones", () => {
     expect((await git(f.a, "rev-list", "HEAD")).split("\n")).toContain(initial);
     expect(await git(f.b, "status", "--porcelain")).toBe("");
   });
+  it("keeps a local branch name while syncing its differently named upstream", async () => {
+    const f = await fixture(); await git(f.a, "branch", "-m", "writing");
+    await writeFile(path.join(f.a, "note.md"), "Upstream-preserving edit\n");
+    await f.repo.sync(f.a, { ...config, branch: "writing", remoteBranch: "main" }, () => {});
+    expect((await git(f.remote, "show", "main:note.md")).trim()).toBe("Upstream-preserving edit");
+    expect((await git(f.remote, "branch", "--list", "writing")).trim()).toBe("");
+    expect((await git(f.a, "branch", "--show-current")).trim()).toBe("writing");
+  });
   it("merges independent edits on two Macs without rewriting either commit", async () => {
     const f = await fixture();
     await writeFile(path.join(f.a, "first.md"), "First Mac\n"); await f.sync(f.a);

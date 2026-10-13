@@ -75,12 +75,27 @@ export class ManagedSiteSetup {
     }
   }
 
-  async startAuth(): Promise<PublishingAuthStatus> {
+  /** Notes share GitHub credentials without requiring website workflow permissions. */
+  async getAccountStatus(): Promise<PublishingAuthStatus> {
+    if (!this.options.run) this.gh = await findGitHubCli(path.join(this.options.sitesParent, ".tools")) ?? "gh";
+    try {
+      const login = await this.run(this.gh, ["api", "user", "--jq", ".login"]);
+      return { authenticated: true, login, managed: false };
+    } catch {
+      return { authenticated: false, managed: false, pending: Boolean(this.auth), deviceCode: this.deviceCode,
+        verificationUrl: this.deviceCode ? "https://github.com/login/device" : undefined,
+        message: this.authMessage ?? "Connect GitHub to sync your notes." };
+    }
+  }
+  async startAccountAuth(): Promise<PublishingAuthStatus> { return this.startAuthFor("notes"); }
+  async startAuth(): Promise<PublishingAuthStatus> { return this.startAuthFor("publishing"); }
+  private async startAuthFor(purpose: "notes" | "publishing"): Promise<PublishingAuthStatus> {
+    const status = () => purpose === "notes" ? this.getAccountStatus() : this.getSetupStatus();
     this.gh = await resolveGitHubCli(path.join(this.options.sitesParent, ".tools"));
-    if (this.auth || (await this.getSetupStatus()).authenticated) return this.getSetupStatus();
+    if (this.auth || (await status()).authenticated) return status();
     this.authMessage = undefined;
     this.deviceCode = undefined;
-    const child = spawn(this.gh, ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web", "--scopes", "workflow,read:org"], {
+    const child = spawn(this.gh, ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web", "--scopes", purpose === "notes" ? "repo" : "workflow,read:org"], {
       env: { ...commandEnvironment(), GH_BROWSER: "true", BROWSER: "true" }, stdio: ["ignore", "pipe", "pipe"],
     });
     this.auth = child;
@@ -95,7 +110,7 @@ export class ManagedSiteSetup {
     child.stderr?.on("data", receive);
     child.once("error", () => { this.authMessage = "GitHub sign-in could not start. Connect again to retry."; if (this.auth === child) this.auth = undefined; });
     child.once("exit", (code) => { if (code) this.authMessage = "GitHub sign-in did not complete. Connect again to retry."; if (this.auth === child) this.auth = undefined; });
-    return this.getSetupStatus();
+    return status();
   }
 
   updateContext(): void {
