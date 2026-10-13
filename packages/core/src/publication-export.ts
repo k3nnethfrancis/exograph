@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { lstat, mkdir, mkdtemp, open, readdir, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseDocument } from "yaml";
+import { stripEditorialNotesForPublication } from "./editorial-notes";
 import type { WorkspaceModel } from "./types";
 import { WorkspaceFiles } from "./workspace-files";
 import { isPathWithinRoot } from "./path-containment";
@@ -133,9 +134,12 @@ export async function exportPublication(request: PublicationExportRequest): Prom
       const relative = slash(path.relative(publicationDirectory, note.path));
       const diagnose = (code: string) => diagnostics.push({ path: relative, code, message: "A local publication reference was removed; its target is excluded, missing, ambiguous or unsupported." });
       const resolve = resolver(note.path);
+      let cleanBody: string;
+      try { cleanBody = stripEditorialNotesForPublication(note.body); }
+      catch { throw new PublicationExportError("Finish or repair the incomplete editorial note or agent envelope before exporting.", [{ path: relative, code: "incomplete-editorial", message: "Finish or repair the incomplete editorial note or agent envelope before exporting." }]); }
       let body: string;
       try {
-        body = projectPublicationMarkdown(note.body, resolve, diagnose);
+        body = projectPublicationMarkdown(cleanBody, resolve, diagnose);
         if (note.unlisted) { note.metadata.unlisted = true; note.document?.set("unlisted", true); }
         for (const [key, value] of Object.entries(note.metadata)) {
           if (key === "aliases") { validateAliases(value); continue; }

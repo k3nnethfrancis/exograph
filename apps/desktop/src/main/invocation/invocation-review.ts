@@ -85,7 +85,7 @@ export class InvocationReviewService {
       afterText: after.text,
       ...(before.omitted ? { beforeTextOmitted: true } : {}),
       ...(after.omitted ? { afterTextOmitted: true } : {}),
-      canKeep: change.decision.status === "pending" || change.decision.status === "conflict",
+      canKeep: !record.editorialGuardFailure && (change.decision.status === "pending" || change.decision.status === "conflict"),
       canReject: change.decision.status === "pending",
     };
   }
@@ -101,6 +101,9 @@ export class InvocationReviewService {
   }
 
   async resolve(record: InvocationRecord, resolutions: readonly ReviewResolution[]): Promise<InvocationRecord> {
+    if (record.editorialGuardFailure && resolutions.some(item => item.action === "keep")) {
+      throw new InvocationReviewError("review-unavailable", record.editorialGuardFailure);
+    }
     if (!record.changeset || record.changeset.files.length === 0) {
       throw new InvocationReviewError("review-unavailable", "This invocation has no reviewable changes.");
     }

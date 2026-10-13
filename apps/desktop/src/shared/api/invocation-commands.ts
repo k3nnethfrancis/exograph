@@ -1,3 +1,4 @@
+import type { EditorialNote } from "@exograph/core/editorial-notes";
 import type {
   AgentCommand,
   InvocationActivityEvent,
@@ -22,6 +23,27 @@ export interface LaunchAgentInvocationInput {
   skill?: InvocationSkillContext;
   authorization: InvocationAuthorizationDecision;
   expectedFingerprint: string;
+}
+
+export interface LaunchEditorialDraftInput {
+  handle: string;
+  documentPath: string;
+  documentBody: string;
+  noteId: string;
+  annotationRevision: string;
+  authorization: InvocationAuthorizationDecision;
+  expectedFingerprint: string;
+}
+export type LaunchEditorialDraftResponse = LaunchAgentInvocationResponse | { ok: false; writerActive: true; invocation: InvocationRecord; detail: string };
+
+export interface EditorialDraftReviewPayload {
+  invocation: InvocationRecord;
+  documentPath: string;
+  prior: EditorialNote;
+  proposal: EditorialNote | null;
+  message: string;
+  canKeep: boolean;
+  canReject: boolean;
 }
 
 export interface LaunchAgentInvocationResponse {
@@ -149,6 +171,10 @@ export interface RendererEditorDiagnostic {
 }
 
 export interface WorkspaceInvocationApi {
+  launchEditorialDraft: (input: LaunchEditorialDraftInput) => Promise<LaunchEditorialDraftResponse>;
+  getEditorialDraftReview: (invocationId: string) => Promise<EditorialDraftReviewPayload>;
+  listPendingEditorialDraftReviews: () => Promise<EditorialDraftReviewPayload[]>;
+  reviewEditorialDraft: (input: { invocationId: string; action: "keep" | "reject" }) => Promise<InvocationRecord>;
   launchAgentInvocation: (input: LaunchAgentInvocationInput) => Promise<LaunchAgentInvocationResponse>;
   getAgentInvocationAuthorization: (input: { handle: string; documentPath: string }) => Promise<AgentInvocationAuthorizationFacts>;
   prepareGraphMaintenanceSkill: (input: {

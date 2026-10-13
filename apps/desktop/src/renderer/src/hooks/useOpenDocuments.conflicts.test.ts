@@ -13,6 +13,7 @@ let root: ReactTestRenderer | undefined;
 let controller: ReturnType<typeof useOpenDocuments>;
 let openPaths: Set<string>;
 let persistence: DocumentPersistence;
+let additionalFlush: ReturnType<typeof vi.fn<() => Promise<void>>>;
 let bridge: { save: ReturnType<typeof vi.fn>; saveCopy: ReturnType<typeof vi.fn> };
 
 beforeEach(async () => {
@@ -21,6 +22,7 @@ beforeEach(async () => {
   await writeFile(filePath, "---\nstatus: original\n---\nOriginal\n");
   persistence = new DocumentPersistence();
   openPaths = new Set([filePath]);
+  additionalFlush = vi.fn(async () => {});
   bridge = {
     save: vi.fn(persistence.save.bind(persistence)),
     saveCopy: vi.fn(persistence.saveCopy.bind(persistence)),
@@ -35,7 +37,7 @@ beforeEach(async () => {
     },
   });
   function Harness() {
-    controller = useOpenDocuments({ workspaceModel: null, activeDocumentPath: filePath, getOpenEditorPaths: () => openPaths, getEditorScrollTopForPath: () => null });
+    controller = useOpenDocuments({ workspaceModel: null, activeDocumentPath: filePath, getOpenEditorPaths: () => openPaths, getEditorScrollTopForPath: () => null, flushAdditionalDirtyState: additionalFlush });
     return null;
   }
   await act(async () => { root = create(createElement(Harness)); });
@@ -56,6 +58,36 @@ async function makeConflict() {
 }
 
 describe("editor save conflicts through real files", () => {
+  it("suspends queued author autosaves without writing and resumes after the draft lease", async () => {
+    await act(async () => { controller.updateBody(filePath, "Unsaved author wording"); });
+    let resume!: () => void;
+    await act(async () => { resume = await controller.pauseDocumentSaves(filePath); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)); });
+    expect(bridge.save).not.toHaveBeenCalled();
+    expect(await readFile(filePath, "utf8")).toContain("Original");
+    expect(controller.openDocuments[filePath]).toMatchObject({body:"Unsaved author wording",dirty:true});
+    await expect(controller.saveDocument(filePath)).rejects.toThrow("Finish the editorial draft");
+    await act(async () => { resume(); resume(); await new Promise(resolve => setTimeout(resolve, 2200)); });
+    expect(bridge.save).toHaveBeenCalledOnce();
+    expect((await persistence.read(filePath)).body).toBe("Unsaved author wording");
+  }, 10000);
+
+  it("waits for authored annotation writes before a normal transition and preserves state on conflict", async () => {
+    let finish!: () => void;
+    additionalFlush.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    let settled = false;
+    let transitioning!: Promise<void>;
+    await act(async () => { transitioning = window.__exographPrepareDocumentTransition!().then(() => { settled = true; }); await Promise.resolve(); });
+    expect(settled).toBe(false);
+    expect(controller.transitionPending).toBe(true);
+    await act(async () => { finish(); await transitioning; window.__exographFinishDocumentTransition!(); });
+    expect(settled).toBe(true);
+    additionalFlush.mockRejectedValueOnce(new Error("Editorial notes changed elsewhere; retained edits need review."));
+    await act(async () => { await expect(window.__exographPrepareDocumentTransition!()).rejects.toThrow("retained edits"); });
+    expect(controller.transitionPending).toBe(false);
+    expect(await readFile(filePath, "utf8")).toContain("Original");
+  });
+
   it("the actual autosave timer preserves an external edit and dirty local frontmatter/body", async () => {
     await act(async () => {
       controller.updateBody(filePath, "Local body");

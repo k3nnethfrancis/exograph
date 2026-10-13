@@ -77,6 +77,8 @@ export interface UseOpenDocumentsOptions {
   activeDocumentPath: string | null;
   getOpenEditorPaths: () => Set<string>;
   getEditorScrollTopForPath: (filePath: string) => number | null;
+  /** Additional authored state shares normal quit/reload/Workspace save barriers. */
+  flushAdditionalDirtyState?: () => Promise<void>;
 }
 
 export function useOpenDocuments(options: UseOpenDocumentsOptions) {
@@ -95,6 +97,7 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
   const pendingContextCommitsRef = useRef<Map<string, number>>(new Map());
   const pendingAutosavesRef = useRef<Map<string, number>>(new Map());
   const saveBarrierRef = useRef(new DocumentSaveBarrier());
+  const saveSuspensionsRef = useRef(new Map<string, number>());
   const dirtySinceRef = useRef<Map<string, number>>(new Map());
   const lastEditorInputAtRef = useRef(0);
   const scrollRestoreNonceRef = useRef(0);
@@ -323,7 +326,28 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
     scheduleAutosave(filePath);
   }
 
+  async function pauseDocumentSaves(filePath: string): Promise<() => void> {
+    saveSuspensionsRef.current.set(filePath, (saveSuspensionsRef.current.get(filePath) ?? 0) + 1);
+    cancelPendingAutosave(filePath);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      const count = (saveSuspensionsRef.current.get(filePath) ?? 1) - 1;
+      if (count > 0) saveSuspensionsRef.current.set(filePath, count);
+      else {
+        saveSuspensionsRef.current.delete(filePath);
+        if (openDocumentsRef.current[filePath]?.dirty) scheduleAutosave(filePath);
+      }
+    };
+    try { await saveBarrierRef.current.idle(filePath); return release; }
+    catch (error) { release(); throw error; }
+  }
+
   function saveDocument(filePath: string): Promise<void> {
+    if (saveSuspensionsRef.current.has(filePath) && openDocumentsRef.current[filePath]?.dirty) {
+      return Promise.reject(new Error("Finish the editorial draft before saving this author document."));
+    }
     if (openDocumentsRef.current[filePath]?.filesystemState === "deleted") {
       return Promise.resolve();
     }
@@ -470,6 +494,7 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
   }
 
   function scheduleAutosave(filePath: string) {
+    if (saveSuspensionsRef.current.has(filePath)) return;
     if (openDocumentsRef.current[filePath]?.saveConflict) return;
     if (openDocumentsRef.current[filePath]?.filesystemState === "deleted") return;
     if (!dirtySinceRef.current.has(filePath)) dirtySinceRef.current.set(filePath, performance.now());
@@ -483,6 +508,7 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
   }
 
   function runAutosaveWhenIdle(filePath: string) {
+    if (saveSuspensionsRef.current.has(filePath)) { cancelPendingAutosave(filePath); return; }
     if (openDocumentsRef.current[filePath]?.filesystemState === "deleted") {
       pendingAutosavesRef.current.delete(filePath);
       return;
@@ -502,6 +528,7 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
   }
 
   async function flushDirtyDocuments(): Promise<void> {
+    await optionsRef.current.flushAdditionalDirtyState?.();
     const dirtyPaths = Object.entries(openDocumentsRef.current)
       .filter(([, document]) => document.dirty && document.filesystemState !== "deleted")
       .map(([filePath]) => filePath);
@@ -695,6 +722,7 @@ export function useOpenDocuments(options: UseOpenDocumentsOptions) {
     updateBody,
     updateFrontmatter,
     saveDocument,
+    pauseDocumentSaves,
     prepareDocumentsForReview,
     discardAndReloadDocument,
     deletePathsWithin,

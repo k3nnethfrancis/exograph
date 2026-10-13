@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type {
   AgentCommand,
@@ -10,13 +10,15 @@ import type {
 } from "@exograph/core";
 import type { InvocationActivityEvent } from "@exograph/core/invocation-activity";
 
-import type { TerminalSessionInfo } from "../../shared/api";
+import type { TerminalSessionInfo, LaunchEditorialDraftInput } from "../../shared/api";
 import type { PreviewTarget } from "../../shared/api/workspace-filesystem";
 
 import type { AppearanceMode, ResolvedAppearance } from "./appearance";
 import { EditorPane, type AgentComposeRequest, type EditorPaneState } from "./components/EditorPane";
 import type { EditorInitialSelectionRequest } from "./components/NoteEditor";
 import { BrowserPane } from "./components/BrowserPane";
+import { useEditorialContext } from "./hooks/useEditorialContext";
+import { flushEditorialAnnotations } from "./components/editorialAnnotationCoordinator";
 import { InspectorDock } from "./components/InspectorDock";
 import { GraphPane } from "./components/GraphPane";
 import {
@@ -88,16 +90,14 @@ import {
 } from "./invocationReviewQueue";
 import { refreshInvocationReviewAfterResolution } from "./invocationReviewResolution";
 
-interface PendingInvocationAuthorization {
+type PendingInvocationAuthorization = {
   command: AgentCommand;
   cwd: string;
-  document: OpenEditorDocument;
-  draft: InlineAgentDraft;
   fingerprint: string;
   reason: string;
   paneId: string;
-  skill?: InvocationSkillContext;
-}
+} & ({ kind: "inline"; document: OpenEditorDocument; draft: InlineAgentDraft; skill?: InvocationSkillContext }
+  | { kind: "editorial"; input: Omit<LaunchEditorialDraftInput,"authorization" | "expectedFingerprint">; draft: Pick<InlineAgentDraft,"anchor" | "message">; onSettled?: () => void });
 
 const NOTE_TREE_MAX_DEPTH = 3;
 export function App() {
@@ -110,7 +110,7 @@ export function App() {
   const workspaceSearch = useWorkspaceSearch({ indexedOnEnter: exploreIndexSearchOnEnter, qmdSelected: qmdSearchSelected });
   const graphInspection = useInspectedConcept();
   const [revealExplorerPathRequest, setRevealExplorerPathRequest] = useState<{ path: string; nonce: number; kind?: "file" | "directory" } | null>(null);
-  const [inspectorTabRequest, setInspectorTabRequest] = useState<{ tab: "history"; nonce: number } | null>(null);
+  const [inspectorTabRequest, setInspectorTabRequest] = useState<{ tab: "history" | "editing"; nonce: number } | null>(null);
   const [pendingInvocationAuthorization, setPendingInvocationAuthorization] = useState<PendingInvocationAuthorization | null>(null);
   const [agentComposeRequest, setAgentComposeRequest] = useState<AgentComposeRequest | null>(null);
   const agentComposeNonceRef = useRef(0);
@@ -132,6 +132,7 @@ export function App() {
   );
   const terminalRuntimeScrollbackLinesRef = useRef(DEFAULT_TERMINAL_RUNTIME_SCROLLBACK_LINES);
   const invocationActivityEarlyEventsRef = useRef(new Map<string, InvocationActivityEvent[]>());
+  const editorialSettledCallbacksRef = useRef(new Map<string, () => void>());
   const shellLayout = useShellLayout();
   const { tree: canvasTree, focusedLeafId: focusedPaneId, actions: canvasActions } = shellLayout.canvasPaneTree;
   const focusedEditorPath = useMemo(
@@ -192,6 +193,7 @@ export function App() {
     activeDocumentPath: focusedEditorPath,
     getOpenEditorPaths: () => collectOpenEditorPaths(shellLayout.canvasPaneTree.tree),
     getEditorScrollTopForPath,
+    flushAdditionalDirtyState: flushEditorialAnnotations,
   });
   const {
     openDocuments,
@@ -221,6 +223,18 @@ export function App() {
     deleteDocumentPaths: openDocumentsState.deletePathsWithin,
     onLastEditorClosed: (openRecoveredFile) => void openOrCreateDailyNote(openRecoveredFile),
   });
+  const editorialContext = useEditorialContext();
+  const editorialHooksRef = useRef({ canvasNavigation, prepareDocumentsForReview, discardAndReloadDocument, pauseDocumentSaves: openDocumentsState.pauseDocumentSaves });
+  editorialHooksRef.current = { canvasNavigation, prepareDocumentsForReview, discardAndReloadDocument, pauseDocumentSaves: openDocumentsState.pauseDocumentSaves };
+  const openEditorialContext = useCallback((paneId:string,filePath:string) => {
+    editorialHooksRef.current.canvasNavigation.focusPane(paneId);
+    restoreEditorInspection(filePath);
+    openNoteContext();
+    setInspectorTabRequest({tab:"editing",nonce:Date.now()});
+  }, []);
+  const pauseEditorialSource = useCallback((filePath:string) => editorialHooksRef.current.pauseDocumentSaves(filePath), []);
+  const prepareEditorialSource = useCallback((filePath:string) => editorialHooksRef.current.prepareDocumentsForReview([filePath]), []);
+  const reloadEditorialSource = useCallback((filePath:string) => editorialHooksRef.current.discardAndReloadDocument(filePath), []);
   const openEditorPaths = useMemo(() => collectOpenEditorPaths(canvasTree), [canvasTree]);
   useEffect(() => {
     const hiddenConflict = Object.entries(openDocuments).find(([filePath, document]) => document.saveConflict && !openEditorPaths.has(filePath));
@@ -300,7 +314,11 @@ export function App() {
       if (record.workspaceRoot && record.workspaceRoot !== workspaceModel?.workspaceRoot) {
         return;
       }
-      if (record.taggedDocumentPath && (record.changeset || record.status !== "pending" && record.status !== "running")) {
+      if (record.purpose === "editorial-draft" && record.changeset && record.status !== "pending" && record.status !== "running") {
+        editorialSettledCallbacksRef.current.get(record.id)?.();
+        editorialSettledCallbacksRef.current.delete(record.id);
+      }
+      if (record.taggedDocumentPath && (record.purpose !== "editorial-draft" || record.changeset?.files.length) && (record.changeset || record.status !== "pending" && record.status !== "running")) {
         scheduleOpenDocumentRefresh(record.taggedDocumentPath);
       }
       invocationReviewController.applyRecord(record);
@@ -488,6 +506,8 @@ export function App() {
   async function invokeInlineAgent(draft: InlineAgentDraft, documentPath: string, paneId: string) {
     const document = openDocuments[documentPath] ?? null;
     if (!document) {
+      draft.restoreComposer();
+      draft.focusComposer();
       return;
     }
     const commandPresentation = invocationCommandPresentation(
@@ -518,7 +538,8 @@ export function App() {
       setInvocationActivity(failInvocationActivity(commandPresentation, authorization.detail, paneId));
       return;
     }
-    const pending = {
+    const pending: PendingInvocationAuthorization = {
+      kind: "inline",
       command: authorization.command,
       cwd: authorization.cwd,
       document,
@@ -536,6 +557,19 @@ export function App() {
     await startInlineAgentInvocation(pending, { kind: "trusted" });
   }
 
+  async function invokeEditorialDraft(input: Omit<LaunchEditorialDraftInput,"authorization" | "expectedFingerprint">, paneId: string, onSettled?: () => void) {
+    const commandPresentation = invocationCommandPresentation(input.handle, workspaceSettingsRef.current?.agentCommands ?? []);
+    setInvocationActivity(acknowledgeInvocationActivity(commandPresentation,paneId));
+    try {
+      const authorization = await window.exograph.workspace.getAgentInvocationAuthorization({handle:input.handle,documentPath:input.documentPath});
+      if (!authorization.launchable || !authorization.cwd) throw new Error(authorization.detail);
+      const pending: PendingInvocationAuthorization = {kind:"editorial",input,onSettled,command:authorization.command,cwd:authorization.cwd,fingerprint:authorization.fingerprint,reason:authorization.detail,paneId,
+        draft:{anchor:{left:24,top:48,origin:"top left"},message:"Draft this editorial proposal without changing author prose."}};
+      if (!authorization.trusted) {setInvocationActivity(null);setPendingInvocationAuthorization(pending);return;}
+      await startInlineAgentInvocation(pending,{kind:"trusted"});
+    } catch(error) { onSettled?.(); setInvocationActivity(failInvocationActivity(commandPresentation,error,paneId)); }
+  }
+
   async function startInlineAgentInvocation(
     pending: PendingInvocationAuthorization,
     authorization: { kind: "trusted" | "run-once" | "always-allow" },
@@ -544,6 +578,29 @@ export function App() {
     // soon as the decision is made; failures belong to the document status UI.
     setPendingInvocationAuthorization(null);
     invocationActivityEarlyEventsRef.current.clear();
+    if (pending.kind === "editorial") {
+      setInvocationActivity(beginInvocationActivity(pending.command,pending.paneId));
+      try {
+        const result = await window.exograph.workspace.launchEditorialDraft({...pending.input,authorization,expectedFingerprint:pending.fingerprint});
+        if (pending.onSettled) editorialSettledCallbacksRef.current.set(result.invocation.id,pending.onSettled);
+        if (!result.ok) {
+          setInvocationActivity({...failInvocationActivity(pending.command,result.detail,pending.paneId),invocationId:result.invocation.id});
+        } else {
+          const earlyEvents = takeEarlyInvocationActivityEvents(invocationActivityEarlyEventsRef.current,result.invocation.id);
+          setInvocationActivity(current => bindInvocationActivity(current,result.invocation,earlyEvents));
+        }
+        // A very short process may settle before its launch IPC response arrives.
+        // Read the durable current record once rather than missing that event.
+        try {
+          const currentReview = await window.exograph.workspace.getEditorialDraftReview(result.invocation.id);
+          if (currentReview.invocation.changeset && !["pending","running"].includes(currentReview.invocation.status)) {pending.onSettled?.();editorialSettledCallbacksRef.current.delete(result.invocation.id);}
+        } catch {
+          // Launch is already committed. A reference read failure cannot release
+          // the source lease while its writer is still alive; settlement owns it.
+        }
+      } catch(error) {pending.onSettled?.();setInvocationActivity(failInvocationActivity(pending.command,error,pending.paneId));}
+      return;
+    }
     setInvocationActivity(beginInvocationActivity(pending.command, pending.paneId, pending.draft.protocolInvocationId));
     try {
       await saveDocument(pending.document.filePath);
@@ -573,6 +630,9 @@ export function App() {
   function cancelPendingInlineAgentInvocation() {
     const pending = pendingInvocationAuthorization;
     if (!pending) return;
+    if (pending.kind === "editorial") {
+      pending.onSettled?.(); setPendingInvocationAuthorization(null);setInvocationActivity(null);return;
+    }
     cancelInlineAgentDraft(pending.draft, () => {
       setPendingInvocationAuthorization(null);
       setInvocationActivity(null);
@@ -954,7 +1014,7 @@ export function App() {
   const utilityTerminalSessions = terminalSessions.filter((session) => !canvasTerminalIds.has(session.id));
   const utilityPreviewTabs = previewTabs.tabs.filter((tab) => !canvasPreviewIds.has(tab.id));
   const activePreview = utilityPreviewTabs.find((tab) => tab.id === previewTabs.activeId) ?? utilityPreviewTabs[0] ?? null;
-  const activityCanStop = invocationActivity?.kind !== "done" && invocationActivity?.kind !== "stopped" && invocationActivity?.kind !== "failed" && invocationActivity?.kind !== "review";
+  const activityCanStop = Boolean(invocationActivity?.invocationId && editorialSettledCallbacksRef.current.has(invocationActivity.invocationId)) || invocationActivity?.kind !== "done" && invocationActivity?.kind !== "stopped" && invocationActivity?.kind !== "failed" && invocationActivity?.kind !== "review";
   const utilityContent = utilityState.destination === "preview" && activePreview ? (
     <BrowserPane
       paneId={activePreview.id}
@@ -1024,7 +1084,7 @@ export function App() {
       onStartMaintenance={(filePath) => void composeGraphMaintenance(filePath)}
     />
   ) : utilityState.destination === "context" ? (
-    <InspectorDock document={inspectedDocument} graphContext={inspectedGraphContext} open activeTag={null} tagResults={[]} invocationHistory={invocationHistory} invocationHistoryError={invocationHistoryError} requestedTab={inspectorTabRequest} onOpenInvocationHistory={(item) => {
+    <InspectorDock editorialController={editorialContext.controllers[focusedPaneId] ?? null} document={inspectedDocument} graphContext={inspectedGraphContext} open activeTag={null} tagResults={[]} invocationHistory={invocationHistory} invocationHistoryError={invocationHistoryError} requestedTab={inspectorTabRequest} onOpenInvocationHistory={(item) => {
       invocationReviewController.openHistory(item);
     }} onResumeInvocation={(id) => {
       const item = invocationHistory.find((candidate) => candidate.invocationId === id);
@@ -1199,9 +1259,19 @@ export function App() {
               onOpenTarget={(target) => void openKnowledgeTarget(target)}
               onSuggestTargets={(query) => suggestNoteTargets(query)}
               onPreviewTarget={(target) => previewKnowledgeTarget(target)}
+              invocationBusy={Boolean((pendingInvocationAuthorization?.paneId === leaf.id) || (invocationActivity && invocationActivityPaneId === leaf.id && (Boolean(invocationActivity.invocationId && editorialSettledCallbacksRef.current.has(invocationActivity.invocationId)) || !["done", "stopped", "failed", "review"].includes(invocationActivity.kind))))}
+              defaultAgentCommandId={workspaceSettingsRef.current?.defaultAgentCommandId}
               agentCommands={workspaceSettingsRef.current?.agentCommands ?? []}
+              onEditorialBarrier={editorialContext.freeze}
+              onEditorialController={editorialContext.register}
+              onOpenEditorial={openEditorialContext}
+              onPrepareEditorialSource={prepareEditorialSource}
+              onPauseEditorialSource={pauseEditorialSource}
+              onReloadEditorialSource={reloadEditorialSource}
+              onDraftEditorial={(input,onSettled) => invokeEditorialDraft(input,leaf.id,onSettled)}
               onInvokeAgent={(draft) => {
                 if (pane.activePath) void invokeInlineAgent(draft, pane.activePath, leaf.id);
+                else { draft.restoreComposer(); draft.focusComposer(); }
               }}
               invocationReview={
                 isFocused && activeReviewEntry && activeReviewPayload && pane.activePath && invocationReviewMatchesPath(activeReviewPayload, pane.activePath, activeReviewEntry.source)
@@ -1229,7 +1299,7 @@ export function App() {
                     }
                   : null
               }
-              editingFrozen={openDocumentsState.transitionPending || Boolean(pane.activePath && (invocationReviewFrozenPaths.includes(pane.activePath) || openDocuments[pane.activePath]?.resolvingConflict))}
+              editingFrozen={openDocumentsState.transitionPending || Boolean(pane.activePath && editorialContext.frozenPaths.has(pane.activePath)) || Boolean(pane.activePath && (invocationReviewFrozenPaths.includes(pane.activePath) || openDocuments[pane.activePath]?.resolvingConflict))}
               historyAvailable={invocationHistory.length > 0 || Boolean(invocationHistoryError)}
               onOpenHistory={() => {
                 openNoteContext();

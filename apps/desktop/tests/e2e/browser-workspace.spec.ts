@@ -98,7 +98,10 @@ test("browser shares live notes, preserves conflicting edits, and renders the gr
       .getByRole("button", { name: "focus-note", exact: true })
       .click();
     await expect(page.getByTestId("editor-title")).toHaveText("focus-note");
+    await expect(page.getByTestId("browser-editorial-unavailable")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add editorial note", exact: true })).toHaveCount(0);
     const editor = page.locator(".cm-content");
+    await expect(editor).toBeVisible();
     await editor.click();
     await page.keyboard.press("Meta+End");
     await page.keyboard.insertText("\nBrowser workspace proof");

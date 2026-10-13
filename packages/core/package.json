@@ -15,7 +15,10 @@
     "./note-title": "./src/note-title.ts",
     "./operator-help": "./src/operator-help.ts",
     "./terminal-settings": "./src/terminal-settings.ts",
-    "./workspace-content-policy": "./src/workspace-content-policy.ts"
+    "./workspace-content-policy": "./src/workspace-content-policy.ts",
+    "./editorial-notes": "./src/editorial-notes.ts",
+    "./editorial-document": "./src/editorial-document.ts",
+    "./editorial-store": "./src/editorial-store.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",

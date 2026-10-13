@@ -26,6 +26,19 @@ retain their draft/preview fields and gain `unlisted: true`; native unlisted Not
 also retain that status. Tags/aliases remain authored metadata. Quartz must honor
 unlisted membership when generating search, graph, backlinks, tags and feeds.
 
+Portable editorial annotations under `.exograph/editorial/` and staged invocation
+artifacts are excluded from the inventory and resource projection, even when linked
+from a publication Note. They are never copied as assets or manifest entries.
+
+Existing inline editorial notes are removed before Markdown reference and resource projection. This
+includes legacy `editorial` fences, structured proposals, resolved/dismissed notes,
+and editorial invocation/response provenance. Closed malformed editorial JSON is excluded conservatively. Unterminated
+editorial fences or agent envelopes stop export with a repair diagnostic; their
+ambiguous trailing content is never published or silently truncated. Accepted prose
+remains ordinary Markdown. Removing notes before resolution prevents their private
+links and proposed assets from entering the snapshot, diagnostics, HTML, search,
+or feeds. Export does not modify source Markdown or annotation history.
+
 Markdown is parsed into an AST. Offset edits leave code literals and unrelated
 body text intact. Standard links, references, wiki links/embeds, parsed HTML URL
 attributes, non-code HTML text, and known frontmatter image fields resolve in the original source

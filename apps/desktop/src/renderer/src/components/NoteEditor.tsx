@@ -1,5 +1,9 @@
+import { useEditorialEditor } from "./useEditorialEditor";
+import type { EditorialPaneController } from "./editorialTypes";
+import type { LaunchEditorialDraftInput } from "../../../shared/api/invocation-commands";
+import { useEditorialPreferences, setEditorialPreferences } from "./editorialPreferences";
 import { SaveConflictNotice } from "./SaveConflictNotice";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 
 import CodeMirror, { ExternalChange, type ReactCodeMirrorRef } from "@uiw/react-codemirror";
@@ -105,6 +109,17 @@ interface NoteEditorProps {
   onSuggestTargets: (query: string) => Promise<Array<{ label: string; target: string; detail?: string }>>;
   onPreviewTarget: (target: string) => Promise<{ title: string; excerpt: string } | null>;
   agentCommands: AgentCommand[];
+  defaultAgentCommandId?: string;
+  invocationBusy?: boolean;
+  editorialSupported?: boolean;
+  editorialPaneId?: string;
+  onEditorialBarrier?: (paneId:string,filePath:string,enabled:boolean)=>void;
+  onEditorialController?: (paneId:string,controller:EditorialPaneController|null)=>void;
+  onOpenEditorial?: (paneId:string,filePath:string)=>void;
+  onPauseEditorialSource?: (filePath:string)=>Promise<()=>void>;
+  onPrepareEditorialSource?: (filePath:string)=>Promise<void>;
+  onReloadEditorialSource?: (filePath:string)=>Promise<void>;
+  onDraftEditorial?: (input:Omit<LaunchEditorialDraftInput,"authorization"|"expectedFingerprint">,onSettled:()=>void)=>void;
   onInvokeAgent: (draft: InlineAgentDraft) => void;
   invocationReview: NoteInvocationReview | null;
   editingFrozen: boolean;
@@ -181,6 +196,7 @@ export function NoteEditor(props: NoteEditorProps) {
     onResumeProtocolInvocation,
   } = props;
   const [rawMarkdownMode, setRawMarkdownMode] = useState(false);
+  const editorialPreferences = useEditorialPreferences();
   const [chromeVisible, setChromeVisible] = useState(false);
   const codeMirrorRef = useRef<ReactCodeMirrorRef>(null);
   const renderedDocumentPathRef = useRef<string | null>(null);
@@ -746,6 +762,19 @@ export function NoteEditor(props: NoteEditorProps) {
     }),
     [document?.kind, invocationReview?.payload, rawMarkdownMode],
   );
+  const getEditorialView = useCallback(() => codeMirrorRef.current?.view ?? null, []);
+  const editorialPreviewRendering = useMemo(() => ({
+    onOpenTarget:(target:string)=>openTargetRef.current(target),onOpenTag:(tag:string)=>openTagRef.current(tag),
+    onResolveImage:(target:string,options?:{lookupByFilename?:boolean})=>resolveMarkdownImageRef.current(documentPath,target,options?.lookupByFilename),
+  }), [documentPath]);
+  const editorialSupported = props.editorialSupported ?? true;
+  const editorial = useEditorialEditor({
+    paneId:props.editorialPaneId ?? "editor", filePath:documentPath, body:document?.body ?? "", enabled:useMarkdownEditing && editorialSupported,rawMarkdown:rawMarkdownMode,
+    disabled:!editorialSupported ? "Editorial notes are available in the desktop app" : editingFrozen || document?.readOnly || document?.saveConflict || document?.filesystemState==="deleted" || inlineComposerActive ? "Finish the current document review or save conflict first" : undefined,
+    invocationBusy:Boolean(props.invocationBusy), defaultAgent:agentCommands.find(command=>command.id===props.defaultAgentCommandId && command.enabled),
+    getView:getEditorialView, previewRendering:editorialPreviewRendering, sourceBarrier:props.onEditorialBarrier, register:props.onEditorialController, open:props.onOpenEditorial,
+    pauseSource:props.onPauseEditorialSource,prepareSource:props.onPrepareEditorialSource,reloadSource:props.onReloadEditorialSource,draft:props.onDraftEditorial,
+  });
   const editorExtensions = useMemo(
     () => useMarkdownEditing
       ? [
@@ -753,11 +782,12 @@ export function NoteEditor(props: NoteEditorProps) {
           EditorView.lineWrapping,
           markdownSpellcheck,
           markdownFormattingKeymap,
+          ...(editorialSupported ? [editorial.commands] : []),
           saveKeymap,
           selectionTracker,
           completionTracker,
           agentComposer,
-          ...(!rawMarkdownMode ? markdownPreviewExtensions : []),
+          ...(!rawMarkdownMode ? [...markdownPreviewExtensions, ...(editorialSupported ? [editorial.extension] : [])] : []),
           ...invocationReviewExtensions,
           cmTheme,
           syntaxTheme,
@@ -776,7 +806,7 @@ export function NoteEditor(props: NoteEditorProps) {
           cmTheme,
           syntaxTheme,
         ],
-    [agentComposer, cmTheme, codeLanguage?.extensions, completionTracker, invocationReviewExtensions, markdownFormattingKeymap, markdownPreviewExtensions, markdownSpellcheck, rawMarkdownMode, saveKeymap, selectionTracker, syntaxTheme, useMarkdownEditing],
+    [editorialSupported, editorial.commands, editorial.extension, agentComposer, cmTheme, codeLanguage?.extensions, completionTracker, invocationReviewExtensions, markdownFormattingKeymap, markdownPreviewExtensions, markdownSpellcheck, rawMarkdownMode, saveKeymap, selectionTracker, syntaxTheme, useMarkdownEditing],
   );
 
   useLayoutEffect(() => {
@@ -1137,6 +1167,19 @@ export function NoteEditor(props: NoteEditorProps) {
           >
             <Save size={14} />
           </button>
+          {editorialSupported && useMarkdownEditing && !rawMarkdownMode ? (
+            <button className="toolbar-button" type="button" data-testid="create-editorial-note" aria-label="Add editorial note" title="Add editorial note (⌘⇧E); select text to attach a passage" disabled={Boolean(editorial.controller.mutationDisabled)} onClick={editorial.createNote}>
+              <Plus size={14} />
+            </button>
+          ) : null}
+          {editorialSupported && useMarkdownEditing && !rawMarkdownMode && editorial.controller.spans.length > 0 ? (
+            <button className="toolbar-button toolbar-button--editorial" type="button" data-testid="toggle-editorial-notes"
+              aria-label={editorialPreferences.hidden ? "Show editorial notes" : "Hide editorial notes"}
+              title={editorialPreferences.hidden ? "Show editorial notes" : "Hide editorial notes"}
+              aria-pressed={editorialPreferences.hidden} onClick={() => setEditorialPreferences({ ...editorialPreferences, hidden: !editorialPreferences.hidden })}>
+              {editorialPreferences.hidden ? "Show notes" : "Hide notes"}
+            </button>
+          ) : null}
           {useMarkdownEditing ? (
             <button
               aria-label={rawMarkdownMode ? "Switch to live preview" : "Switch to raw markdown"}
@@ -1274,13 +1317,14 @@ export function NoteEditor(props: NoteEditorProps) {
         onMouseLeave={handleEditorSurfaceMouseLeave}
         onMouseMove={handleEditorSurfaceMouseMove}
       >
+        {editorial.preview && !rawMarkdownMode ? <div className="editorial-preview-notice" role="status">Preview — select Original in Editing to write.</div> : null}
         <CodeMirror
           ref={codeMirrorRef}
           key={`${document.filePath}:${useMarkdownEditing && !rawMarkdownMode ? "live" : "code"}:${theme.id}:${fontSize}`}
           value={document.body}
           extensions={editorExtensions}
           basicSetup={EDITOR_BASIC_SETUP}
-          editable={!document.readOnly && !editingFrozen && !invocationReview?.decisionPending}
+          editable={!document.readOnly && !editingFrozen && !editorial.barrier && (rawMarkdownMode || !editorial.preview) && !invocationReview?.decisionPending}
           onBlur={() => {
             const view = codeMirrorRef.current?.view;
             if (inlineComposerActive && view) bodyChangeRef.current(view.state.doc.toString());
