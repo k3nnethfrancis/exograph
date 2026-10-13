@@ -110,6 +110,11 @@ export interface InvocationRecord {
   originalMentionText?: string;
   /** Links the local invocation record to its inert Markdown envelope. */
   protocolInvocationId?: string;
+  /** Dedicated artifact-based drafting; never uses a Markdown request envelope. */
+  purpose?: "editorial-draft";
+  editorialDraft?: { noteId: string; annotationRevision: string; sourceRevision: string; reviewStatus: "waiting" | "pending" | "kept" | "rejected"; requestSha256?: string; documentSha256?: string; proposalSha256?: string; message?: string };
+  /** Scope violation; its captured changes can never be kept through review. */
+  editorialGuardFailure?: string;
   mentionProvenance: InvocationMentionProvenance;
   message: string;
   promptDelivery: AgentCommandPromptDelivery;
@@ -378,6 +383,9 @@ export function normalizeInvocationRecord(input: unknown): InvocationRecord | nu
     return null;
   }
 
+  if (candidate.purpose !== undefined && candidate.purpose !== "editorial-draft") return null;
+  if (candidate.purpose === "editorial-draft" && !normalizeEditorialDraftRecord(candidate.editorialDraft)) return null;
+  if (candidate.editorialDraft !== undefined && candidate.purpose !== "editorial-draft") return null;
   const status = normalizeInvocationStatus(candidate.status);
   return {
     id,
@@ -388,6 +396,9 @@ export function normalizeInvocationRecord(input: unknown): InvocationRecord | nu
     ...(taggedDocumentPath ? { taggedDocumentPath } : {}),
     ...(originalMentionText ? { originalMentionText } : {}),
     ...optionalProtocolInvocationId(candidate.protocolInvocationId),
+    ...(candidate.purpose === "editorial-draft" ? { purpose: "editorial-draft" as const } : {}),
+    ...(normalizeEditorialDraftRecord(candidate.editorialDraft) ? { editorialDraft: normalizeEditorialDraftRecord(candidate.editorialDraft)! } : {}),
+    ...optionalStringField("editorialGuardFailure", candidate.editorialGuardFailure),
     mentionProvenance: normalizeInvocationMentionProvenance(candidate.mentionProvenance),
     message,
     promptDelivery: "stdin",
@@ -520,4 +531,15 @@ function optionalIntegerField<Key extends string>(key: Key, value: unknown): { [
 
 function normalizeRequiredString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeEditorialDraftRecord(value: unknown): InvocationRecord["editorialDraft"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const draft = value as NonNullable<InvocationRecord["editorialDraft"]>;
+  const validHash = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+  if (typeof draft.noteId !== "string" || !draft.noteId || !validHash(draft.annotationRevision) || !validHash(draft.sourceRevision) || !["waiting", "pending", "kept", "rejected"].includes(draft.reviewStatus)) return undefined;
+  for (const field of [draft.requestSha256,draft.documentSha256,draft.proposalSha256]) if (field !== undefined && !validHash(field)) return undefined;
+  if (Boolean(draft.requestSha256) !== Boolean(draft.documentSha256)) return undefined;
+  if (draft.reviewStatus !== "waiting" && (!draft.requestSha256 || !draft.documentSha256 || !draft.proposalSha256)) return undefined;
+  return { noteId: draft.noteId, annotationRevision: draft.annotationRevision, sourceRevision: draft.sourceRevision, reviewStatus: draft.reviewStatus, ...optionalStringField("requestSha256",draft.requestSha256), ...optionalStringField("documentSha256",draft.documentSha256), ...optionalStringField("proposalSha256",draft.proposalSha256), ...(typeof draft.message === "string" ? {message: draft.message} : {}) };
 }

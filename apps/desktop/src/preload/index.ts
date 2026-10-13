@@ -26,6 +26,16 @@ window.addEventListener(
 );
 
 const api: DesktopApi = {
+  editorial: {
+    relink: (filePath,id,revision) => invokeDesktop("editorial:relink",filePath,id,revision),
+    read: filePath => invokeDesktop('editorial:read',filePath),
+    save: (filePath,notes,revision) => invokeDesktop('editorial:save',filePath,notes,revision),
+    apply: (filePath,id,sourceRevision,revision) => invokeDesktop('editorial:apply',filePath,id,sourceRevision,revision),
+    migrate: (filePath,ids,sourceRevision,revision) => invokeDesktop('editorial:migrate',filePath,ids,sourceRevision,revision),
+    undo: (filePath,id,sourceRevision,revision) => invokeDesktop('editorial:undo',filePath,id,sourceRevision,revision),
+    redo: (filePath,id,sourceRevision,revision) => invokeDesktop('editorial:redo',filePath,id,sourceRevision,revision),
+    onChanged: listener => {const handler=(_event:unknown,payload:Parameters<typeof listener>[0])=>listener(payload);ipcRenderer.on('editorial:changed',handler);return ()=>ipcRenderer.removeListener('editorial:changed',handler);},
+  },
   ...(process.env.EXOGRAPH_TEST === "1" ? { test: { graphHooks: true as const } } : {}),
   publishing: {
     getSetupStatus: () => invokeDesktop("publishing:get-setup-status"),
@@ -46,6 +56,10 @@ const api: DesktopApi = {
     },
   },
   workspace: {
+    launchEditorialDraft: input => invokeDesktop('workspace:launch-editorial-draft',input),
+    getEditorialDraftReview: id => invokeDesktop('workspace:get-editorial-draft-review',id),
+    listPendingEditorialDraftReviews: () => invokeDesktop('workspace:list-pending-editorial-draft-reviews'),
+    reviewEditorialDraft: input => invokeDesktop('workspace:review-editorial-draft',input),
     getModel: () => invokeDesktop("workspace:get-model"),
     getSettings: () => invokeDesktop("workspace:get-settings"),
     getSetupState: () => invokeDesktop("workspace:get-setup-state"),

@@ -36,6 +36,12 @@ import {
   commandForCodexResume as buildCodexResumeCommand,
 } from "@exograph/core/provider-session";
 
+import { stageEditorialDraft, editorialDraftArtifactPrompt, captureEditorialDraftProposal, readEditorialDraftProposal, readEditorialDraftRequest } from "./editorial-draft-artifacts";
+import type { EditorialDraftReviewPayload, LaunchEditorialDraftResponse } from "../../shared/api/invocation-commands";
+import type { EditorialNote } from "@exograph/core/editorial-notes";
+import { validateEditorialDraftProposal } from "@exograph/core/editorial-notes";
+import { guardEditorialDraftSettlement } from "./editorial-draft-guard";
+
 import type { TerminalSessionInfo } from "../../shared/api";
 import type { AgentCommandContinuityStatus, AgentCommandLaunchFacts, AgentInvocationAuthorizationFacts } from "../../shared/api";
 import { bindResolvedExecutable, inspectAgentCommandLaunchFacts } from "./agent-command-launch-facts";
@@ -66,6 +72,7 @@ export interface InvocationRequest {
   task?: string;
   documentPath?: string;
   protocolInvocationId?: string;
+  editorialDraft?: { note: EditorialNote; annotationRevision: string; sourceRevision: string };
   mentionText?: string;
   documentFrontmatter?: Record<string, unknown>;
   documentBody?: string;
@@ -136,6 +143,10 @@ export class InvocationRunnerError extends Error {
   }
 }
 
+class EditorialDraftWriterActiveError extends Error {
+  constructor(readonly invocation: InvocationRecord, readonly cause: unknown) { super("The editorial agent could not be stopped. Source writes remain paused until it settles."); }
+}
+
 class InvocationProcessStopError extends Error {
   constructor(message: string, readonly cause: unknown) { super(message); }
 }
@@ -191,6 +202,8 @@ export class InvocationRunner extends EventEmitter {
     invocationProcessFactory?: InvocationProcessFactory;
     settlementQuietMs?: number;
     settlementMaxWaitMs?: number;
+    inspectEditorialAnnotationRevision?: (input: {documentPath:string;noteId:string;annotationRevision:string}) => Promise<boolean>;
+    importEditorialProposal?: (input: {documentPath: string; noteId: string; annotationRevision: string; sourceRevision: string; proposal: EditorialNote; documentBody: string}) => Promise<void>;
   }) {
     super();
     options.workspaceWatcherService.subscribe((event) => this.onWorkspaceChange(event));
@@ -221,6 +234,7 @@ export class InvocationRunner extends EventEmitter {
       id, workspaceRoot: settings.workspaceRoot, noteRoots: [...settings.noteRoots], status: "pending", context: request.context,
       ...(request.context === "note" ? { taggedDocumentPath: request.documentPath, originalMentionText: request.mentionText, mentionProvenance: "human-authored" as const } : { mentionProvenance: "unknown" as const }),
       ...(request.protocolInvocationId ? { protocolInvocationId: request.protocolInvocationId } : {}),
+      ...(request.editorialDraft ? { purpose:"editorial-draft" as const, editorialDraft:{ noteId:request.editorialDraft.note.id, annotationRevision:request.editorialDraft.annotationRevision, sourceRevision:request.editorialDraft.sourceRevision, reviewStatus:"waiting" as const } } : {}),
       ...(request.skill ? { skill: request.skill } : {}),
       message: request.message,
       continuity: { policy: command.continuityPolicy, outcome: "fresh" },
@@ -229,7 +243,13 @@ export class InvocationRunner extends EventEmitter {
     };
     let before = request.context === "note" ? await snapshotTextFile(request.documentPath!) : undefined;
     let cleanBaseContent: string | undefined;
-    if (request.context === "note" && request.documentBody !== undefined) {
+    if (request.editorialDraft) {
+      if (request.context !== "note" || typeof request.documentBody !== "string" || request.editorialDraft.note.status !== "open") throw new InvocationRunnerError("editorial-scope-invalid", "Select a valid open editorial annotation before drafting.");
+      const invalid = validateEditorialDraftProposal(request.editorialDraft.note,request.editorialDraft.note,request.documentBody!);
+      if (invalid) throw new InvocationRunnerError("editorial-scope-invalid",invalid);
+      cleanBaseContent = before!.content;
+    }
+    if (request.context === "note" && request.documentBody !== undefined && !request.editorialDraft) {
       const persisted = await readWorkspaceDocument(request.documentPath!);
       const verified = await snapshotTextFile(request.documentPath!);
       const frontmatterMatches = request.documentFrontmatter === undefined ||
@@ -292,6 +312,15 @@ export class InvocationRunner extends EventEmitter {
     };
   }
 
+  async authorizeAndStartEditorial(prepared: PreparedInvocation, authorization: InvocationAuthorization): Promise<LaunchEditorialDraftResponse> {
+    if (!prepared.request.editorialDraft) throw new InvocationRunnerError("editorial-scope-invalid", "This launch is not an editorial draft.");
+    try { return await this.authorizeAndStart(prepared,authorization); }
+    catch(error) {
+      if (!(error instanceof EditorialDraftWriterActiveError)) throw error;
+      return {ok:false,writerActive:true,invocation:error.invocation,detail:error.message};
+    }
+  }
+
   async authorizeAndStart(
     prepared: PreparedInvocation,
     authorization: InvocationAuthorization,
@@ -322,6 +351,7 @@ export class InvocationRunner extends EventEmitter {
     let launchArtifacts: InvocationLaunchArtifacts | undefined;
     let continuityHead: InvocationConversationHead | null = null;
     let startCommitted = false;
+    let failedLaunchExitHandler: ((event: Parameters<typeof inspectInvocationAdapterResult>[1], head: InvocationConversationHead | null, fallback: boolean) => Promise<void>) | undefined;
     const queuedExitRef: { current: { event: Parameters<typeof inspectInvocationAdapterResult>[1]; attemptedHead: InvocationConversationHead | null; fallback: boolean } | null } = { current: null };
     const settleHeadlessProcess = (exitCode: number | null, failureReason: string | null) => {
       const status = exitCode !== 0 || failureReason ? "failed" : "process-exited";
@@ -369,11 +399,15 @@ export class InvocationRunner extends EventEmitter {
       continuityHead = prepared.continuityLane
         ? await new InvocationContinuityStore(prepared.workspaceRoot).readHead(prepared.continuityLane)
         : null;
+      if (prepared.request.editorialDraft) {
+        const hashes = await stageEditorialDraft(store, prepared.pending, prepared.request.editorialDraft.note, prepared.request.documentBody!);
+        prepared.pending = {...prepared.pending, editorialDraft:{...prepared.pending.editorialDraft!,...hashes}};
+      }
       await store.writeRecord(prepared.pending);
       if (prepared.before) {
         this.observe(prepared.pending, prepared.before, prepared.workspaceRoot, prepared.noteRoots, continuityLockKey);
       }
-      const prompt = prepared.request.context === "note"
+      const prompt = prepared.request.editorialDraft ? editorialDraftArtifactPrompt(store, prepared.pending) : prepared.request.context === "note"
         ? formatNoteInvocationPrompt({
             documentPath: prepared.request.documentPath!,
             mentionText: prepared.request.mentionText ?? "",
@@ -439,6 +473,7 @@ export class InvocationRunner extends EventEmitter {
         }
         settleHeadlessProcess(event.exitCode, result.failureReason);
       };
+      failedLaunchExitHandler=handleHeadlessExit;
       const launchHeadless = async (head: InvocationConversationHead | null, fallback: boolean): Promise<void> => {
         const activityAdapter = new InvocationActivityAdapter(prepared.command.adapter);
         invocationProcess = (this.options.invocationProcessFactory ?? new DirectInvocationProcessFactory()).launch({
@@ -544,8 +579,23 @@ export class InvocationRunner extends EventEmitter {
             endedAt: new Date().toISOString(),
             failureReason: "Invocation launch failed and its process could not be stopped safely.",
           };
-          await store.writeRecord(recoverable);
           if (observation) observation.record = recoverable;
+          if (prepared.request.editorialDraft) {
+            // The launch IPC can fail while its writer remains alive. Keep that
+            // identity reachable and let a later real exit settle this scope.
+            startCommitted = true;
+            let persistenceError: unknown;
+            try { await store.writeRecord(recoverable); } catch(failure) { persistenceError=failure; }
+            const exit=queuedExitRef.current;
+            if(exit) {
+              queuedExitRef.current=null;
+              void failedLaunchExitHandler!(exit.event,exit.attemptedHead,exit.fallback).catch(failure => {
+                this.emit("settlement-error",{invocationId:prepared.id,error:failure});
+              });
+            }
+            throw new EditorialDraftWriterActiveError(recoverable,new AggregateError([error,stopError,...(persistenceError?[persistenceError]:[])]));
+          }
+          await store.writeRecord(recoverable);
           throw new AggregateError([error, stopError], "Invocation launch failed and its process could not be stopped safely.");
         }
       }
@@ -704,6 +754,55 @@ export class InvocationRunner extends EventEmitter {
     return this.invocationScopes.get(id)?.workspaceRoot ?? this.active.get(id)?.workspaceRoot ?? null;
   }
 
+  async getEditorialDraftReview(id: string): Promise<EditorialDraftReviewPayload> {
+    const scope = this.scopeForInvocation(id);
+    const store = new InvocationStore(scope.workspaceRoot);
+    const record = await requiredInvocation(store,id);
+    if (record.purpose !== "editorial-draft" || !record.editorialDraft) throw new InvocationRunnerError("review-unavailable", "This invocation is not an editorial draft.");
+    const {request} = await readEditorialDraftRequest(store,record);
+    const captured = record.editorialDraft.proposalSha256 && !record.editorialGuardFailure ? await readEditorialDraftProposal(store,record) : null;
+    return {invocation:record,documentPath:record.taggedDocumentPath!,prior:request.note,proposal:captured?.note ?? null,message:record.failureReason ?? captured?.message ?? "Drafting is still running.",canKeep:record.editorialDraft.reviewStatus === "pending" && !record.editorialGuardFailure,canReject:record.editorialDraft.reviewStatus === "pending"};
+  }
+
+  async listPendingEditorialDraftReviews(): Promise<EditorialDraftReviewPayload[]> {
+    const records = await new InvocationStore(this.options.getWorkspaceSettings().workspaceRoot).listRecords();
+    const pending = records.filter(record => record.purpose === "editorial-draft" && record.editorialDraft?.reviewStatus === "pending");
+    return Promise.all(pending.map(record => this.getEditorialDraftReview(record.id)));
+  }
+
+  async reviewEditorialDraft(id: string, action: "keep" | "reject"): Promise<InvocationRecord> {
+    return this.serializeReviewDecision(id,async () => {
+      const scope = this.scopeForInvocation(id), store = new InvocationStore(scope.workspaceRoot);
+      const record = await requiredInvocation(store,id);
+      const draft = record.editorialDraft;
+      if (draft?.reviewStatus === (action === "keep" ? "kept" : "rejected")) return record;
+      if (record.purpose !== "editorial-draft" || !draft || draft.reviewStatus !== "pending" || record.editorialGuardFailure) throw new InvocationRunnerError("review-unavailable", "This editorial proposal is not available for review.");
+      if (action === "keep") {
+        if (!this.options.importEditorialProposal) throw new InvocationRunnerError("review-unavailable", "Editorial annotation import is unavailable.");
+        const {body} = await readEditorialDraftRequest(store,record);
+        const proposal = await readEditorialDraftProposal(store,record);
+        await this.options.importEditorialProposal({documentPath:record.taggedDocumentPath!,noteId:draft.noteId,annotationRevision:draft.annotationRevision,sourceRevision:draft.sourceRevision,proposal:proposal.note,documentBody:body});
+      }
+      const next: InvocationRecord = {...record,editorialDraft:{...draft,reviewStatus:action === "keep" ? "kept" : "rejected"}};
+      await store.writeRecord(next); this.emit("updated",next); return next;
+    });
+  }
+
+  private async captureEditorialResult(store: InvocationStore, record: InvocationRecord): Promise<InvocationRecord> {
+    if (record.purpose !== "editorial-draft" || !record.editorialDraft || record.editorialGuardFailure || record.editorialDraft.reviewStatus !== "waiting") return record;
+    if (record.status === "failed" || record.status === "user-ended") return record;
+    try {
+      if (this.options.inspectEditorialAnnotationRevision && !await this.options.inspectEditorialAnnotationRevision({documentPath:record.taggedDocumentPath!,noteId:record.editorialDraft.noteId,annotationRevision:record.editorialDraft.annotationRevision})) {
+        const reason = "Editorial annotations changed while drafting. Newer annotations were preserved; review them and request a new draft.";
+        return {...record,status:"failed",failureReason:reason,editorialGuardFailure:reason};
+      }
+      const proposal = await captureEditorialDraftProposal(store,record);
+      return {...record,editorialDraft:{...record.editorialDraft,reviewStatus:"pending",message:proposal.message,proposalSha256:proposal.sha256}};
+    } catch (error) {
+      return {...record,status:"failed",failureReason:`Editorial drafting did not produce a valid proposal: ${error instanceof Error ? error.message : String(error)}`};
+    }
+  }
+
   async getInvocationFileReview(id: string, changeId: string): Promise<InvocationFileReviewPayload> {
     const scope = this.scopeForInvocation(id);
     const record = await requiredInvocation(new InvocationStore(scope.workspaceRoot), id);
@@ -836,7 +935,8 @@ export class InvocationRunner extends EventEmitter {
         recordStore = store;
         recovered = record;
 
-        const requiresFromRecord = record.status === "pending" || record.status === "running" ||
+        const waitingEditorialDraft = record.purpose === "editorial-draft" && record.editorialDraft?.reviewStatus === "waiting" && record.status !== "failed" && !record.editorialGuardFailure;
+        const requiresFromRecord = waitingEditorialDraft || record.status === "pending" || record.status === "running" ||
           record.status === "orphaned" && !record.changeset;
         let existingSettled = null as InvocationWorkspaceManifest | null;
         if (!ownership && requiresFromRecord) {
@@ -848,7 +948,7 @@ export class InvocationRunner extends EventEmitter {
         recovered = await this.reviewService(workspaceRoot).recoverJournal(record);
         const launch = await recordStore.readManifest(record.id, "launch");
         const failedBeforeExecution = recovered.status === "failed" && !recovered.startedAt;
-        const requiresExactRecovery = recovered.status === "pending" || recovered.status === "running" ||
+        const requiresExactRecovery = waitingEditorialDraft || recovered.status === "pending" || recovered.status === "running" ||
           (recovered.status === "orphaned" && !recovered.changeset) ||
           Boolean(launch && !recovered.changeset && !failedBeforeExecution);
         if (!requiresExactRecovery) {
@@ -860,14 +960,16 @@ export class InvocationRunner extends EventEmitter {
         existingSettled ??= await recordStore.readManifest(record.id, "settled");
         const settled = existingSettled ?? await recordStore.captureSettledManifest(record.id, noteRoots, launch);
         const changeset = buildInvocationChangeset(launch, settled);
-        const next: InvocationRecord = {
+        let next: InvocationRecord = {
           ...recovered,
           status: "orphaned",
           endedAt: new Date().toISOString(),
           changeset,
         };
+        next = await guardEditorialDraftSettlement(recordStore, next);
+        next = await this.captureEditorialResult(recordStore, next);
         await recordStore.writeRecord(next);
-        await this.compactArtifacts(recordStore, next.id, changeset);
+        await this.compactArtifacts(recordStore, next.id, next.changeset ?? changeset);
         await recordStore.clearProcessOwnership(record.id);
         this.emit("updated", next);
       } catch (error) {
@@ -980,6 +1082,9 @@ export class InvocationRunner extends EventEmitter {
    * even while the harness finishes its own terminal response.
    */
   private async captureProposalCheckpoint(observation: ActiveObservation): Promise<void> {
+    // Editorial scope is validated only once the writer has stopped. A response
+    // checkpoint could otherwise freeze the immutable settled manifest too early.
+    if (observation.record.purpose === "editorial-draft") return;
     const id = observation.record.id;
     const protocolId = observation.record.protocolInvocationId;
     if (!isDocumentAgentProtocolId(protocolId)) return;
@@ -1038,7 +1143,7 @@ export class InvocationRunner extends EventEmitter {
       const settledFailureReason = missingDurableResponse
         ? `@${observation.record.command.handle} finished without writing its linked response into the note.`
         : failureReason;
-      const next: InvocationRecord = {
+      let next: InvocationRecord = {
         ...observation.record,
         status: settledStatus,
         endedAt: new Date().toISOString(),
@@ -1046,12 +1151,15 @@ export class InvocationRunner extends EventEmitter {
         ...(settledStatus === "failed" ? { failureReason: settledFailureReason ?? `Command exited with code ${exitCode ?? "unknown"}.` } : {}),
         changeset,
       };
+      next = await guardEditorialDraftSettlement(store, next);
+      next = await this.captureEditorialResult(store, next);
       await store.writeRecord(next);
       await store.clearProcessOwnership(id);
       // Retire redundant snapshots before releasing the invocation scope. The
       // compactor is bounded and concurrent; process completion was already
       // reported independently through the activity channel.
-      await this.compactArtifacts(store, id, changeset);
+      await this.compactArtifacts(store, id, next.changeset ?? changeset);
+      if (next.editorialGuardFailure) this.emitActivity(id, { kind: "failed", label: next.failureReason }, true);
       this.emit("updated", next);
       this.releaseObservation(observation);
       return next;
@@ -1153,6 +1261,9 @@ export class InvocationRunner extends EventEmitter {
       const scope = this.scopeForInvocation(id);
       const store = new InvocationStore(scope.workspaceRoot);
       const record = await requiredInvocation(store, id);
+      if (record.editorialGuardFailure && (allAction === "keep" || resolutions.some(item => item.action === "keep"))) {
+        throw new InvocationRunnerError("editorial-scope-violation", record.editorialGuardFailure);
+      }
       const effectiveResolutions = allAction
         ? record.changeset?.files
           .filter((change) => change.decision.status === "pending" || allAction === "keep" && change.decision.status === "conflict")
@@ -1440,6 +1551,12 @@ function newestRecordFirst(left: InvocationRecord, right: InvocationRecord): num
 }
 
 function invocationHistoryOutcome(record: InvocationRecord): InvocationHistoryItem["outcome"] {
+  if (record.purpose === "editorial-draft") {
+    if (record.editorialDraft?.reviewStatus === "pending") return "pending";
+    if (record.editorialDraft?.reviewStatus === "kept") return "kept";
+    if (record.editorialDraft?.reviewStatus === "rejected") return "rejected";
+    if (record.status === "failed" || record.status === "orphaned") return "failed";
+  }
   const changesetStatus = record.changeset?.status;
   if (changesetStatus === "pending-review" || changesetStatus === "partially-resolved" || changesetStatus === "conflict" ||
       record.status === "pending" || record.status === "running") return "pending";

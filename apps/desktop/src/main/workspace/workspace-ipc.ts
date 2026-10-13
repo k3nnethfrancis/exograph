@@ -29,6 +29,10 @@ export interface WorkspaceIpcHandlers {
   getFolderOverview: WorkspaceApi["getFolderOverview"];
   ensureFolderIndex: WorkspaceApi["ensureFolderIndex"];
   launchAgentInvocation: WorkspaceApi["launchAgentInvocation"];
+  launchEditorialDraft: WorkspaceApi["launchEditorialDraft"];
+  getEditorialDraftReview: WorkspaceApi["getEditorialDraftReview"];
+  listPendingEditorialDraftReviews: WorkspaceApi["listPendingEditorialDraftReviews"];
+  reviewEditorialDraft: WorkspaceApi["reviewEditorialDraft"];
   getAgentInvocationAuthorization: WorkspaceApi["getAgentInvocationAuthorization"];
   prepareGraphMaintenanceSkill: WorkspaceApi["prepareGraphMaintenanceSkill"];
   discoverOntology: WorkspaceApi["discoverOntology"];
@@ -107,6 +111,16 @@ export function registerWorkspaceIpcHandlers(handlers: WorkspaceIpcHandlers) {
   handleDesktopInvoke("workspace:launch-agent-invocation", async (_event, input) => {
     const documentPath = await workspaceFiles().existing(input.documentPath);
     return handlers.launchAgentInvocation({ ...input, documentPath });
+  });
+  handleDesktopInvoke("workspace:launch-editorial-draft", async (_event,input) => {
+    const documentPath = await workspaceFiles().existing(input.documentPath);
+    return handlers.launchEditorialDraft({...input,documentPath});
+  });
+  handleDesktopInvoke("workspace:get-editorial-draft-review", async (_event,id) => handlers.getEditorialDraftReview(id));
+  handleDesktopInvoke("workspace:list-pending-editorial-draft-reviews", async () => handlers.listPendingEditorialDraftReviews());
+  handleDesktopInvoke("workspace:review-editorial-draft", async (_event,input) => {
+    assertReviewAction(input.action);
+    return handlers.reviewEditorialDraft(input);
   });
   handleDesktopInvoke("workspace:get-agent-invocation-authorization", async (_event, input) => {
     const documentPath = await workspaceFiles().existing(input.documentPath);

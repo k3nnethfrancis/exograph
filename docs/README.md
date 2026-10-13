@@ -16,6 +16,7 @@ contracts are linked from there.
 - [Publishing](publishing.md) — folder exports, Quartz previews, and preparing a site for review.
 - [Search](search.md) — immediate search, optional QMD indexing, and recovery.
 - [Knowledge graph](knowledge-graph.md) — what the graph represents and what it deliberately does not.
+- [Editorial notes](editorial-notes.md) — review passage notes and proposed wording in Note context, preview changes, and apply accepted proposals.
 - [Agent invocations](document-agent-protocol.md) — inline `@` requests, review, durable response blocks, and session handoff.
 - [CLI and MCP](cli.md) — shell commands, app-off behavior, and the bounded MCP server.
 - [CLI graph traversal](graph-traversal.md) — bounded graph queries, snapshot cursors, and execution traces.

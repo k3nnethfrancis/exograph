@@ -585,3 +585,22 @@ function bodySnapshotFromPrompt(prompt: string): string {
   expect(end).toBeGreaterThan(start);
   return prompt.slice(start + startMarker.length, end);
 }
+
+describe("editorial draft invocation records", () => {
+  const base = () => ({id:"editorial-1",status:"process-exited",context:"note",taggedDocumentPath:"/tmp/note.md",originalMentionText:"@claude",message:"Draft editorial proposal",promptDelivery:"stdin",command:createDefaultClaudeAgentCommand(),cwd:"/tmp",createdAt:"2026-10-12T00:00:00.000Z"});
+  it("preserves the immutable purpose, revision and captured proposal review state", () => {
+    const editorialDraft = {noteId:"selected",annotationRevision:"a".repeat(64),sourceRevision:"b".repeat(64),reviewStatus:"pending",requestSha256:"a".repeat(64),documentSha256:"b".repeat(64),proposalSha256:"c".repeat(64),message:"Drafted."};
+    const record = normalizeInvocationRecord({...base(),purpose:"editorial-draft",editorialDraft});
+    expect(record?.purpose).toBe("editorial-draft");
+    expect(record?.editorialDraft).toEqual(editorialDraft);
+  });
+  it("rejects unknown purposes and incomplete editorial draft scopes", () => {
+    expect(normalizeInvocationRecord({...base(),purpose:"unknown"})).toBeNull();
+    expect(normalizeInvocationRecord({...base(),purpose:"editorial-draft"})).toBeNull();
+    expect(normalizeInvocationRecord({...base(),purpose:"editorial-draft",editorialDraft:{noteId:"selected",annotationRevision:"a",sourceRevision:"s",reviewStatus:"accepted"}})).toBeNull();
+    const draft = {noteId:"selected",annotationRevision:"a".repeat(64),sourceRevision:"b".repeat(64),reviewStatus:"pending"};
+    expect(normalizeInvocationRecord({...base(),purpose:"editorial-draft",editorialDraft:draft})).toBeNull();
+    expect(normalizeInvocationRecord({...base(),editorialDraft:{...draft,reviewStatus:"waiting"}})).toBeNull();
+    expect(normalizeInvocationRecord({...base(),purpose:"editorial-draft",editorialDraft:{...draft,reviewStatus:"waiting",requestSha256:"malformed",documentSha256:"b".repeat(64)}})).toBeNull();
+  });
+});

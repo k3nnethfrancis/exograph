@@ -269,3 +269,5 @@ function graphReferenceDecorations(
 }
 
 // ---------------------------------------------------------------------------
+
+export { markdownPreviewInlineContent } from "./previewDom";

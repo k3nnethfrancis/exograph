@@ -3,16 +3,19 @@ import { useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
 import type { NoteDocument, SearchResult, WorkspaceGraphContext } from "@exograph/core";
 import type { InvocationHistoryItem } from "../../../shared/api";
 
+import { EditorialNotesPanel } from "./EditorialNotesPanel";
+import type { EditorialPaneController } from "./editorialTypes";
 import { buildNoteGraphContext } from "../graphAffordances";
 import { AgentCommandIcon } from "./AgentCommandIcon";
 
-type ConnectionTab = "outline" | "links" | "history";
+type ConnectionTab = "outline" | "links" | "history" | "editing";
 const CONNECTION_TABS: readonly { id: Exclude<ConnectionTab, "history">; label: string }[] = [
   { id: "outline", label: "Outline" },
   { id: "links", label: "Links" },
 ];
 
 interface InspectorDockProps {
+  editorialController?: EditorialPaneController | null;
   document: NoteDocument | null;
   graphContext: WorkspaceGraphContext | null;
   open: boolean;
@@ -25,7 +28,7 @@ interface InspectorDockProps {
   onOpenHeading: (filePath: string, line: number) => void;
   invocationHistory: InvocationHistoryItem[];
   invocationHistoryError?: string | null;
-  requestedTab?: { tab: "history"; nonce: number } | null;
+  requestedTab?: { tab: "history" | "editing"; nonce: number } | null;
   onOpenInvocationHistory: (item: InvocationHistoryItem) => void;
   onResumeInvocation: (invocationId: string) => void;
   onRetryInvocationHistory?: () => void;
@@ -60,16 +63,16 @@ export function InspectorDock(props: InspectorDockProps) {
   const artifactLinks = isMarkdown ? graphContext?.artifactLinks ?? [] : [];
   const tags = isMarkdown ? graphContext?.tags ?? [] : [];
   const outline = isMarkdown ? extractOutline(document?.body ?? "") : [];
-  const tabs = useMemo<readonly { id: ConnectionTab; label: string }[]>(
-    () => invocationHistory.length > 0 || invocationHistoryError
-      ? [...CONNECTION_TABS, { id: "history", label: "History" }]
-      : CONNECTION_TABS,
-    [invocationHistory.length, invocationHistoryError],
-  );
+  const tabs = useMemo<readonly { id: ConnectionTab; label: string }[]>(() => [
+    ...CONNECTION_TABS,
+    ...(isMarkdown ? [{id:"editing" as const,label:"Editing"}] : []),
+    ...(invocationHistory.length > 0 || invocationHistoryError ? [{id:"history" as const,label:"History"}] : []),
+  ], [isMarkdown,invocationHistory.length,invocationHistoryError]);
 
   useEffect(() => {
+    if (requestedTab?.tab === "editing" && isMarkdown) setActiveTab("editing");
     if (requestedTab?.tab === "history" && (invocationHistory.length > 0 || invocationHistoryError)) setActiveTab("history");
-  }, [invocationHistory.length, invocationHistoryError, requestedTab?.nonce, requestedTab?.tab]);
+  }, [isMarkdown, invocationHistory.length, invocationHistoryError, requestedTab?.nonce, requestedTab?.tab]);
 
   useEffect(() => {
     if (activeTab === "history" && invocationHistory.length === 0 && !invocationHistoryError) setActiveTab("outline");
@@ -80,7 +83,7 @@ export function InspectorDock(props: InspectorDockProps) {
   }
 
   return (
-    <section className="connections-rail" data-testid="inspector-panel">
+    <section className={`connections-rail ${activeTab === "editing" ? "connections-rail--editing" : ""}`} data-testid="inspector-panel">
       <header className="connections-rail__header">
         <div>
           <div className="connections-rail__title">Note context</div>
@@ -122,6 +125,8 @@ export function InspectorDock(props: InspectorDockProps) {
             <OutlineTab filePath={document?.filePath ?? null} isMarkdown={isMarkdown} headings={outline} onOpenHeading={onOpenHeading} />
           ) : activeTab === "links" ? (
             <LinksTab isMarkdown={isMarkdown} backlinks={backlinks} references={referenceLinks} externalLinks={externalLinks} artifactLinks={artifactLinks} tags={tags} activeTag={activeTag} tagResults={tagResults} onOpenTarget={onOpenTarget} onOpenExternal={onOpenExternal} onOpenTag={onOpenTag} />
+          ) : activeTab === "editing" ? (
+            <EditorialNotesPanel controller={props.editorialController?.filePath===document?.filePath ? props.editorialController ?? null : null}/>
           ) : activeTab === "history" ? (
             <InvocationHistoryTab
               error={invocationHistoryError}

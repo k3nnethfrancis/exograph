@@ -44,6 +44,15 @@ describe("shortcut capture", () => {
     expect(fixture.button().props["aria-pressed"]).toBe(false);
     expect(fixture.status()).toContain("canceled");
   });
+  it("reserves the editorial-note shortcut while allowing other E combinations", async () => {
+    const fixture = await mount();
+    await act(async () => fixture.button().props.onClick());
+    await act(async () => fixture.button().props.onKeyDown(key("KeyE", { shiftKey: true })));
+    expect(fixture.status()).toContain("Reserved");
+    expect(fixture.onChange).not.toHaveBeenCalled();
+    await act(async () => fixture.button().props.onKeyDown(key("KeyE", { altKey: true })));
+    expect(fixture.onChange).toHaveBeenCalledWith({ explorer: { code: "KeyE", shift: false, alt: true } });
+  });
   it("lets Tab move focus and cancels on blur; Reset all restores defaults", async () => {
     const fixture = await mount();
     await act(async () => fixture.button().props.onClick());

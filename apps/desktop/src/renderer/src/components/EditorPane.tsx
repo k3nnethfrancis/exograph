@@ -12,6 +12,8 @@ import { EditorFaultBoundary } from "./EditorFaultBoundary";
 import type { EditorFaultContext } from "./editorFaultDiagnostics";
 import { NoteEditor, type EditorInitialSelectionRequest } from "./NoteEditor";
 import { FolderOverviewPane } from "./FolderOverviewPane";
+import type { EditorialPaneController } from "./editorialTypes";
+import type { LaunchEditorialDraftInput } from "../../../shared/api/invocation-commands";
 import type { InlineAgentDraft } from "./inlineAgentComposer";
 
 interface EditorDocument extends NoteDocument {
@@ -68,6 +70,15 @@ interface EditorPaneProps {
   onSuggestTargets: (query: string) => Promise<Array<{ label: string; target: string; detail?: string }>>;
   onPreviewTarget: (target: string) => Promise<{ title: string; excerpt: string } | null>;
   agentCommands: AgentCommand[];
+  defaultAgentCommandId?: string;
+  invocationBusy?: boolean;
+  onEditorialBarrier?: (paneId:string,filePath:string,enabled:boolean)=>void;
+  onEditorialController?: (paneId:string,controller:EditorialPaneController|null)=>void;
+  onOpenEditorial?: (paneId:string,filePath:string)=>void;
+  onPauseEditorialSource?: (filePath:string)=>Promise<()=>void>;
+  onPrepareEditorialSource?: (filePath:string)=>Promise<void>;
+  onReloadEditorialSource?: (filePath:string)=>Promise<void>;
+  onDraftEditorial?: (input:Omit<LaunchEditorialDraftInput,"authorization"|"expectedFingerprint">,onSettled:()=>void)=>void;
   onInvokeAgent: (draft: InlineAgentDraft) => void;
   invocationReview: EditorInvocationReview | null;
   editingFrozen: boolean;
@@ -255,6 +266,16 @@ export function EditorPane(props: EditorPaneProps) {
         onSuggestTargets={onSuggestTargets}
         onPreviewTarget={onPreviewTarget}
         agentCommands={agentCommands}
+        editorialPaneId={pane.id}
+        onEditorialBarrier={props.onEditorialBarrier}
+        onEditorialController={props.onEditorialController}
+        onOpenEditorial={props.onOpenEditorial}
+        onPauseEditorialSource={props.onPauseEditorialSource}
+        onPrepareEditorialSource={props.onPrepareEditorialSource}
+        onReloadEditorialSource={props.onReloadEditorialSource}
+        onDraftEditorial={props.onDraftEditorial}
+        invocationBusy={props.invocationBusy}
+        defaultAgentCommandId={props.defaultAgentCommandId}
         onInvokeAgent={onInvokeAgent}
         invocationReview={invocationReview}
         editingFrozen={editingFrozen}
