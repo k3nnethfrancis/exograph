@@ -34,5 +34,14 @@ export class EditorialService {
    ? await sourceStore.renamePath(sourcePath,nextPath,renameWorkspacePath)
    : await sourceStore.moveUnannotated(sourcePath,()=>renameWorkspacePath(sourcePath,nextPath));for(const old of [...this.tracked]) if(old===sourcePath || old.startsWith(sourcePath+path.sep)) {this.tracked.delete(old);this.tracked.add(nextPath+old.slice(sourcePath.length));}this.onChanged({filePath:nextPath});return result;
  }
+ /** Git may create the first sidecar directory or replace watched directory inodes. */
+ refreshFromDisk():void {
+  for(const [root,store] of this.stores) {
+   if(!this.getModel().noteRoots.some(candidate=>path.resolve(candidate.path)===root)) continue;
+   this.watchers.get(root)?.close();this.watchers.delete(root);clearTimeout(this.debounce.get(root));this.debounce.delete(root);
+   this.observe(store);
+  }
+  for(const filePath of this.tracked) {try {this.root(filePath);this.onChanged({filePath});}catch {/* Inactive roots are not authority. */}}
+ }
  dispose():void {for(const watcher of this.watchers.values()) watcher.close();for(const timer of this.debounce.values()) clearTimeout(timer);this.watchers.clear();this.debounce.clear();}
 }

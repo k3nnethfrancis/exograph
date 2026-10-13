@@ -1,3 +1,5 @@
+import { EditorialStore } from "@exograph/core/editorial-store";
+import { captureEditorialTarget, createEditorialNote } from "@exograph/core/editorial-notes";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -64,14 +66,31 @@ esac
     await fixture.electronApp.evaluate(({ powerMonitor }) => { powerMonitor.emit("resume"); });
     await expect.poll(async () => git(remote, "show", "main:scheduled.md").catch(() => "")).toContain("Saved while this Mac slept");
     await expect(page.getByTestId("github-sync-now")).toBeEnabled();
+    // The first annotation-only pull must update the already-open note without a reload.
+    await git(other, "pull", "--ff-only");
+    const incomingStore = new EditorialStore(other);
+    const incomingPath = path.join(other, "transport.md");
+    const initialAnnotations = await incomingStore.read(incomingPath);
+    const originalBody = await readFile(incomingPath, "utf8");
+    const passageFrom = originalBody.indexOf("Starting words.");
+    const incoming = await incomingStore.save(incomingPath, [createEditorialNote({ id: "remote-note", commentary: "Comment from the other Mac", targets: [captureEditorialTarget(originalBody, passageFrom, passageFrom + "Starting words.".length, "passage")] })], initialAnnotations.revision);
+    if (incoming.status !== "saved") throw new Error("Could not create fixture annotation");
+    await git(other, "add", ".exograph"); await git(other, "commit", "-m", "Editorial comment only"); await git(other, "push", "origin", "main");
+    await page.getByTestId("github-sync-now").click();
+    await expect.poll(() => readFile(path.join(notes, ".exograph/editorial/v1/documents", incoming.snapshot.documentId + ".json"), "utf8").catch(() => "")).toContain("Comment from the other Mac");
+    await expect(page.getByTestId("github-sync-now")).toBeEnabled();
+    await page.getByTestId("workspace-settings-close").click();
+    await expect(page.getByTestId("editorial-marker").first()).toBeVisible();
+    await page.getByTestId("editorial-marker").first().click();
+    await expect(page.getByTestId("editorial-selected-note")).toContainText("Comment from the other Mac");
+    await page.getByTestId("workspace-menu-toggle").click(); await page.getByTestId("workspace-menu-settings").click();
+    await page.getByTestId("workspace-settings-tab-github-sync").click();
     // Local saved writing + portable suggestion state both travel through the real pipeline.
     await writeFile(path.join(notes, "transport.md"), "# Transport\n\nWriting from this Mac.\n");
-    await mkdir(path.join(notes, ".exograph/editorial/v1/documents"), { recursive: true });
-    await writeFile(path.join(notes, ".exograph/editorial/v1/documents/fixture.json"), '{"commentary":"Review this"}');
     await page.getByTestId("github-sync-now").click();
     await expect(page.getByTestId("github-sync-status")).toContainText("Saved snapshot uploaded.", { timeout: 30_000 });
     await expect.poll(() => git(remote, "show", "main:transport.md")).toContain("Writing from this Mac.");
-    expect(await git(remote, "show", "main:.exograph/editorial/v1/documents/fixture.json")).toContain("Review this");
+    expect(await git(remote, "show", `main:.exograph/editorial/v1/documents/${incoming.snapshot.documentId}.json`)).toContain("Comment from the other Mac");
     await git(other, "pull", "--ff-only");
     await writeFile(path.join(other, "remote-writing.md"), "# Arrived from the other Mac\n");
     await git(other, "add", "remote-writing.md"); await git(other, "commit", "-m", "Other Mac writing"); await git(other, "push", "origin", "main");

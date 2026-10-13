@@ -73,6 +73,25 @@ describe("GitHub sync scheduling and save authority", () => {
     f.setRoot(other.root); await expect(f.service.syncNow({ root: f.root })).rejects.toThrow("Workspace changed");
     expect((await f.service.getStatus()).config.enabled).toBe(false); await f.service.tick(); expect(f.repository.sync).not.toHaveBeenCalled();
   });
+  it.each(["sync", "configure"])("rejects an interleaved root switch before %s can borrow another root's settings", async (action) => {
+    const f = await fixture(); const other = await fixture();
+    let root = f.root; let switchOnRead = false;
+    const service = new GitHubSyncService({ ...f.options, noteRoots: () => {
+      const captured = root;
+      if (switchOnRead) { switchOnRead = false; root = other.root; }
+      return [captured];
+    } });
+    await service.configure({ root: f.root, config });
+    root = other.root; await service.configure({ root: other.root, config });
+    const before = await service.getStatus(); f.repository.inspect.mockClear();
+    root = f.root; switchOnRead = true;
+    await expect(action === "sync" ? service.syncNow({ root: f.root }) : service.configure({ root: f.root, config }))
+      .rejects.toThrow("Workspace changed");
+    expect(f.repository.sync).not.toHaveBeenCalled();
+    expect(f.repository.inspect).not.toHaveBeenCalled();
+    expect(await service.getStatus()).toEqual(before);
+    expect(service.isBusy()).toBe(false);
+  });
   it("rejects root changes while a destination check is pending", async () => {
     const f = await fixture(); const other = await fixture();
     f.repository.inspect.mockImplementation(async () => { f.setRoot(other.root); return { repository: "owner/private", url: "private" }; });

@@ -391,7 +391,11 @@ function registerIpcHandlers() {
       if (invocationRunner.hasWorkspaceWriter() || (await invocationRunner.listPendingReviews()).length) {
         throw new Error("Finish or review the active agent work before syncing your notes.");
       }
-      return appLifecycle.withDocumentsFlushed(operation);
+      return appLifecycle.withDocumentsFlushed(async () => {
+        const result = await operation();
+        editorialService.refreshFromDisk();
+        return result;
+      });
     },
     publishStatus: (status) => sendToRenderer("github-sync:status", status),
   });

@@ -136,7 +136,7 @@ export class GitSyncRepository {
                 throw new SyncConflict("Both computers changed the same content. Your local work is committed and remote work is fetched; resolve the merge in Git, then Sync now.", [...(error as Error).message.matchAll(/CONFLICT.*? in (.+)/g)].map((match) => match[1]!));
               }
             }
-            await this.git(root, "-c", "commit.gpgsign=false", "merge", "--no-edit", "--no-gpg-sign", remoteHead);
+            await this.git(root, "-c", "commit.gpgsign=false", "merge", "--no-edit", "--no-gpg-sign", "--no-overwrite-ignore", remoteHead);
           }
         }
         return (await this.git(root, "rev-parse", "HEAD")).trim();

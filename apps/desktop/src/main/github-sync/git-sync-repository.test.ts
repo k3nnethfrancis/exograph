@@ -96,6 +96,16 @@ describe("GitHub notes synchronization against two real clones", () => {
     await expect(f.sync(f.b)).rejects.toThrow("tracks files excluded");
     await expect(readFile(path.join(f.b, ".env"))).rejects.toThrow();
   });
+  it("preserves an ignored local attachment when the remote starts tracking the same path", async () => {
+    const f = await fixture();
+    await writeFile(path.join(f.a, "attachment.txt"), "Incoming attachment"); await git(f.a, "add", "attachment.txt"); await git(f.a, "commit", "-m", "Remote attachment"); await git(f.a, "push");
+    await writeFile(path.join(f.b, ".git/info/exclude"), "attachment.txt\n");
+    await writeFile(path.join(f.b, "attachment.txt"), "Only local copy");
+    const before = await git(f.b, "rev-parse", "HEAD");
+    await expect(f.sync(f.b)).rejects.toThrow();
+    expect(await readFile(path.join(f.b, "attachment.txt"), "utf8")).toBe("Only local copy");
+    expect(await git(f.b, "rev-parse", "HEAD")).toBe(before);
+  });
   it("rejects nested roots, detached HEAD, escaping symlinks and nested repositories", async () => {
     const f = await fixture(); const sub = path.join(f.a, "sub"); await mkdir(sub);
     await expect(f.sync(sub)).rejects.toThrow("top-level");

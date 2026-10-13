@@ -69,6 +69,7 @@ export class GitHubSyncService {
       validateConfig(input.config);
       const root = await this.assertRoot(input.root);
       const current = await this.getStatus();
+      if (current.root !== root) throw new Error("The Workspace changed. Reopen GitHub sync settings for the current Workspace.");
       const info = input.config.enabled ? await this.repository.inspect(root, input.config) : undefined;
       await this.assertRoot(root);
       const destinationChanged = current.repository !== info?.repository || current.config.branch !== input.config.branch;
@@ -86,6 +87,7 @@ export class GitHubSyncService {
     try {
       await this.assertRoot(input.root);
       const status = await this.getStatus();
+      if (status.root !== input.root) throw new Error("The Workspace changed. Reopen GitHub sync settings for the current Workspace.");
       if (!status.config.enabled) throw new Error("Save and enable GitHub sync before syncing.");
       const run = this.perform(status);
       this.pending = run;
