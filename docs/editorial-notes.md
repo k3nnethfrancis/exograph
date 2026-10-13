@@ -83,7 +83,7 @@ wait for them. A conflict retains local edits and offers **Retry annotation
 changes** against the latest notes, preserving unrelated annotations.
 
 File and folder renames within the Note Root keep annotation identity. Moves
-between Note Roots stop rather than separate prose from its annotations. Uncertain external
+of files with stored annotations between Note Roots stop rather than separate prose from its annotations. Ordinary unannotated moves remain available. Uncertain external
 moves are not guessed. When available, **Notes from moved files** offers an
 explicit **Associate with this document** action. Captured targets still require
 review and repair after association.
