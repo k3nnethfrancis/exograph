@@ -1,9 +1,11 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { serializeEditorialNote } from "../editorial-notes";
+import { formatDocumentAgentInvocation, formatDocumentAgentResponse } from "../document-agent-protocol";
 import { exportPublication, verifyPublicationSnapshot, PublicationExportError } from "../publication-export";
 
 const temporary: string[] = [];
@@ -17,6 +19,92 @@ async function fixture(files: Record<string, string>) {
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 describe("publication export", () => {
+  it("excludes portable editorial stores and staged draft artifacts even when referenced", async () => {
+    const source = 'Accepted prose.\n\n[Annotation](.exograph/editorial/v1/documents/doc.json)\n![Draft](.exograph/invocations/draft/proposal.png)\n';
+    const f = await fixture({
+      "public/index.md": source,
+      "public/.exograph/editorial/v1/documents/doc.json": '{"commentary":"PRIVATE ANNOTATION"}',
+      "public/.exograph/editorial/v1/catalog.json": 'PRIVATE CATALOG',
+      "public/.exograph/invocations/draft/proposal.png": 'PRIVATE DRAFT ASSET',
+      ".exograph/editorial/v1/documents/outside.json": 'PRIVATE OUTSIDE ANNOTATION',
+    });
+    const snapshot = await exportPublication(f.request);
+    expect(snapshot.manifest.files.map(file => file.path)).toEqual(["index.md"]);
+    const output = await readFile(path.join(snapshot.directory, "index.md"), "utf8");
+    expect(output).toContain("Accepted prose.");
+    expect(output).not.toMatch(/PRIVATE|\.exograph|proposal\.png|doc\.json/);
+    expect(snapshot.sources.inventory.some(file => file.includes(".exograph"))).toBe(false);
+    expect(snapshot.sources.hashes.some(file => file.path.includes(".exograph"))).toBe(false);
+    expect(await readFile(path.join(f.notes, "public/index.md"), "utf8")).toBe(source);
+    await verifyPublicationSnapshot(snapshot);
+  });
+
+  it("strips editorial payloads before resolving references or copying proposed assets", async () => {
+    const source = '# Accepted title\n\nAccepted author prose.\n\n```editorial\n# PRIVATE EDITORIAL\n![private proposal](proposal.png) [[secret]]\n---\nPRIVATE REPLACEMENT\n```\n\nAccepted ending.\n';
+    const f = await fixture({ "public/index.md": source, "public/proposal.png": "PRIVATE ASSET", "secret.md": "PRIVATE NOTE" });
+    const snapshot = await exportPublication(f.request);
+    const output = await readFile(path.join(snapshot.directory, "index.md"), "utf8");
+    expect(output).toContain("Accepted author prose.");
+    expect(output).toContain("Accepted ending.");
+    expect(output).not.toMatch(/PRIVATE|editorial|proposal\.png|secret/);
+    expect(snapshot.manifest.files.map(file => file.path)).toEqual(["index.md"]);
+    expect(snapshot.manifest.diagnostics).toEqual([]);
+    expect(await readFile(path.join(f.notes, "public/index.md"), "utf8")).toBe(source);
+    await verifyPublicationSnapshot(snapshot);
+  });
+
+  it("excludes recognized legacy editorial blockquotes without dropping ordinary quotations", async () => {
+    const source = 'Accepted prose.\n\n> **Editorial comment — objectives:** PRIVATE LEGACY\n> ![proposal](proposal.png)\n>\n> PRIVATE REPLACEMENT\n\n> Ordinary author quotation.\n\nAccepted ending.';
+    const f = await fixture({ "public/index.md": source, "public/proposal.png": "PRIVATE ASSET" });
+    const snapshot = await exportPublication(f.request);
+    const output = await readFile(path.join(snapshot.directory, "index.md"), "utf8");
+    expect(output).not.toMatch(/PRIVATE|proposal\.png/);
+    expect(output).toContain("> Ordinary author quotation.");
+    expect(output).toContain("Accepted ending.");
+    expect(snapshot.manifest.files.map(file => file.path)).toEqual(["index.md"]);
+    expect(await readFile(path.join(f.notes, "public/index.md"), "utf8")).toBe(source);
+  });
+
+  it("omits resolved structured proposals and agent provenance while preserving accepted text", async () => {
+    const note = serializeEditorialNote({ version: 1, id: "editorial-test", status: "resolved", title: "PRIVATE TITLE", commentary: "PRIVATE COMMENT", targets: [{ id: "target-test", base: "Original passage", prefix: "", suffix: "", from: 0, to: 16 }], edits: [{ targetId: "target-test", replacement: "PRIVATE PROPOSAL" }] });
+    const invocation = formatDocumentAgentInvocation({ id: "12345678-1234-4123-8123-123456789012", agent: "codex", message: "PRIVATE PROMPT" });
+    const response = formatDocumentAgentResponse({ invocationId: "12345678-1234-4123-8123-123456789012", agent: "codex", message: "PRIVATE RESPONSE" });
+    const source = `Accepted revised passage.\n\n${note}\n\n${invocation}\n\n${response}\n\nAccepted ending.`;
+    const f = await fixture({ "public/index.md": source });
+    const snapshot = await exportPublication(f.request);
+    const output = await readFile(path.join(snapshot.directory, "index.md"), "utf8");
+    expect(output).toContain("Accepted revised passage.");
+    expect(output).toContain("Accepted ending.");
+    expect(output).not.toMatch(/PRIVATE|editorial-test|resolved|exograph-invocation|exograph-agent-response/);
+    expect(await readFile(path.join(f.notes, "public/index.md"), "utf8")).toBe(source);
+  });
+
+  it.each([
+    '```editorial\nPRIVATE UNTERMINATED [[secret]] ![proposal](proposal.png)',
+    '~~~editorial\n{"schemaVersion":1,"status":"resolved","commentary":"PRIVATE MALFORMED",',
+    '<exograph-invocation id="12345678-1234-4123-8123-123456789012" agent="codex" status="sent">\nPRIVATE PROMPT',
+  ])("rejects incomplete private annotations without truncating author prose %s", async (payload) => {
+    const source = `Accepted prose.\n\n${payload}\n\nPossibly accepted author tail.`;
+    const f = await fixture({ "public/index.md": source, "public/proposal.png": "PRIVATE ASSET", "secret.md": "PRIVATE NOTE" });
+    await expect(exportPublication(f.request)).rejects.toMatchObject({
+      message: "Finish or repair the incomplete editorial note or agent envelope before exporting.",
+      diagnostics: [{ path: "index.md", code: "incomplete-editorial", message: "Finish or repair the incomplete editorial note or agent envelope before exporting." }],
+    });
+    expect(await readFile(path.join(f.notes, "public/index.md"), "utf8")).toBe(source);
+    expect(await readdir(f.request.stagingParent).catch(() => [])).toEqual([]);
+  });
+
+  it("strips closed malformed editorial JSON while retaining accepted prose", async () => {
+    const source = 'Accepted prose.\n\n```editorial\n{ invalid PRIVATE JSON }\n```\n\nAccepted ending.';
+    const f = await fixture({ "public/index.md": source });
+    const snapshot = await exportPublication(f.request);
+    const output = await readFile(path.join(snapshot.directory, "index.md"), "utf8");
+    expect(output).toContain("Accepted prose.");
+    expect(output).toContain("Accepted ending.");
+    expect(output).not.toMatch(/PRIVATE|editorial/);
+    expect(await readFile(path.join(f.notes, "public/index.md"), "utf8")).toBe(source);
+  });
+
   it("keeps decoded URL delimiters inside the destination rather than creating unprocessed Markdown", async () => {
     const f = await fixture({
       "public/index.md": '[link](<page.md?x=&gt;&#41;&#32;!&#91;leak&#93;&#40;../private.png&#41;>)',

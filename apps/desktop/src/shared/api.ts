@@ -1,5 +1,7 @@
 import type { GitHubSyncApi } from "./api/github-sync";
 export type { GitHubSyncConfig, GitHubSyncStatus } from "./api/github-sync";
+import type { EditorialApi } from './api/editorial';
+export type { EditorialSnapshot, EditorialSaveResult, EditorialMutationResult, EditorialChangedEvent } from './api/editorial';
 import type { PublishingApi } from "./api/publishing";
 export { publicationScope } from "./api/publishing";
 export type { PublishingAuthStatus, PublishingSetupRequest, PublishingSetupResult, PublishingStatus, PublicationAction, PublicationDiagnostic, PublishingBuildRequest, PublishingScope, PublicationDeployResult } from "./api/publishing";
@@ -19,6 +21,9 @@ export type {
   InvocationFileReviewPayload,
   InvocationHistoryItem,
   InvocationReviewListItem,
+  LaunchEditorialDraftInput,
+  LaunchEditorialDraftResponse,
+  EditorialDraftReviewPayload,
   LaunchAgentInvocationInput,
   LaunchAgentInvocationResponse,
   ProviderMcpSetupInput,
@@ -56,6 +61,7 @@ export interface DesktopApi {
   workspace: WorkspaceSetupApi & WorkspaceIndexApi & WorkspaceFilesystemApi & WorkspaceInvocationApi;
   publishing: PublishingApi;
   githubSync: GitHubSyncApi;
+  editorial: EditorialApi;
   notes: NotesGraphApi;
   terminals: TerminalsApi;
   shell: ShellApi;

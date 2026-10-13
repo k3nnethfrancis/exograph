@@ -29,6 +29,11 @@ export class DocumentPersistence {
   }
 
   async save(filePath: string, frontmatter: Record<string, unknown>, body: string, expectedRevision: string): Promise<DocumentSaveResult> {
+    return this.saveRaw(filePath, serializeWorkspaceDocument(filePath,frontmatter,body), expectedRevision);
+  }
+
+  /** Exact-byte writes use the same revision/queue contract as editor saves. */
+  async saveRaw(filePath: string, serialized: string, expectedRevision: string): Promise<DocumentSaveResult> {
     if (typeof expectedRevision !== "string" || !/^[a-f0-9]{64}$/.test(expectedRevision)) {
       throw new Error("A document revision is required to save safely. Reload the document first.");
     }
@@ -45,7 +50,6 @@ export class DocumentPersistence {
       try {
         const currentRevision = revisionOf(await file.readFile());
         if (currentRevision !== expectedRevision) return { status: "conflict", currentRevision };
-        const serialized = serializeWorkspaceDocument(filePath, frontmatter, body);
         const bytes = Buffer.from(serialized, "utf8");
         // Explicit position: readFile advanced the handle's cursor.
         let offset = 0;
@@ -55,6 +59,7 @@ export class DocumentPersistence {
           offset += bytesWritten;
         }
         await file.truncate(bytes.length);
+        await file.sync();
         const revision = revisionOf(bytes);
         // A path may have been atomically replaced while its old handle was
         // open. Never clear the buffer if the named file is already different.

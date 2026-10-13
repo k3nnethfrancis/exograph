@@ -23,7 +23,6 @@ import {
   markOnboardingComplete,
   readOnboardingStateStore,
   DocumentPersistence,
-  renameWorkspacePath,
   resolveWorkspaceModel,
   workspaceModelFromSettings,
   writeOnboardingStateStore,
@@ -40,6 +39,8 @@ import { ManagedSiteSetup } from "./publishing/managed-site-setup";
 import { PublishingService } from "./publishing/publishing-service";
 import { registerPublishingIpc } from "./publishing/publishing-ipc";
 import { InvocationRunner } from "./invocation/invocation-runner";
+import { EditorialService } from "./editorial/editorial-service";
+import { registerEditorialIpcHandlers } from "./editorial/editorial-ipc";
 import { awaitInvocationAwareQuit } from "./invocation/invocation-quit";
 import { AppLifecycleController } from "./app-lifecycle";
 import { CommandServer } from "./command/command-server";
@@ -420,6 +421,7 @@ function registerIpcHandlers() {
     verify: verifyPublicationSnapshot,
   });
   registerPublishingIpc(publishingService, managedSiteSetup);
+  registerEditorialIpcHandlers(editorialService);
   const workspaceHandlers: WorkspaceIpcHandlers = {
     activateWorkspace: async (input) => {
       return switchWorkspace(input.workspaceId, input.expectedRevision);
@@ -447,6 +449,18 @@ function registerIpcHandlers() {
         decision: input.authorization,
         expectedFingerprint: input.expectedFingerprint,
       });
+    },
+    launchEditorialDraft: async (input) => {
+      const snapshot = await editorialService.read(input.documentPath);
+      if (snapshot.revision !== input.annotationRevision) throw new Error("Editorial notes changed before drafting. Review the current note and try again.");
+      const note = snapshot.notes.find(note => note.id === input.noteId);
+      if (!note || note.status !== "open") throw new Error("Select a current open editorial note before drafting.");
+      const prepared = await invocationRunner.prepare({
+        context: "note", handle: input.handle, documentPath: input.documentPath,
+        mentionText: `@${input.handle}`, message: "Draft editorial proposal", documentBody: input.documentBody,
+        editorialDraft: { note, annotationRevision: snapshot.revision, sourceRevision: snapshot.sourceRevision },
+      });
+      return invocationRunner.authorizeAndStartEditorial(prepared, { decision: input.authorization, expectedFingerprint: input.expectedFingerprint });
     },
     getAgentInvocationAuthorization: (input) => invocationRunner.getInvocationAuthorization(input.handle, input.documentPath),
     prepareGraphMaintenanceSkill: async ({ documentPath, commandId }) => {
@@ -497,6 +511,9 @@ function registerIpcHandlers() {
     },
     endAgentInvocation: (invocationId) => invocationRunner.endObservation(invocationId),
     listPendingInvocationReviews: () => invocationRunner.listPendingReviews(),
+    listPendingEditorialDraftReviews: () => invocationRunner.listPendingEditorialDraftReviews(),
+    getEditorialDraftReview: (invocationId) => invocationRunner.getEditorialDraftReview(invocationId),
+    reviewEditorialDraft: (input) => invocationRunner.reviewEditorialDraft(input.invocationId, input.action),
     listInvocationHistory: (notePath) => invocationRunner.listHistoryForNote(notePath),
     getInvocationFileReview: (input) => invocationRunner.getInvocationFileReview(input.invocationId, input.changeId),
     reviewInvocationFile: (input) => invocationRunner.reviewInvocationFile(input.invocationId, input.changeId, input.action),
@@ -524,7 +541,7 @@ function registerIpcHandlers() {
     listTree: listRootTree,
     listWorkspaces: () => workspaceConfig.listWorkspaces(),
     readNote: (filePath) => documentPersistence.read(filePath),
-    renamePath: renameWorkspacePath,
+    renamePath: (source, next) => editorialService.renamePath(source, next),
     resolvePreviewTarget: async (target) => {
       const result = await resolvePreviewTarget(target, currentSettings());
       return result;
@@ -534,7 +551,7 @@ function registerIpcHandlers() {
     resolveMarkdownImage: (sourceFilePath, target, lookupByFilename) => workspaceNotesService.resolveMarkdownImage(sourceFilePath, target, lookupByFilename),
     saveNote: async (filePath, frontmatter, body, expectedRevision) => {
       const result = await documentPersistence.save(filePath, frontmatter, body, expectedRevision);
-      if (result.status === "saved") indexingService.scheduleForFile(filePath, "note-save");
+      if (result.status === "saved") { indexingService.scheduleForFile(filePath, "note-save"); editorialService.sourceChanged(filePath); }
       return result;
     },
     saveNoteCopy: async (filePath, frontmatter, body) => {
@@ -672,6 +689,7 @@ function currentSnapshot() {
 }
 
 const documentPersistence = new DocumentPersistence();
+const editorialService = new EditorialService(() => workspaceModel, documentPersistence, event => sendToRenderer("editorial:changed", event));
 
 async function saveSettings(request: WorkspaceSettingsSaveRequest): Promise<WorkspaceSettingsSaveOutcome> {
   const previous = currentSettings();
@@ -779,6 +797,7 @@ app.whenReady().then(async () => {
     // request observes that refresh. Graph owns a separate utility process, so
     // this ordering never delays foreground Search or QMD maintenance.
     const refresh = Promise.resolve(workspaceNotesService?.handleWorkspaceChange(event));
+    if (event.filePath) editorialService.sourceChanged(event.filePath);
     sendToRenderer("workspace:changed", event);
     void refresh.catch((error) => {
       console.warn("[exograph] incremental workspace refresh failed", error);
@@ -858,6 +877,14 @@ app.whenReady().then(async () => {
     getWorkspaceSettings: () => currentSettings(),
     assertWorkspaceWritable: () => {
       if (githubSyncService?.isBusy()) throw new Error("Wait for GitHub sync to finish before starting agent work.");
+    },
+    inspectEditorialAnnotationRevision: async input => {
+      const snapshot = await editorialService.read(input.documentPath);
+      return snapshot.revision === input.annotationRevision && snapshot.notes.some(note => note.id === input.noteId);
+    },
+    importEditorialProposal: async input => {
+      const result = await editorialService.importProposal(input.documentPath, input.noteId, input.annotationRevision, input.proposal, input.documentBody, input.sourceRevision);
+      if (result.status === "conflict") throw new Error("Editorial notes or author prose changed before Keep. Review the current document before importing this proposal.");
     },
   });
   invocationRunner.on("updated", (record) => {
@@ -1105,3 +1132,5 @@ app.on("window-all-closed", () => {
     app.quit();
   }
 });
+
+app.on("will-quit", () => editorialService.dispose());

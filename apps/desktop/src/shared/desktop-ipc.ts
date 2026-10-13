@@ -10,6 +10,19 @@ export interface DesktopInvokeHandlers {
   "github-sync:get-status": DesktopApi["githubSync"]["getStatus"];
   "github-sync:configure": DesktopApi["githubSync"]["configure"];
   "github-sync:sync-now": DesktopApi["githubSync"]["syncNow"];
+  "workspace:launch-editorial-draft": WorkspaceApi["launchEditorialDraft"];
+  "workspace:get-editorial-draft-review": WorkspaceApi["getEditorialDraftReview"];
+  "workspace:list-pending-editorial-draft-reviews": WorkspaceApi["listPendingEditorialDraftReviews"];
+  "workspace:review-editorial-draft": WorkspaceApi["reviewEditorialDraft"];
+
+  "editorial:relink": DesktopApi["editorial"]["relink"];
+  "editorial:read": DesktopApi["editorial"]["read"];
+  "editorial:save": DesktopApi["editorial"]["save"];
+  "editorial:apply": DesktopApi["editorial"]["apply"];
+  "editorial:migrate": DesktopApi["editorial"]["migrate"];
+  "editorial:undo": DesktopApi["editorial"]["undo"];
+  "editorial:redo": DesktopApi["editorial"]["redo"];
+
   "publishing:get-setup-status": DesktopApi["publishing"]["getSetupStatus"];
   "publishing:start-auth": DesktopApi["publishing"]["startAuth"];
   "publishing:setup": DesktopApi["publishing"]["setup"];
@@ -96,6 +109,7 @@ export interface DesktopInvokeHandlers {
 
 export interface DesktopEventPayloads {
   "github-sync:status": Awaited<ReturnType<DesktopApi["githubSync"]["getStatus"]>>;
+  "editorial:changed": import("./api/editorial").EditorialChangedEvent;
   "publishing:status": Awaited<ReturnType<DesktopApi["publishing"]["getStatus"]>>;
   "workspace:changed": { rootPath: string; eventType: string; filePath: string | null };
   "workspace:index-sync-state": IndexSyncStateEvent;

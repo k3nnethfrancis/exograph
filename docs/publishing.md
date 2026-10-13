@@ -107,8 +107,12 @@ new preparation. Unrelated appearance and layout saves do not invalidate it.
 
 ## Notes and themes
 
-Core selects eligible files and projects Markdown references before Quartz sees
-any content. Public links and external URLs remain; local references to private,
+Core excludes portable editorial sidecars and staged draft artifacts, removes
+legacy inline annotations and their proposal/provenance payloads, and projects
+Markdown references before Quartz sees any content. This
+also applies to local publishing previews; hiding notes in the editor is separate
+from this export rule. Running Quartz directly against source notes bypasses
+Exograph's export boundary; use Build preview for sanitized preview content. Public links and external URLs remain; local references to private,
 excluded, ambiguous, or unavailable content lose their link while keeping the
 label. Source notes are unchanged. Drafts are excluded except `draft: true` with
 `preview: true`, which become accessible unlisted pages. See

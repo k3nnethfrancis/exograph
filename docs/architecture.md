@@ -27,9 +27,13 @@ Markdown + frontmatter in a selected Note Root
       └─ compact graph topology → WebGPU or Canvas Graph
 ```
 
-Markdown is canonical. `.exograph/` holds local, rebuildable state: indexes,
-command-server discovery, invocation review evidence, accepted ontology state,
-and other runtime artifacts. It must never become a competing source of truth.
+Markdown is canonical author prose and graph knowledge. Portable editorial
+annotations live separately under each Note Root’s `.exograph/editorial/v1/`;
+they are authored review data that must be backed up, not rebuildable cache.
+Diff and preview modes project that data without changing prose. Runtime indexes,
+command discovery and invocation evidence retain their existing owners and
+recovery contracts. See [editorial notes](editorial-notes.md) and the
+[durable-state catalog](durable-state.md).
 
 The basic objects are:
 

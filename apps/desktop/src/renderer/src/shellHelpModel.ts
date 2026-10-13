@@ -105,6 +105,7 @@ export function shortcutBindingIssue(id: WorkspaceShortcutId, binding: Workspace
 /** These are the keymaps enabled by NoteEditor's basicSetup. Include both
  * platform spellings because workspace primary-modifier bindings are portable. */
 export function editorOwnsShortcut(binding: WorkspaceShortcutBinding): boolean {
+  if (!binding.alt && binding.shift && binding.code === "KeyE") return true;
   if (!binding.alt && !binding.shift && ["KeyB", "KeyS", "KeyC", "KeyV", "KeyX"].includes(binding.code)) return true;
   return [...defaultKeymap, ...historyKeymap, ...searchKeymap].some(command =>
     [command.key, command.mac, command.win, command.linux].some(key => {

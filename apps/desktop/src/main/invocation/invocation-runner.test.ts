@@ -1515,6 +1515,8 @@ function createRunner(
   workspaceSettings: WorkspaceSettings,
   terminalManager: EventEmitter = new EventEmitter(),
   invocationProcessFactory: InvocationProcessFactory = new FakeInvocationProcessFactory(),
+  importEditorialProposal?: ConstructorParameters<typeof InvocationRunner>[0]["importEditorialProposal"],
+  inspectEditorialAnnotationRevision?: ConstructorParameters<typeof InvocationRunner>[0]["inspectEditorialAnnotationRevision"],
 ): InvocationRunner {
   const watcher = { subscribe: () => () => undefined };
   return new InvocationRunner({
@@ -1525,6 +1527,8 @@ function createRunner(
     workspaceWatcherService: watcher as unknown as WorkspaceWatcherService,
     settlementQuietMs: 0,
     settlementMaxWaitMs: 0,
+    importEditorialProposal,
+    inspectEditorialAnnotationRevision,
   });
 }
 
@@ -1763,3 +1767,152 @@ function absentProcessOwnership(pid: number) {
     launchedAt: "2026-07-20T00:00:00.000Z",
   };
 }
+
+describe("InvocationRunner staged editorial drafting", () => {
+  async function fixture(referenceBody?: string, failStop = false, exitBeforeResponse = false) {
+    const {createEditorialNote,captureEditorialTarget} = await import("@exograph/core/editorial-notes");
+    const root = await mkdtemp(path.join(os.tmpdir(),"exograph-staged-editorial-")); temporaryRoots.push(root);
+    const notePath = path.join(root,"author.md"), source = "Author prose.\n";
+    await writeFile(notePath,source);
+    const note = createEditorialNote({id:"selected",commentary:"Make it clearer."});
+    const command = {...createDefaultClaudeAgentCommand(),command:process.execPath,continuityPolicy:"fresh" as const};
+    const processFactory = new FakeInvocationProcessFactory();
+    const imports: Array<Parameters<NonNullable<ConstructorParameters<typeof InvocationRunner>[0]["importEditorialProposal"]>>[0]> = [];
+    const annotationPath = path.join(root,".exograph","editorial","live.json");
+    await mkdir(path.dirname(annotationPath),{recursive:true}); await writeFile(annotationPath,JSON.stringify({revision:"a".repeat(64)}));
+    const inspect = async (input:{annotationRevision:string}) => JSON.parse(await readFile(annotationPath,"utf8")).revision === input.annotationRevision;
+    const runner = createRunner(settings(root,command),new FakeTerminalManager(),processFactory,async input => {imports.push(input);},inspect);
+    const request = {context:"note" as const,handle:command.handle,documentPath:notePath,mentionText:"@claude",message:"Draft editorial proposal",documentBody:referenceBody ?? source,editorialDraft:{note,annotationRevision:"a".repeat(64),sourceRevision:"b".repeat(64)}};
+    if(exitBeforeResponse)processFactory.onRelease=async process=>{process.exit(23,"failed before launch returned");};
+    if(failStop) {processFactory.nextSendError=new Error("prompt delivery failed");processFactory.nextStopError=new Error("cannot stop live group");}
+    const prepared = await runner.prepare(request);
+    const launchResult = await runner.authorizeAndStartEditorial(prepared,authorizationFor(prepared));
+    const directory = path.join(new InvocationStore(root).layout.invocationsDir,prepared.id);
+    const target = captureEditorialTarget(referenceBody ?? source,0,(referenceBody ?? source).trimEnd().length,"target");
+    const proposal = {...note,targets:[target],edits:[{targetId:target.id,replacement:"Clearer author wording."}]};
+    const complete = async (result:unknown = {note:proposal,message:"Drafted."}) => {
+      await writeFile(path.join(directory,"result.json"),JSON.stringify(result));
+      const updated = new Promise<import("@exograph/core").InvocationRecord>(resolve => runner.once("updated",resolve));
+      processFactory.process.exit(0,"done"); return updated;
+    };
+    return {root,notePath,annotationPath,source,note,proposal,command,runner,processFactory,prepared,directory,imports,complete,launchResult};
+  }
+  it("returns a live-writer failure identity and settles only after the real process exit", async () => {
+    const f = await fixture(undefined,true);
+    expect(f.launchResult).toMatchObject({ok:false,writerActive:true,invocation:{id:f.prepared.id,status:"orphaned"}});
+    expect(f.launchResult.invocation.changeset).toBeUndefined();
+    expect((await f.runner.get(f.prepared.id))?.changeset).toBeUndefined();
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+    const overlapping=await f.runner.prepare({...f.prepared.request});
+    await expect(f.runner.authorizeAndStartEditorial(overlapping,authorizationFor(overlapping))).rejects.toMatchObject({code:"review-busy"});
+    const settled = new Promise<import("@exograph/core").InvocationRecord>(resolve=>f.runner.once("updated",resolve));
+    f.processFactory.process.exit(23,"failed");
+    const record=await settled;
+    expect(record.status).toBe("failed");expect(record.changeset?.files).toEqual([]);
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+  });
+  it("settles an exit queued during a failed launch instead of stranding its committed identity", async () => {
+    const f = await fixture(undefined,true,true);
+    expect(f.launchResult).toMatchObject({ok:false,writerActive:true,invocation:{id:f.prepared.id}});
+    await expect.poll(async()=>Boolean((await f.runner.get(f.prepared.id))?.changeset)).toBe(true);
+    const review=await f.runner.getEditorialDraftReview(f.prepared.id);
+    expect(review.invocation.status).toBe("failed");expect(review.invocation.changeset?.files).toEqual([]);
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+  });
+  it("stages references without changing Markdown and imports only on explicit Keep", async () => {
+    const f = await fixture();
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+    expect(await readFile(path.join(f.directory,"document.md"),"utf8")).toBe(f.source);
+    expect(f.processFactory.process.prompts[0]).toContain("Proposal output artifact:");
+    expect(f.processFactory.process.prompts[0]).not.toContain("Exograph document-agent protocol");
+    const settled = await f.complete();
+    expect(settled.editorialDraft?.reviewStatus).toBe("pending"); expect(settled.changeset?.files).toEqual([]);
+    expect(f.imports).toEqual([]);
+    expect((await f.runner.listHistoryForNote(f.notePath))[0].outcome).toBe("pending");
+    expect((await f.runner.listPendingEditorialDraftReviews())[0].proposal).toEqual(f.proposal);
+    // Mutating agent output after settlement cannot change the captured proposal.
+    await writeFile(path.join(f.directory,"result.json"),JSON.stringify({note:f.note,message:"Altered result"}));
+    const kept = await f.runner.reviewEditorialDraft(f.prepared.id,"keep");
+    expect(kept.editorialDraft?.reviewStatus).toBe("kept");
+    expect(f.imports).toEqual([{documentPath:f.notePath,noteId:f.note.id,annotationRevision:"a".repeat(64),sourceRevision:"b".repeat(64),proposal:f.proposal,documentBody:f.source}]);
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+    await f.runner.reviewEditorialDraft(f.prepared.id,"keep"); expect(f.imports).toHaveLength(1);
+  });
+  it("uses an unsaved author snapshot without forcing it onto disk", async () => {
+    const dirty = "Unsaved author prose.\n";
+    const f = await fixture(dirty);
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+    expect(await readFile(path.join(f.directory,"document.md"),"utf8")).toBe(dirty);
+    expect((await f.complete()).editorialDraft?.reviewStatus).toBe("pending");
+    await f.runner.reviewEditorialDraft(f.prepared.id,"keep");
+    expect(f.imports[0].documentBody).toBe(dirty);
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+  });
+  it("rejects altered reference artifacts without importing or changing Markdown", async () => {
+    const f = await fixture();
+    await chmod(path.join(f.directory,"document.md"),0o600);
+    await writeFile(path.join(f.directory,"document.md"),"Altered reference.\n");
+    const record = await f.complete();
+    expect(record.status).toBe("failed"); expect(record.failureReason).toContain("immutable editorial reference");
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source); expect(f.imports).toEqual([]);
+  });
+  it("preserves the pending proposal when annotation import reports a conflict", async () => {
+    const f = await fixture(); await f.complete();
+    const recovering = createRunner(settings(f.root,f.command),new FakeTerminalManager(),new FakeInvocationProcessFactory(),async () => {throw new Error("The selected annotation changed.");});
+    await recovering.recoverWorkspace(settings(f.root,f.command));
+    await expect(recovering.reviewEditorialDraft(f.prepared.id,"keep")).rejects.toThrow("annotation changed");
+    expect((await recovering.getEditorialDraftReview(f.prepared.id)).canKeep).toBe(true);
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+  });
+  it("detects live annotation drift and preserves the new bytes without rollback", async () => {
+    const f = await fixture(), external = JSON.stringify({revision:"external-edit",notes:["Retained human annotation edit"]});
+    await writeFile(f.annotationPath,external);
+    const record = await f.complete();
+    expect(record.status).toBe("failed"); expect(record.failureReason).toContain("annotations changed while drafting");
+    expect(await readFile(f.annotationPath,"utf8")).toBe(external); expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+    await expect(f.runner.reviewEditorialDraft(f.prepared.id,"keep")).rejects.toThrow("not available"); expect(f.imports).toEqual([]);
+  });
+  it("finishes proposal capture when recovery finds a settled manifest with a waiting draft", async () => {
+    const f = await fixture(), store = new InvocationStore(f.root);
+    await writeFile(path.join(f.directory,"result.json"),JSON.stringify({note:f.proposal,message:"Interrupted capture."}));
+    const launch = await store.readManifest(f.prepared.id,"launch");
+    const settled = await store.captureSettledManifest(f.prepared.id,[f.root],launch!);
+    const {buildInvocationChangeset} = await import("@exograph/core");
+    const running = await f.runner.get(f.prepared.id);
+    await store.writeRecord({...running!,status:"process-exited",endedAt:new Date().toISOString(),changeset:buildInvocationChangeset(launch!,settled)});
+    await store.clearProcessOwnership(f.prepared.id);
+    const recovering = createRunner(settings(f.root,f.command));
+    await recovering.recoverWorkspace(settings(f.root,f.command));
+    expect((await recovering.get(f.prepared.id))?.editorialDraft?.reviewStatus).toBe("pending");
+    expect((await recovering.getEditorialDraftReview(f.prepared.id)).proposal).toEqual(f.proposal);
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+  });
+  it("rejects staged proposals without importing or changing Markdown", async () => {
+    const f = await fixture(); await f.complete();
+    await f.runner.reviewEditorialDraft(f.prepared.id,"reject");
+    expect(f.imports).toEqual([]); expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+    expect(await f.runner.listPendingEditorialDraftReviews()).toEqual([]);
+  });
+  it("rejects malformed proposals and retains author bytes", async () => {
+    const f = await fixture(); const record = await f.complete({note:{id:"bad"},message:"Wrong"});
+    expect(record.status).toBe("failed"); expect(record.failureReason).toContain("valid proposal");
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source); expect(f.imports).toEqual([]);
+  });
+  it("rolls back illegal author writes through journaled review and prohibits Keep", async () => {
+    const f = await fixture(); await writeFile(f.notePath,"Illegal author rewrite.\n");
+    const record = await f.complete();
+    expect(record.status).toBe("failed"); expect(record.editorialGuardFailure).toContain("author Markdown");
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source);
+    await expect(f.runner.reviewEditorialDraft(f.prepared.id,"keep")).rejects.toThrow("not available");
+    expect(f.imports).toEqual([]);
+  });
+  it("recovers a staged result after an interrupted run without rerunning or importing it", async () => {
+    const f = await fixture(); await writeFile(path.join(f.directory,"result.json"),JSON.stringify({note:f.proposal,message:"Recovered."}));
+    const recovering = createRunner(settings(f.root,f.command));
+    await recovering.recoverWorkspace(settings(f.root,f.command));
+    const record = await recovering.get(f.prepared.id);
+    expect(record?.editorialDraft?.reviewStatus).toBe("pending");
+    expect((await recovering.getEditorialDraftReview(f.prepared.id)).proposal).toEqual(f.proposal);
+    expect(await readFile(f.notePath,"utf8")).toBe(f.source); expect(f.imports).toEqual([]);
+  });
+});
