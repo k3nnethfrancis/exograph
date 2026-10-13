@@ -185,6 +185,7 @@ export class InvocationRunner extends EventEmitter {
 
   constructor(private readonly options: {
     getWorkspaceSettings: () => WorkspaceSettings;
+    assertWorkspaceWritable?: () => void;
     trustStateRoot: string;
     terminalManager: TerminalManager;
     workspaceWatcherService: WorkspaceWatcherService;
@@ -200,7 +201,10 @@ export class InvocationRunner extends EventEmitter {
     });
   }
 
+  hasWorkspaceWriter(): boolean { return this.active.size > 0 || this.changesetLocks.size > 0 || this.reviewDecisionTails.size > 0; }
+
   async prepare(request: InvocationRequest): Promise<PreparedInvocation> {
+    this.options.assertWorkspaceWritable?.();
     const settings = this.options.getWorkspaceSettings();
     const command = { ...this.resolveCommand(settings, request.handle) };
     const context = request.context === "note"
@@ -1112,6 +1116,7 @@ export class InvocationRunner extends EventEmitter {
   }
 
   private async acquireChangesetLock(prepared: PreparedInvocation, store: InvocationStore): Promise<void> {
+    this.options.assertWorkspaceWritable?.();
     const roots = prepared.noteRoots.map((root) => path.resolve(root));
     const recoveryBlock = [...this.recoveryBlocks.values()].find((block) => rootsOverlap(block.noteRoots, roots));
     if (recoveryBlock) {

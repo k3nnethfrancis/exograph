@@ -1,3 +1,5 @@
+import type { GitHubSyncApi } from "./api/github-sync";
+export type { GitHubSyncConfig, GitHubSyncStatus } from "./api/github-sync";
 import type { PublishingApi } from "./api/publishing";
 export { publicationScope } from "./api/publishing";
 export type { PublishingAuthStatus, PublishingSetupRequest, PublishingSetupResult, PublishingStatus, PublicationAction, PublicationDiagnostic, PublishingBuildRequest, PublishingScope, PublicationDeployResult } from "./api/publishing";
@@ -53,6 +55,7 @@ export interface DesktopApi {
   test?: { graphHooks: true };
   workspace: WorkspaceSetupApi & WorkspaceIndexApi & WorkspaceFilesystemApi & WorkspaceInvocationApi;
   publishing: PublishingApi;
+  githubSync: GitHubSyncApi;
   notes: NotesGraphApi;
   terminals: TerminalsApi;
   shell: ShellApi;

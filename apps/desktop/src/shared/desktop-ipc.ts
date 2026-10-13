@@ -7,6 +7,9 @@ type TerminalsApi = DesktopApi["terminals"];
 type ShellApi = DesktopApi["shell"];
 
 export interface DesktopInvokeHandlers {
+  "github-sync:get-status": DesktopApi["githubSync"]["getStatus"];
+  "github-sync:configure": DesktopApi["githubSync"]["configure"];
+  "github-sync:sync-now": DesktopApi["githubSync"]["syncNow"];
   "publishing:get-setup-status": DesktopApi["publishing"]["getSetupStatus"];
   "publishing:start-auth": DesktopApi["publishing"]["startAuth"];
   "publishing:setup": DesktopApi["publishing"]["setup"];
@@ -92,6 +95,7 @@ export interface DesktopInvokeHandlers {
 }
 
 export interface DesktopEventPayloads {
+  "github-sync:status": Awaited<ReturnType<DesktopApi["githubSync"]["getStatus"]>>;
   "publishing:status": Awaited<ReturnType<DesktopApi["publishing"]["getStatus"]>>;
   "workspace:changed": { rootPath: string; eventType: string; filePath: string | null };
   "workspace:index-sync-state": IndexSyncStateEvent;

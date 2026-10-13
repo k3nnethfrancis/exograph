@@ -27,6 +27,16 @@ window.addEventListener(
 
 const api: DesktopApi = {
   ...(process.env.EXOGRAPH_TEST === "1" ? { test: { graphHooks: true as const } } : {}),
+  githubSync: {
+    getStatus: () => invokeDesktop("github-sync:get-status"),
+    configure: (input) => invokeDesktop("github-sync:configure", input),
+    syncNow: (input) => invokeDesktop("github-sync:sync-now", input),
+    onStatus: (callback) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: Awaited<ReturnType<DesktopApi["githubSync"]["getStatus"]>>) => callback(status);
+      ipcRenderer.on("github-sync:status", listener);
+      return () => ipcRenderer.removeListener("github-sync:status", listener);
+    },
+  },
   publishing: {
     getSetupStatus: () => invokeDesktop("publishing:get-setup-status"),
     startAuth: () => invokeDesktop("publishing:start-auth"),
