@@ -29,9 +29,10 @@ export class EditorialService {
  /** Called by main for source watcher events; no sidecar write or automatic rebasing. */
  sourceChanged(filePath:string):void {if(this.tracked.has(path.resolve(filePath))) this.onChanged({filePath});}
  async renamePath(sourcePath:string,nextPath:string):Promise<string> {
-  const sourceStore=this.store(sourcePath),nextRoot=this.root(nextPath);const files=new WorkspaceFiles(this.getModel().noteRoots.map(r=>r.path));await files.writable(nextPath);
-  if(sourceStore.noteRoot!==nextRoot) throw new Error('Cross-Note-Root moves require moving the portable annotation records together; the current Workspace supports one Note Root.');
-  const result=await sourceStore.renamePath(sourcePath,nextPath,renameWorkspacePath);for(const old of [...this.tracked]) if(old===sourcePath || old.startsWith(sourcePath+path.sep)) {this.tracked.delete(old);this.tracked.add(nextPath+old.slice(sourcePath.length));}this.onChanged({filePath:nextPath});return result;
+  const sourceStore=this.store(sourcePath),nextRoot=this.root(nextPath);const files=new WorkspaceFiles(this.getModel().noteRoots.map(r=>r.path));await files.writable(sourcePath);await files.writable(nextPath);
+  const result=sourceStore.noteRoot===nextRoot
+   ? await sourceStore.renamePath(sourcePath,nextPath,renameWorkspacePath)
+   : await sourceStore.moveUnannotated(sourcePath,()=>renameWorkspacePath(sourcePath,nextPath));for(const old of [...this.tracked]) if(old===sourcePath || old.startsWith(sourcePath+path.sep)) {this.tracked.delete(old);this.tracked.add(nextPath+old.slice(sourcePath.length));}this.onChanged({filePath:nextPath});return result;
  }
  dispose():void {for(const watcher of this.watchers.values()) watcher.close();for(const timer of this.debounce.values()) clearTimeout(timer);this.watchers.clear();this.debounce.clear();}
 }
