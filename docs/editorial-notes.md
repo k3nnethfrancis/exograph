@@ -5,6 +5,9 @@ the right edge of a passage indicates commentary; red indicates a proposed edit.
 Click a marker to select its note in **Note context → Editing**. General notes
 and notes covering several passages are listed there too.
 
+Editorial notes are available in the desktop app. The browser workspace supports
+ordinary Markdown editing; editorial controls are unavailable there.
+
 Select author text and click **Add editorial note** in the editor toolbar, or
 press **Command–Shift–E** (Control–Shift–E on Windows/Linux). Without a selection,
 the same action adds a general note. In Editing, write the comment, attach
