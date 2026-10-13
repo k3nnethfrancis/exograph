@@ -1,5 +1,5 @@
 import type { GitHubSyncApi } from "./api/github-sync";
-export type { GitHubSyncConfig, GitHubSyncStatus } from "./api/github-sync";
+export type { GitHubSyncConfig, GitHubSyncStatus, GitHubSyncSetup, GitHubSyncRepositoryInfo, GitHubSyncConnectionResult, GitHubSyncDownloadResult, GitHubSyncSetupProgress } from "./api/github-sync";
 import type { EditorialApi } from './api/editorial';
 export type { EditorialSnapshot, EditorialSaveResult, EditorialMutationResult, EditorialChangedEvent } from './api/editorial';
 import type { PublishingApi } from "./api/publishing";

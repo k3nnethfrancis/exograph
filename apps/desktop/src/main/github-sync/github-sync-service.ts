@@ -21,7 +21,7 @@ export class GitHubSyncService {
   private readonly repository: Pick<GitSyncRepository, "inspect" | "sync"> & Partial<Pick<GitSyncRepository, "cancel">>;
   private readonly now: () => number;
   private states = new Map<string, GitHubSyncStatus>();
-  private pending: Promise<GitHubSyncStatus> | null = null;
+  private pending: Promise<unknown> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
   private busy = false;
@@ -66,20 +66,42 @@ export class GitHubSyncService {
     if (this.busy) throw new Error("Wait for the current sync to finish before changing its configuration.");
     this.busy = true;
     try {
+      return await this.saveConfiguration(input);
+    } finally { this.busy = false; }
+  }
+  private async saveConfiguration(input: { root: string; config: GitHubSyncConfig }): Promise<GitHubSyncStatus> {
       validateConfig(input.config);
       const root = await this.assertRoot(input.root);
       const current = await this.getStatus();
       if (current.root !== root) throw new Error("The Workspace changed. Reopen GitHub sync settings for the current Workspace.");
       const info = input.config.enabled ? await this.repository.inspect(root, input.config) : undefined;
       await this.assertRoot(root);
-      const destinationChanged = current.repository !== info?.repository || current.config.branch !== input.config.branch;
-      const status: GitHubSyncStatus = { ...current, ...(destinationChanged && input.config.enabled ? { lastAttempt: undefined, lastSuccess: undefined, lastSyncedCommit: undefined, hasLocalChanges: undefined } : {}), config: { ...input.config }, phase: "idle", repository: info?.repository, message: input.config.enabled ? "Ready to sync." : "Automatic sync is off.", conflicts: undefined };
+      const destinationChanged = current.repository !== info?.repository || current.config.branch !== input.config.branch || current.config.remoteBranch !== input.config.remoteBranch;
+      const status: GitHubSyncStatus = { ...current, ...(destinationChanged && input.config.enabled ? { lastAttempt: undefined, lastSuccess: undefined, lastSyncedCommit: undefined, hasLocalChanges: undefined } : {}), config: { ...input.config }, phase: "idle", repository: info?.repository ?? current.repository, message: input.config.enabled ? "Ready to sync." : "Automatic sync is off.", conflicts: undefined };
       this.updateNext(status);
       await this.persist(status);
       this.states.set(root, status);
       this.options.publishStatus(structuredClone(status));
       return structuredClone(status);
-    } finally { this.busy = false; }
+  }
+  async exclusiveSetup<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.busy) throw new Error("Wait for the current sync or setup to finish.");
+    this.busy = true;
+    const run = Promise.resolve().then(operation); this.pending = run;
+    try { return await run; } finally { this.pending = null; this.busy = false; }
+  }
+  async setupAndSync(root: string, prepare: () => Promise<GitHubSyncConfig>): Promise<GitHubSyncStatus> {
+    return this.exclusiveSetup(async () => {
+      await this.assertRoot(root);
+      await this.prepareLocal(root, async () => {});
+      const config = await prepare();
+      const status = await this.saveConfiguration({ root, config });
+      return this.perform(status);
+    });
+  }
+  async assertSetupRoot(root: string): Promise<void> { await this.assertRoot(root); }
+  async prepareLocal<T>(root: string, operation: () => Promise<T>): Promise<T> {
+    return this.options.withDocumentsFlushed(async () => { await this.assertRoot(root); return operation(); });
   }
   async syncNow(input: { root: string }): Promise<GitHubSyncStatus> {
     if (this.busy) throw new Error("A sync is already running. Wait for it to finish.");
@@ -163,6 +185,6 @@ export class GitHubSyncService {
   }
 }
 function validateConfig(config: GitHubSyncConfig): void {
-  if (!config || typeof config.enabled !== "boolean" || typeof config.remote !== "string" || typeof config.branch !== "string"
+  if (!config || typeof config.enabled !== "boolean" || typeof config.remote !== "string" || typeof config.branch !== "string" || (config.remoteBranch !== undefined && typeof config.remoteBranch !== "string")
     || !["manual", "hourly", "daily"].includes(config.cadence)) throw new Error("Invalid GitHub sync configuration.");
 }

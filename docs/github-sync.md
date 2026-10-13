@@ -1,10 +1,30 @@
 # GitHub sync
 
-GitHub sync keeps an existing **private GitHub repository** in sync with the
-active Workspace's Note Root. Configure it in **Workspace Settings → GitHub
-sync**, then choose **Sync now**, **Hourly**, or **Daily**. Save the configuration
-before the first run. The selected Note Root must be the repository's top-level
-folder and its checked-out branch must match the saved branch.
+GitHub sync keeps your notes in a **private GitHub repository**. Open
+**Workspace Settings → GitHub sync** and connect GitHub. Notes sync shares your
+account with Publishing, but does not require website workflow permissions or
+select a website destination.
+
+Exograph inspects the current notes folder first. If it already has a GitHub
+remote, choose the repository shown and enable sync. The existing branch and
+upstream are preserved, including differently named local and remote branches.
+When there is no destination, **Create private repository** initializes Git if
+needed, adds private-file ignore rules, creates the personal-account repository,
+and starts syncing. Existing Git commit identity is preserved; missing identity
+is configured for this repository using your connected GitHub account, never in
+global Git settings. **Use existing repository** lists writable private repos and
+accepts a GitHub URL. Search follows older pages before reporting no matches.
+
+**Hourly** is the initial setup choice; Daily and Manual are available. Saved
+schedules remain in place until changed. **Pause sync** retains the connected
+repository, history and successful revision for Resume. **Git details** exposes
+technical overrides for complex existing configurations.
+
+The selected Note Root must be the repository's top-level folder. Public,
+read-only, detached, staged, or partially merged repositories need attention
+before setup proceeds. A populated unrelated destination produces a review
+message and offers a separate download; Exograph does not silently merge
+unrelated histories or replace either source.
 
 A sync fetches remote changes, saves open documents and queued editorial notes,
 commits local changes, merges compatible remote changes, and uploads the saved
@@ -15,20 +35,20 @@ uploaded commit, last successful run, next scheduled attempt, and any errors.
 
 ## Set up another Mac
 
-1. Clone your private notes repository and the Exograph source repository into
-   separate folders. Follow the [development setup](../README.md) to build and
-   install Exograph, or install a released app.
-2. Open the cloned notes repository's top-level folder as a Workspace. Editorial
-   annotations under `.exograph/editorial/v1/` travel with the notes; indexing is
-   rebuilt locally.
-3. Configure your Git commit identity in the cloned notes repository with
-   `git config user.name "Your Name"` and `git config user.email "you@example.com"`
-   (a GitHub-provided private email is also suitable). Connect GitHub from the sync panel (or `gh auth login`). Authentication uses
-   GitHub CLI and Git's credential support. Tokens are not stored in your notes
-   or in sync configuration.
-4. Select the existing remote, such as `origin`, and the checked-out branch,
-   enable sync, choose a cadence, and save. Run **Sync now** on each Mac before
-   continuing work there.
+1. Install Exograph or clone its source repository and follow the
+   [development setup](../README.md). Keep source code separate from notes.
+2. Choose **Open from GitHub** during workspace opening or **Use existing
+   repository** in GitHub sync. Sign into GitHub on this Mac and select your
+   private notes repository.
+3. Download into a chosen parent folder. Exograph creates a new child named
+   after the repository and opens it through the normal workspace transition.
+   Existing folders, symlinks and locations inside another notes folder or Git
+   repository are refused. No current notes or workspace settings are replaced
+   when a download fails or is cancelled. A completed download remains available
+   if opening it later fails.
+4. Continue local setup and enable sync for the new workspace. Editorial notes
+   under `.exograph/editorial/v1/` travel with your Markdown; indexes are rebuilt
+   locally. Run **Sync now** on each Mac before continuing work there.
 5. Restore your portable publishing source/theme and configure their local
    paths in Publishing. See [publishing](publishing.md). Syncing notes does not
    deploy a website. Reconfigure local agent executable paths and grant command
@@ -36,8 +56,8 @@ uploaded commit, last successful run, next scheduled attempt, and any errors.
 
 Sync configuration is specific to this Mac and the exact Note Root. It does not
 copy machine paths, trust decisions, credentials, or app settings to another
-computer. Existing repositories/remotes are used; sync does not initialize,
-clone, switch branches, create repositories, or rewrite history for you.
+computer. Guided setup can create or download repositories after explicit selection.
+Sync never switches branches or rewrites history.
 
 ## Scheduling and stopping
 
@@ -137,3 +157,18 @@ pnpm --filter @exograph/desktop exec playwright test tests/e2e/github-sync.spec.
 Repository tests use real temporary bare remotes and two clones. Electron tests
 exercise the production main/preload/renderer bridge with fixture-only GitHub
 authentication and a local remote; they do not upload test content to GitHub.
+
+## Setup recovery
+
+Creation records a local intent before the request and the immutable GitHub
+repository ID after success. Retrying a failed upload reuses that repository.
+An unknown creation outcome may reuse an empty destination; a populated
+repository without confirmed identity requires separate review. Exograph never
+uses a matching name alone as authority to combine existing notes.
+
+Large first uploads may exceed GitHub server limits even when the connection is
+healthy. Failures remain visible, local commits remain available, and retry uses
+the same repository. Setup does not claim success until the normal sync finishes.
+Downloads expose cancellation and clean up only their own temporary folder.
+Workspace save conflicts and queued annotation writes are handled by the same
+save barrier as ongoing sync, before local setup and snapshots.

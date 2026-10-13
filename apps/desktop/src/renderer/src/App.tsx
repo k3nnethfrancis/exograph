@@ -1453,9 +1453,9 @@ export function App() {
           structuralDraftKey={workspaceSettingsStructuralDraftKey}
           onChooseFolder={(target) => void workspaceSettingsController.chooseFolder(target)}
           onClose={workspaceSettingsController.closeDialog}
-          onOpenWorkspaceSwitcher={() => {
+          onOpenWorkspaceSwitcher={async (downloadedDirectory) => {
+            await workspaceBootstrap.openWorkspaceSwitcher(downloadedDirectory);
             setWorkspaceSettingsDialog(null);
-            void workspaceBootstrap.openWorkspaceSwitcher();
           }}
           onRunIndexUpdate={(kind) => void workspaceSettingsController.runIndexUpdate(kind)}
           onSave={(settingsDialog, options) => void workspaceSettingsController.saveDialog(settingsDialog, options)}

@@ -149,3 +149,14 @@ it("preserves an imported managed site's original vanilla revision across setup"
   const result = await f.service.setup(f.input);
   expect(JSON.parse(await readFile(path.join(result.engineDirectory, "exograph-site.json"), "utf8")).vanillaCommit).toBe(vanillaCommit);
 });
+
+it("notes account discovery works without a Workspace or website workflow permissions", async () => {
+  const f = await fixture();
+  const calls: string[][] = [];
+  const service = new ManagedSiteSetup({ context: () => { throw new Error("No Workspace yet"); }, sitesParent: path.join(f.temp, "sites"),
+    capture: (model, publicationDirectory, stagingParent) => exportPublication({ model, publicationDirectory, stagingParent }), verify: verifyPublicationSnapshot,
+    run: async (_file, args) => { calls.push(args); return "author"; },
+  });
+  expect(await service.getAccountStatus()).toMatchObject({ authenticated: true, login: "author" });
+  expect(calls).toEqual([["api", "user", "--jq", ".login"]]);
+});

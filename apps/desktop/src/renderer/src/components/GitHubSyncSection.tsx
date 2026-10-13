@@ -1,22 +1,30 @@
 import "./githubSync.css";
-import { useEffect, useRef, useState } from "react";
-import type { GitHubSyncConfig, GitHubSyncStatus, PublishingAuthStatus } from "../../../shared/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { GitHubSyncConfig, GitHubSyncConnectionResult, GitHubSyncRepositoryInfo, GitHubSyncSetup, GitHubSyncSetupProgress, GitHubSyncStatus } from "../../../shared/api";
+import { GitHubConnection } from "./GitHubConnection";
+import { GitHubDownload, GitHubRepositoryPicker } from "./GitHubRepositoryPicker";
 
 const activePhases = new Set<GitHubSyncStatus["phase"]>(["checking", "saving", "fetching", "merging", "pushing"]);
-const sameConfig = (a: GitHubSyncConfig, b: GitHubSyncConfig) => a.enabled === b.enabled && a.remote === b.remote && a.branch === b.branch && a.cadence === b.cadence;
+const sameConfig = (a: GitHubSyncConfig, b: GitHubSyncConfig) => a.enabled === b.enabled && a.remote === b.remote && a.branch === b.branch && a.remoteBranch === b.remoteBranch && a.cadence === b.cadence;
 const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const localTime = (value: string) => new Date(value).toLocaleString();
 
-/** Configuration is deliberately saved through sync's own validated boundary. */
-export function GitHubSyncSection({ disabled = false }: { disabled?: boolean }) {
+export function GitHubSyncSection({ disabled = false, onDownloaded }: { disabled?: boolean; onDownloaded?: (directory: string) => void | Promise<void> }) {
   const [status, setStatus] = useState<GitHubSyncStatus | null>(null);
   const [draft, setDraft] = useState<GitHubSyncConfig | null>(null);
+  const [setup, setSetup] = useState<GitHubSyncSetup>();
+  const [name, setName] = useState("");
+  const [cadence, setCadence] = useState<GitHubSyncConfig["cadence"]>("hourly");
+  const [mode, setMode] = useState<"home" | "create" | "existing" | "download">("home");
+  const [selected, setSelected] = useState<GitHubSyncRepositoryInfo>();
+  const [review, setReview] = useState<GitHubSyncConnectionResult>();
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<"save" | "sync" | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  const [setupProgress, setSetupProgress] = useState<GitHubSyncSetupProgress>();
   const [cancelling, setCancelling] = useState(false);
   const [reload, setReload] = useState(0);
-  const [auth, setAuth] = useState<PublishingAuthStatus | null>(null);
-  const [connecting, setConnecting] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const connected = useCallback(() => setAuthenticated(true), []);
   const alive = useRef(false);
   const root = useRef<string | null>(null);
   const operation = useRef(false);
@@ -27,6 +35,7 @@ export function GitHubSyncSection({ disabled = false }: { disabled?: boolean }) 
     let event: GitHubSyncStatus | null = null;
     const api = window.exograph.githubSync;
     if (!api) { setError("GitHub sync is unavailable. Restart Exograph after installing the current build."); return () => { alive.current = false; }; }
+    const offSetup = api.onSetupProgress(next => { if (current) setSetupProgress(next); });
     const off = api.onStatus(next => {
       event = next;
       if (current && root.current === next.root) setStatus(next);
@@ -36,33 +45,33 @@ export function GitHubSyncSection({ disabled = false }: { disabled?: boolean }) 
       const latest = event && event.root === next.root ? event : next;
       root.current = latest.root; setStatus(latest); setDraft(latest.config); setError(null);
     }).catch(cause => { if (current) setError(errorMessage(cause)); });
-    void window.exograph.publishing.getSetupStatus().then(next => { if (current) setAuth(next); }).catch(() => {});
-    return () => { current = false; alive.current = false; off(); };
+    return () => { current = false; alive.current = false; off(); offSetup(); };
   }, [reload]);
 
   useEffect(() => {
-    if (!auth?.pending) return;
+    if (!authenticated) return;
     let current = true;
-    const timer = window.setInterval(() => {
-      void window.exograph.publishing.getSetupStatus().then(next => { if (current) setAuth(next); }).catch(cause => { if (current) setError(errorMessage(cause)); });
-    }, 2000);
-    return () => { current = false; window.clearInterval(timer); };
-  }, [auth?.pending]);
+    void window.exograph.githubSync.inspectSetup().then(next => {
+      if (!current || (root.current && root.current !== next.root)) return;
+      setSetup(next); setName(next.suggestedName);
+    }).catch(cause => { if (current) setError(errorMessage(cause)); });
+    return () => { current = false; };
+  }, [authenticated, reload]);
 
-  const run = async (kind: "save" | "sync") => {
-    if (!status || !draft || disabled || operation.current || activePhases.has(status.phase)) return;
+  const run = async (kind: string, action: () => Promise<GitHubSyncStatus | GitHubSyncConnectionResult>) => {
+    if (!status || disabled || operation.current || activePhases.has(status.phase)) return;
     const capturedRoot = status.root;
-    operation.current = true; setPending(kind); setError(null);
+    operation.current = true; setPending(kind); setError(null); setSetupProgress(undefined);
     try {
-      const next = kind === "save"
-        ? await window.exograph.githubSync.configure({ root: capturedRoot, config: { ...draft } })
-        : await window.exograph.githubSync.syncNow({ root: capturedRoot });
-      if (!alive.current || root.current !== capturedRoot || next.root !== capturedRoot) return;
-      setStatus(next);
-      if (kind === "save") setDraft(next.config);
+      const result = await action();
+      if (!alive.current || root.current !== capturedRoot) return;
+      if ("kind" in result && result.kind === "review-required") { setReview(result); setSelected(result.repository); setMode("existing"); return; }
+      const next = "kind" in result ? result.status : result;
+      if (next?.root === capturedRoot) { setStatus(next); setDraft(next.config); setMode("home"); setReview(undefined); }
     } catch (cause) { if (alive.current && root.current === capturedRoot) setError(errorMessage(cause)); }
     finally { operation.current = false; if (alive.current) setPending(null); }
   };
+  const configure = (config: GitHubSyncConfig) => void run("save", () => window.exograph.githubSync.configure({ root: status!.root, config }));
   const cancel = async () => {
     if (!status || cancelling) return;
     const capturedRoot = status.root;
@@ -73,58 +82,77 @@ export function GitHubSyncSection({ disabled = false }: { disabled?: boolean }) 
     } catch (cause) { if (alive.current && root.current === capturedRoot) setError(errorMessage(cause)); }
     finally { if (alive.current) setCancelling(false); }
   };
-  const connect = async () => {
-    if (connecting || auth?.pending) return;
-    setConnecting(true); setError(null);
-    try { const next = await window.exograph.publishing.startAuth(); if (alive.current) setAuth(next); }
-    catch (cause) { if (alive.current) setError(errorMessage(cause)); }
-    finally { if (alive.current) setConnecting(false); }
-  };
-  const dirty = Boolean(status && draft && !sameConfig(status.config, draft));
   const busy = Boolean(pending || (status && activePhases.has(status.phase)));
-  const update = (patch: Partial<GitHubSyncConfig>) => { setDraft(current => current ? { ...current, ...patch } : current); setError(null); };
+  const dirty = Boolean(status && draft && !sameConfig(status.config, draft));
+  const validName = /^[A-Za-z0-9_.-]+$/.test(name.trim()) && ![".", ".."].includes(name.trim());
+  const destination = status?.repository;
+  const preferred = setup?.candidates.find(candidate => candidate.preferred) ?? (setup?.candidates.length === 1 ? setup.candidates[0] : undefined);
+  const chooseExisting = (repository: GitHubSyncRepositoryInfo) => { setSelected(repository); setReview(undefined); };
+  const enable = (repository: GitHubSyncRepositoryInfo, remote?: string) => void run("connect", () => window.exograph.githubSync.connectExisting({ root: status!.root, repository: repository.nameWithOwner, cadence, ...(remote ? { remote } : {}) }));
 
   return <section className="github-sync-section" data-testid="workspace-settings-github-sync">
     {disabled ? <p role="status">Apply your workspace changes before configuring sync.</p> : null}
-    {status && draft ? <>
-      <div className="github-sync-summary"><strong>{status.repository ? `${status.repository} · Private` : "Private repository"}</strong><p>{status.root}</p>
-        <small>Uses this notes folder’s Git repository. Clone or connect its Git remote before enabling sync.</small>
-      </div>
-      <fieldset disabled={disabled || busy} style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: "1rem" }}>
-        <label className="github-sync-toggle"><input data-testid="github-sync-enabled" type="checkbox" checked={draft.enabled} onChange={event => update({ enabled: event.target.checked })} />Enable GitHub sync</label>
-        <label className="dialog-field"><span className="dialog-field__label">Sync schedule</span>
-          <select className="dialog-card__input" data-testid="github-sync-cadence" value={draft.cadence} onChange={event => update({ cadence: event.target.value as GitHubSyncConfig["cadence"] })}>
-            <option value="manual">Only when I press Sync now</option><option value="hourly">Hourly</option><option value="daily">Daily</option>
-          </select>
-          <small>Scheduled sync runs for the active workspace while Exograph is open. Missed runs resume when the app opens or wakes. Sync does not publish your website.</small>
-        </label>
-        <div className="github-sync-fields">
-          <label className="dialog-field"><span className="dialog-field__label">Git remote</span><input className="dialog-card__input" data-testid="github-sync-remote" value={draft.remote} onChange={event => update({ remote: event.target.value })} spellCheck={false} /></label>
-          <label className="dialog-field"><span className="dialog-field__label">Branch</span><input className="dialog-card__input" data-testid="github-sync-branch" value={draft.branch} onChange={event => update({ branch: event.target.value })} spellCheck={false} /></label>
-        </div>
-      </fieldset>
-      <div className="github-sync-actions">
-        <button className="toolbar-button" data-testid="github-sync-save" type="button" disabled={disabled || busy || !dirty || !draft.remote.trim() || !draft.branch.trim()} onClick={() => void run("save")}>{pending === "save" ? "Saving…" : "Save configuration"}</button>
-        <button className="toolbar-button" data-testid="github-sync-now" type="button" disabled={disabled || busy || dirty || !status.config.enabled} onClick={() => void run("sync")}>{pending === "sync" || activePhases.has(status.phase) ? "Syncing…" : "Sync now"}</button>
+    {mode === "download" && onDownloaded ? <GitHubDownload onDownloaded={onDownloaded} onClose={() => setMode("home")} /> : <>
+      {status && draft ? <>
+        {destination && mode === "home" ? <>
+          <div className="github-sync-summary"><div className="github-sync-repository"><button className="github-sync-link" type="button" onClick={() => void window.exograph.shell.openExternal(`https://github.com/${destination}`).catch(cause => setError(errorMessage(cause)))}>{destination} ↗</button><small>Private</small></div>
+            <small>{status.lastSuccess ? `Last synced ${localTime(status.lastSuccess)}` : "Not yet synced"}</small>
+          </div>
+          <div className="github-sync-actions">
+            <button className="toolbar-button toolbar-button--primary" data-testid="github-sync-now" type="button" disabled={disabled || busy || dirty || !status.config.enabled} onClick={() => void run("sync", () => window.exograph.githubSync.syncNow({ root: status.root }))}>{busy ? "Syncing…" : "Sync now"}</button>
+            <label className="github-sync-schedule">Automatically<Schedule value={status.config.cadence} disabled={disabled || busy} onChange={value => configure({ ...status.config, cadence: value })} /></label>
+            <button className="toolbar-button" data-testid="github-sync-pause" type="button" disabled={disabled || busy} onClick={() => configure({ ...status.config, enabled: !status.config.enabled })}>{status.config.enabled ? "Pause sync" : "Resume sync"}</button>
+          </div>
+          <small>Sync runs while this workspace is open. Missed runs resume when Exograph opens or wakes.</small>
+          <GitHubConnection onConnected={connected} />
+          <details data-testid="github-sync-details"><summary>Git details</summary>
+            <div className="github-sync-fields">
+              <label className="dialog-field"><span className="dialog-field__label">Git remote</span><input className="dialog-card__input" data-testid="github-sync-remote" disabled={disabled || busy} value={draft.remote} onChange={event => setDraft({ ...draft, remote: event.target.value })} spellCheck={false} /></label>
+              <label className="dialog-field"><span className="dialog-field__label">Branch</span><input className="dialog-card__input" data-testid="github-sync-branch" disabled={disabled || busy} value={draft.branch} onChange={event => setDraft({ ...draft, branch: event.target.value })} spellCheck={false} /></label>
+            </div>
+            <small>{status.root}</small>{status.config.remoteBranch ? <small>Remote branch: {status.config.remoteBranch}</small> : null}
+            {status.lastSyncedCommit ? <small>Saved revision: <code>{status.lastSyncedCommit.slice(0, 8)}</code></small> : null}
+            {status.nextRun ? <small>Next sync: {localTime(status.nextRun)}</small> : null}
+            <button className="toolbar-button" data-testid="github-sync-save" type="button" disabled={disabled || busy || !dirty || !draft.remote.trim() || !draft.branch.trim()} onClick={() => configure(draft)}>Save Git details</button>
+          </details>
+        </> : <>
+          {mode === "existing" && !selected ? null : <GitHubConnection onConnected={connected} />}
+          {authenticated && setup ? <>
+            {mode === "home" ? <>
+              {preferred ? <div className="github-sync-summary"><strong>{preferred.repository.nameWithOwner} · {preferred.repository.isPrivate ? "Private" : "Public"}</strong><small>This notes folder is already connected.</small>
+                <Schedule value={cadence} disabled={disabled || busy} onChange={setCadence} />
+                <button className="toolbar-button toolbar-button--primary" data-testid="github-sync-enable" type="button" disabled={disabled || busy || !preferred.repository.isPrivate || !preferred.repository.writable} onClick={() => enable(preferred.repository, preferred.remote)}>Enable sync</button>
+                {!preferred.repository.isPrivate ? <p>Notes sync requires a private repository.</p> : !preferred.repository.writable ? <p>You need write access to enable sync.</p> : null}
+              </div> : setup.candidates.length > 1 ? <div className="github-repository-list"><p>Choose the repository for these notes.</p>{setup.candidates.map(candidate => <button className="github-repository-option" key={candidate.remote} type="button" disabled={disabled || busy || !candidate.repository.isPrivate || !candidate.repository.writable} onClick={() => enable(candidate.repository, candidate.remote)}><strong>{candidate.repository.nameWithOwner}</strong><small>{candidate.branch}</small></button>)}</div> : <p>Keep your notes on GitHub and continue on another computer.</p>}
+              {setup.local.problem ? <p role="status">{setup.local.problem}</p> : null}
+              <div className="github-sync-actions"><button className="toolbar-button" data-testid="github-sync-create" type="button" disabled={disabled || busy} onClick={() => setMode("create")}>Create private repository</button><button className="toolbar-button" data-testid="github-sync-existing" type="button" disabled={disabled || busy} onClick={() => setMode("existing")}>Use existing repository</button></div>
+            </> : mode === "create" ? <>
+              <label className="dialog-field"><span className="dialog-field__label">Repository name</span><input className="dialog-card__input" data-testid="github-sync-name" value={name} disabled={busy} onChange={event => setName(event.target.value)} /></label>
+              <strong>{setup.account?.login}/{name.trim()} · Private</strong>
+              <small>Includes notes, attachments, and editorial annotations. Credentials, caches, and local app state stay on this computer.</small>
+              <Schedule value={cadence} disabled={busy} onChange={setCadence} />
+              <button className="toolbar-button toolbar-button--primary" data-testid="github-sync-create-submit" type="button" disabled={disabled || busy || !validName || !setup.account} onClick={() => void run("create", () => window.exograph.githubSync.createAndSync({ root: status.root, owner: setup.account!.login, name: name.trim(), cadence }))}>{busy ? "Setting up…" : "Create and sync"}</button>
+            </> : mode === "existing" ? <>
+              {!selected ? <GitHubRepositoryPicker disabled={disabled || busy} onSelect={chooseExisting} /> : <>
+                <strong>{selected.nameWithOwner} · Private</strong>
+                {review ? <div role="status" data-testid="github-sync-combination-review"><p>{review.message}</p><p>Your local notes and this repository are kept separate.</p>{onDownloaded ? <button className="toolbar-button" type="button" onClick={() => setMode("download")}>Download as another workspace</button> : null}</div> : <><Schedule value={cadence} disabled={disabled || busy} onChange={setCadence} /><button className="toolbar-button toolbar-button--primary" data-testid="github-sync-connect-submit" type="button" disabled={disabled || busy} onClick={() => enable(selected)}>Connect and sync</button></>}
+                <button className="toolbar-button" type="button" disabled={busy} onClick={() => { setSelected(undefined); setReview(undefined); }}>Choose another repository</button>
+              </>}
+            </> : null}
+            {mode !== "home" ? <button className="toolbar-button" type="button" disabled={busy} onClick={() => { setMode("home"); setReview(undefined); }}>Back</button> : null}
+          </> : authenticated ? <p role="status">Checking this notes folder…</p> : null}
+        </>}
         {["checking", "fetching", "pushing"].includes(status.phase) ? <button className="toolbar-button" data-testid="github-sync-cancel" type="button" disabled={cancelling} onClick={() => void cancel()}>{cancelling ? "Stopping…" : "Stop sync"}</button> : null}
-      </div>
-      {dirty ? <small>Save configuration to use these settings.</small> : null}
-      <div role="status" aria-live="polite" data-testid="github-sync-status">
-        <p role={status.phase === "error" ? "alert" : undefined}>{status.message || (status.config.enabled ? "Ready to sync." : "Sync is off.")}</p>
-        {activePhases.has(status.phase) ? <p>{({ checking: "Checking repository…", saving: "Saving local changes…", fetching: "Checking GitHub…", merging: "Combining changes…", pushing: "Sending changes to GitHub…" } as Partial<Record<GitHubSyncStatus["phase"], string>>)[status.phase]}</p> : null}
-        <p>Last successful sync: {status.lastSuccess ? localTime(status.lastSuccess) : "Not yet synced"}</p>
-        {status.lastSyncedCommit ? <small>Saved revision: <code>{status.lastSyncedCommit.slice(0, 8)}</code></small> : null}
-        {status.nextRun ? <small>Next scheduled sync: {localTime(status.nextRun)}</small> : null}
-      </div>
-      {status.conflicts?.length ? <div role="alert"><p>Resolve these files before syncing again. Your changes are preserved.</p><ul>{status.conflicts.map(file => <li key={file}>{file}</li>)}</ul></div> : null}
-      {status.excluded.length ? <details><summary>Files kept on this computer ({status.excluded.length})</summary><ul>{status.excluded.map(file => <li key={file}>{file}</li>)}</ul></details> : null}
-    </> : !error ? <p role="status">Loading sync settings…</p> : null}
-    <div className="dialog-field"><span className="dialog-field__label">GitHub account</span>
-      {auth?.authenticated ? <small>Connected{auth.login ? ` as ${auth.login}` : ""}</small> : <button className="toolbar-button" type="button" disabled={connecting || auth?.pending} onClick={() => void connect()}>{connecting || auth?.pending ? "Connecting…" : "Connect GitHub"}</button>}
-      {auth?.deviceCode ? <p>Enter <strong>{auth.deviceCode}</strong> on GitHub.</p> : null}
-      {auth?.verificationUrl ? <button className="toolbar-button" type="button" onClick={() => void window.exograph.shell.openExternal(auth.verificationUrl!).catch(cause => setError(errorMessage(cause)))}>Open GitHub sign-in</button> : null}
-      {!auth?.authenticated && auth?.message ? <small>{auth.message}</small> : null}
-    </div>
-    {error ? <div role="alert"><p className="dialog-card__status--error">{error}</p>{!status ? <button className="toolbar-button" onClick={() => setReload(value => value + 1)}>Retry</button> : null}</div> : null}
+        {pending && setupProgress ? <p role="status">{setupProgress.message}</p> : null}
+        <div role="status" aria-live="polite" data-testid="github-sync-status"><p role={status.phase === "error" ? "alert" : undefined}>{status.message || (status.config.enabled ? "Ready to sync." : destination ? "Sync paused." : "")}</p></div>
+        {status.conflicts?.length ? <div role="alert"><p>Resolve these files before syncing again. Your changes are preserved.</p><ul>{status.conflicts.map(file => <li key={file}>{file}</li>)}</ul></div> : null}
+        {status.excluded.length ? <details><summary>Files kept on this computer ({status.excluded.length})</summary><ul>{status.excluded.map(file => <li key={file}>{file}</li>)}</ul></details> : null}
+      </> : !error ? <p role="status">Loading sync settings…</p> : null}
+    </>}
+    {error ? <div role="alert"><p className="dialog-card__status--error">{error}</p><button className="toolbar-button" onClick={() => setReload(value => value + 1)}>Retry</button></div> : null}
   </section>;
+}
+
+function Schedule({ value, disabled, onChange }: { value: GitHubSyncConfig["cadence"]; disabled?: boolean; onChange: (value: GitHubSyncConfig["cadence"]) => void }) {
+  return <select className="dialog-card__input" aria-label="Sync schedule" data-testid="github-sync-cadence" value={value} disabled={disabled} onChange={event => onChange(event.target.value as GitHubSyncConfig["cadence"])}><option value="manual">Manual</option><option value="hourly">Hourly</option><option value="daily">Daily</option></select>;
 }

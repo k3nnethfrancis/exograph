@@ -60,6 +60,20 @@ describe("GitHub sync scheduling and save authority", () => {
     await f.service.configure({ root: f.root, config: { ...config, enabled: false } }); f.advance(86_400_000);
     await f.service.tick(); expect(f.repository.sync).toHaveBeenCalledTimes(1); expect((await f.service.getStatus()).nextRun).toBeUndefined();
   });
+  it("setup stops before remote creation when author or annotation saves fail", async () => {
+    const f = await fixture(); f.barrier.mockRejectedValue(new Error("Unsaved author conflict"));
+    const prepare = vi.fn(async () => config);
+    await expect(f.service.setupAndSync(f.root, prepare)).rejects.toThrow("Unsaved author conflict");
+    expect(prepare).not.toHaveBeenCalled(); expect(f.service.isBusy()).toBe(false);
+  });
+  it("pause retains the repository identity and successful revision for Resume", async () => {
+    const f = await fixture(); await f.service.configure({ root: f.root, config });
+    await f.service.syncNow({ root: f.root });
+    const paused = await f.service.configure({ root: f.root, config: { ...config, enabled: false } });
+    expect(paused.repository).toBe("owner/private"); expect(paused.lastSyncedCommit).toBe("abc123"); expect(paused.nextRun).toBeUndefined();
+    const resumed = await f.service.configure({ root: f.root, config });
+    expect(resumed.repository).toBe("owner/private"); expect(resumed.lastSyncedCommit).toBe("abc123");
+  });
   it("daily cadence is durable and failures remain visible until the next attempt", async () => {
     const f = await fixture(); await f.service.configure({ root: f.root, config: { ...config, cadence: "daily" } });
     f.repository.sync.mockRejectedValue(new Error("Offline: could not connect")); await f.service.tick();

@@ -38,6 +38,20 @@ const api: DesktopApi = {
   },
   ...(process.env.EXOGRAPH_TEST === "1" ? { test: { graphHooks: true as const } } : {}),
   githubSync: {
+    getAccountStatus: () => invokeDesktop("github-sync:get-account-status"),
+    startAccountAuth: () => invokeDesktop("github-sync:start-account-auth"),
+    inspectSetup: () => invokeDesktop("github-sync:inspect-setup"),
+    listRepositories: (input) => invokeDesktop("github-sync:list-repositories", input),
+    inspectRepository: (input) => invokeDesktop("github-sync:inspect-repository", input),
+    createAndSync: (input) => invokeDesktop("github-sync:create-and-sync", input),
+    connectExisting: (input) => invokeDesktop("github-sync:connect-existing", input),
+    downloadRepository: (input) => invokeDesktop("github-sync:download-repository", input),
+    cancelSetup: () => invokeDesktop("github-sync:cancel-setup"),
+    onSetupProgress: (callback) => {
+      const listener = (_event: Electron.IpcRendererEvent, progress: Parameters<typeof callback>[0]) => callback(progress);
+      ipcRenderer.on("github-sync:setup-progress", listener);
+      return () => ipcRenderer.removeListener("github-sync:setup-progress", listener);
+    },
     cancel: () => invokeDesktop("github-sync:cancel"),
     getStatus: () => invokeDesktop("github-sync:get-status"),
     configure: (input) => invokeDesktop("github-sync:configure", input),

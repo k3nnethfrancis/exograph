@@ -67,6 +67,7 @@ export class GitSyncRepository {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(config.remote)) throw new Error("Enter an existing Git remote name, such as origin.");
     if (!config.branch || config.branch.startsWith("-")) throw new Error("Choose a branch to sync.");
     await this.git(root, "check-ref-format", "--branch", config.branch);
+    if (config.remoteBranch) await this.git(root, "check-ref-format", "--branch", config.remoteBranch);
     try { await this.git(root, "var", "GIT_AUTHOR_IDENT"); } catch { throw new Error("Set your Git commit identity for this repository with git config user.name and git config user.email, then retry."); }
     const branch = (await this.git(root, "symbolic-ref", "--quiet", "--short", "HEAD")).trim();
     if (branch !== config.branch) throw new Error(`This workspace is on ${branch}. Choose that branch, or switch branches in Git before syncing.`);
@@ -106,10 +107,10 @@ export class GitSyncRepository {
       await this.assertSafeTree(root, "HEAD");
       phase("fetching");
       // Fetch first: slow network work must not freeze the editor.
-      const exists = (await this.git(root, "ls-remote", "--heads", url, `refs/heads/${config.branch}`)).trim();
+      const exists = (await this.git(root, "ls-remote", "--heads", url, `refs/heads/${config.remoteBranch ?? config.branch}`)).trim();
       let remoteHead: string | undefined;
       if (exists) {
-        await this.git(root, "fetch", "--no-tags", url, `refs/heads/${config.branch}`);
+        await this.git(root, "fetch", "--no-tags", url, `refs/heads/${config.remoteBranch ?? config.branch}`);
         remoteHead = (await this.git(root, "rev-parse", "FETCH_HEAD")).trim();
         await this.assertSafeTree(root, remoteHead);
       }
@@ -145,7 +146,7 @@ export class GitSyncRepository {
       const finalDestination = await this.inspect(root, config);
       if (finalDestination.url !== url) throw new Error("The Git remote changed during sync. Review the remote and retry.");
       // Upload exactly the guarded snapshot. New local edits remain for the next run.
-      await this.git(root, "-c", "push.followTags=false", "push", "--porcelain", url, `${commit}:refs/heads/${config.branch}`);
+      await this.git(root, "-c", "push.followTags=false", "push", "--porcelain", url, `${commit}:refs/heads/${config.remoteBranch ?? config.branch}`);
       const changed = [
         ...(await this.git(root, "diff", "--name-only", "-z", commit)).split("\0"),
         ...(await this.git(root, "ls-files", "--others", "--exclude-standard", "-z")).split("\0"),
