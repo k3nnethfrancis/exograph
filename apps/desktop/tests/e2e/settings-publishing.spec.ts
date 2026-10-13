@@ -260,3 +260,59 @@ esac
     await expect(page.getByTestId("publishing-setup-submit")).toBeDisabled();
   } finally { await fixture.cleanup(); }
 });
+
+test("A fresh profile reconnects a cloned managed website and previews without setup or upload", async () => {
+  const env: Record<string, string> = {};
+  let publication = "", engine = "", log = "", originalCommit = "";
+  const fixture = await launchExographWorkspaceFixture({ mutable: true, env,
+    prepareSettings: async ({ settingsPath, workspaceRoot }) => {
+      const notes = path.join(workspaceRoot, "notes/test-notes");
+      publication = path.join(notes, "garden"); engine = path.join(workspaceRoot, "cloned-site");
+      const bin = path.join(workspaceRoot, "fake-gh-bin"); log = path.join(workspaceRoot, "github-calls");
+      await mkdir(publication, { recursive: true }); await mkdir(path.join(engine, "scripts"), { recursive: true }); await mkdir(bin);
+      await writeFile(path.join(publication, "index.md"), "# Current writing\n");
+      await writeFile(path.join(engine, "exograph-site.json"), JSON.stringify({ schemaVersion: 1, repository: "author/site", contentDirectory: "garden" }));
+      await writeFile(path.join(engine, "CNAME"), "fixture.example\n");
+      await writeFile(path.join(engine, "scripts/exograph-publish.mjs"), `
+        import {readFile,mkdir,writeFile} from 'node:fs/promises';
+        import {parseArgs} from 'node:util';
+        const {values}=parseArgs({options:Object.fromEntries(['input','output','site-url','action'].map(name=>[name,{type:'string'}]))});
+        await mkdir(values.output);
+        await writeFile(values.output+'/index.html','<!doctype html><title>Existing custom theme</title>'+await readFile(values.input+'/index.md','utf8'));
+      `);
+      await writeFile(path.join(bin, "gh"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$EXO_FIXTURE_GH_LOG"\nexit 1\n');
+      await chmod(path.join(bin, "gh"), 0o755);
+      env.PATH = `${bin}${path.delimiter}${process.env.PATH ?? ""}`; env.EXO_FIXTURE_GH_LOG = log;
+      const git = async (...args: string[]) => (await promisify(execFile)("git", ["-C", engine, ...args])).stdout.trim();
+      await git("init", "-b", "main"); await git("remote", "add", "origin", "https://github.com/author/site.git");
+      await git("add", "."); await git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "Existing site");
+      originalCommit = await git("rev-parse", "HEAD");
+      await writeFile(settingsPath, JSON.stringify({ workspaceRoot, defaultTerminalCwd: workspaceRoot, noteRoots: [notes], indexedRoots: [], indexing: { enabled: false, mode: "off", backend: "qmd" }, searchEngine: "filesystem" }));
+    },
+  });
+  try {
+    const page = fixture.page;
+    await page.getByTestId("workspace-menu-toggle").click(); await page.getByTestId("workspace-menu-settings").click();
+    await page.getByTestId("workspace-settings-tab-publishing").click();
+    await page.getByText("Connect an existing local website", { exact: true }).click();
+    await page.getByTestId("publishing-folder").fill(publication);
+    await page.getByTestId("publishing-site-url").fill("https://fixture.example/");
+    await page.getByTestId("publishing-repository").fill("author/site");
+    await page.getByTestId("publishing-engine").fill(engine);
+    await expect.poll(async () => JSON.parse(await readFile(fixture.settingsPath, "utf8"))).toMatchObject({ publishing: { publicationDirectory: publication, engineDirectory: engine, siteUrl: "https://fixture.example/", destinationRepository: "author/site" } });
+    await expect(page.getByRole("button", { name: "Customize appearance" })).toBeVisible();
+    await expect(page.getByTestId("publishing-preview")).toBeEnabled();
+    await page.getByTestId("publishing-preview").click();
+    await expect(page.getByTestId("publishing-status")).toContainText("Preview ready", { timeout: 30_000 });
+    const status = await page.evaluate(() => window.exograph.publishing.getStatus());
+    const html = await (await fetch(status.previewUrl!)).text();
+    expect(html).toContain("Existing custom theme"); expect(html).toContain("Current writing");
+    expect(status.preparedId).toBeFalsy(); expect(status.deployment?.status).not.toBe("deployed");
+    const calls = await readFile(log, "utf8").catch(() => "");
+    expect(calls).not.toMatch(/repo create|repos\/|workflow run|--method|auth login/);
+    expect((await promisify(execFile)("git", ["-C", engine, "rev-parse", "HEAD"])).stdout.trim()).toBe(originalCommit);
+    expect((await promisify(execFile)("git", ["-C", engine, "status", "--porcelain"])).stdout.trim()).toBe("");
+    expect(await readFile(path.join(engine, "CNAME"), "utf8")).toBe("fixture.example\n");
+    expect(await readFile(path.join(publication, "index.md"), "utf8")).toBe("# Current writing\n");
+  } finally { await fixture.cleanup(); }
+});

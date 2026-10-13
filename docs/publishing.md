@@ -65,6 +65,24 @@ Design changes invalidate a prepared publication. Preview, prepare, and publish
 again to deploy the chosen design. Nothing in recovery automatically pushes or
 deploys. A failed setup does not replace the saved active configuration.
 
+## Connect a website cloned onto another computer
+
+Clone your existing website repository outside your Note Roots and install its
+locked dependencies with Node 24 and `npm ci`. Open your cloned notes in Exograph,
+then choose **Settings → Publishing → Connect an existing local website**.
+Select the publication folder inside your notes and the cloned Quartz project;
+enter the same site URL and GitHub destination repository. Settings save locally.
+The site's managed marker restores its customization and publishing controls.
+
+Use **View local site** to build and inspect the current notes with that theme.
+Connecting and previewing do not upload content, replace the theme, or deploy.
+Authenticate GitHub separately on this computer before publishing; do not copy
+credentials or a whole app profile from another machine. **Prepare publish** and
+**Publish website** retain their separate review and deployment steps.
+
+This reconnect flow uses the checkout you selected. **Set up website** is the
+separate creation/migration flow; its default new-site design is vanilla Quartz.
+
 ## Existing separate-engine setup
 
 Settings → Publishing selects a publication folder inside a Note Root, an
