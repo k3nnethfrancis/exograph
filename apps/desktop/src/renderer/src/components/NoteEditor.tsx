@@ -111,6 +111,7 @@ interface NoteEditorProps {
   agentCommands: AgentCommand[];
   defaultAgentCommandId?: string;
   invocationBusy?: boolean;
+  editorialSupported?: boolean;
   editorialPaneId?: string;
   onEditorialBarrier?: (paneId:string,filePath:string,enabled:boolean)=>void;
   onEditorialController?: (paneId:string,controller:EditorialPaneController|null)=>void;
@@ -766,9 +767,10 @@ export function NoteEditor(props: NoteEditorProps) {
     onOpenTarget:(target:string)=>openTargetRef.current(target),onOpenTag:(tag:string)=>openTagRef.current(tag),
     onResolveImage:(target:string,options?:{lookupByFilename?:boolean})=>resolveMarkdownImageRef.current(documentPath,target,options?.lookupByFilename),
   }), [documentPath]);
+  const editorialSupported = props.editorialSupported ?? true;
   const editorial = useEditorialEditor({
-    paneId:props.editorialPaneId ?? "editor", filePath:documentPath, body:document?.body ?? "", enabled:useMarkdownEditing,rawMarkdown:rawMarkdownMode,
-    disabled:editingFrozen || document?.readOnly || document?.saveConflict || document?.filesystemState==="deleted" || inlineComposerActive ? "Finish the current document review or save conflict first" : undefined,
+    paneId:props.editorialPaneId ?? "editor", filePath:documentPath, body:document?.body ?? "", enabled:useMarkdownEditing && editorialSupported,rawMarkdown:rawMarkdownMode,
+    disabled:!editorialSupported ? "Editorial notes are available in the desktop app" : editingFrozen || document?.readOnly || document?.saveConflict || document?.filesystemState==="deleted" || inlineComposerActive ? "Finish the current document review or save conflict first" : undefined,
     invocationBusy:Boolean(props.invocationBusy), defaultAgent:agentCommands.find(command=>command.id===props.defaultAgentCommandId && command.enabled),
     getView:getEditorialView, previewRendering:editorialPreviewRendering, sourceBarrier:props.onEditorialBarrier, register:props.onEditorialController, open:props.onOpenEditorial,
     pauseSource:props.onPauseEditorialSource,prepareSource:props.onPrepareEditorialSource,reloadSource:props.onReloadEditorialSource,draft:props.onDraftEditorial,
@@ -780,12 +782,12 @@ export function NoteEditor(props: NoteEditorProps) {
           EditorView.lineWrapping,
           markdownSpellcheck,
           markdownFormattingKeymap,
-          editorial.commands,
+          ...(editorialSupported ? [editorial.commands] : []),
           saveKeymap,
           selectionTracker,
           completionTracker,
           agentComposer,
-          ...(!rawMarkdownMode ? [...markdownPreviewExtensions, editorial.extension] : []),
+          ...(!rawMarkdownMode ? [...markdownPreviewExtensions, ...(editorialSupported ? [editorial.extension] : [])] : []),
           ...invocationReviewExtensions,
           cmTheme,
           syntaxTheme,
@@ -804,7 +806,7 @@ export function NoteEditor(props: NoteEditorProps) {
           cmTheme,
           syntaxTheme,
         ],
-    [editorial.commands, editorial.extension, agentComposer, cmTheme, codeLanguage?.extensions, completionTracker, invocationReviewExtensions, markdownFormattingKeymap, markdownPreviewExtensions, markdownSpellcheck, rawMarkdownMode, saveKeymap, selectionTracker, syntaxTheme, useMarkdownEditing],
+    [editorialSupported, editorial.commands, editorial.extension, agentComposer, cmTheme, codeLanguage?.extensions, completionTracker, invocationReviewExtensions, markdownFormattingKeymap, markdownPreviewExtensions, markdownSpellcheck, rawMarkdownMode, saveKeymap, selectionTracker, syntaxTheme, useMarkdownEditing],
   );
 
   useLayoutEffect(() => {
@@ -1165,12 +1167,12 @@ export function NoteEditor(props: NoteEditorProps) {
           >
             <Save size={14} />
           </button>
-          {useMarkdownEditing && !rawMarkdownMode ? (
+          {editorialSupported && useMarkdownEditing && !rawMarkdownMode ? (
             <button className="toolbar-button" type="button" data-testid="create-editorial-note" aria-label="Add editorial note" title="Add editorial note (⌘⇧E); select text to attach a passage" disabled={Boolean(editorial.controller.mutationDisabled)} onClick={editorial.createNote}>
               <Plus size={14} />
             </button>
           ) : null}
-          {useMarkdownEditing && !rawMarkdownMode && editorial.controller.spans.length > 0 ? (
+          {editorialSupported && useMarkdownEditing && !rawMarkdownMode && editorial.controller.spans.length > 0 ? (
             <button className="toolbar-button toolbar-button--editorial" type="button" data-testid="toggle-editorial-notes"
               aria-label={editorialPreferences.hidden ? "Show editorial notes" : "Hide editorial notes"}
               title={editorialPreferences.hidden ? "Show editorial notes" : "Hide editorial notes"}

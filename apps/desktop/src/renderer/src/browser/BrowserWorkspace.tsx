@@ -487,7 +487,11 @@ export function BrowserWorkspace() {
             />
           ) : draft ? (
             <>
+              <div className="browser-editorial-availability" data-testid="browser-editorial-unavailable">
+                Editorial notes are available in the desktop app.
+              </div>
               <NoteEditor
+                editorialSupported={false}
                 document={draft}
                 graphContext={context}
                 saveStatus={saveStatus}

@@ -182,3 +182,9 @@ body,
   max-height: 30vh;
   overflow: auto;
 }
+
+.browser-editorial-availability {
+  padding: 6px 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+}

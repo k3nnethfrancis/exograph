@@ -156,6 +156,17 @@ export class EditorialStore {
   if(record) {await this.atomic(this.recordPath(journal.documentId),record);catalog.documents[journal.relativePath]=journal.documentId;await this.atomic(path.join(this.directory,'catalog.json'),catalog);}
   else {delete catalog.documents[journal.relativePath];await this.atomic(path.join(this.directory,'catalog.json'),catalog);await rm(this.recordPath(journal.documentId),{force:true});}
  }
+ /** Preserve ordinary moves when no portable editorial identity needs migration.
+  * The main caller authorizes the destination; this root owns the source check
+  * and queue so a local annotation save cannot race the move decision. */
+ async moveUnannotated(sourcePath:string,move:()=>Promise<string>):Promise<string> {
+  return this.locked(async()=>{
+   await this.authorize(sourcePath);await this.recoverAnnotationCommits();await this.recoverMoves();
+   const source=this.relative(sourcePath),catalog=await this.catalog();
+   if(Object.keys(catalog.documents).some(key=>key===source || key.startsWith(source+'/'))) throw new Error('Cross-Note-Root moves of annotated files require moving their portable annotation records together.');
+   return move();
+  });
+ }
  /** One main-owned mutation for the author path and its portable catalog. */
  async renamePath(sourcePath:string,nextPath:string,renameFile:(source:string,next:string)=>Promise<string>):Promise<string> {
   return this.locked(async()=>{

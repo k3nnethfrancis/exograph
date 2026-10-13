@@ -5,6 +5,9 @@ the right edge of a passage indicates commentary; red indicates a proposed edit.
 Click a marker to select its note in **Note context → Editing**. General notes
 and notes covering several passages are listed there too.
 
+Editorial notes are available in the desktop app. The browser workspace supports
+ordinary Markdown editing; editorial controls are unavailable there.
+
 Select author text and click **Add editorial note** in the editor toolbar, or
 press **Command–Shift–E** (Control–Shift–E on Windows/Linux). Without a selection,
 the same action adds a general note. In Editing, write the comment, attach
@@ -83,7 +86,7 @@ wait for them. A conflict retains local edits and offers **Retry annotation
 changes** against the latest notes, preserving unrelated annotations.
 
 File and folder renames within the Note Root keep annotation identity. Moves
-between Note Roots stop rather than separate prose from its annotations. Uncertain external
+of files with stored annotations between Note Roots stop rather than separate prose from its annotations. Ordinary unannotated moves remain available. Uncertain external
 moves are not guessed. When available, **Notes from moved files** offers an
 explicit **Associate with this document** action. Captured targets still require
 review and repair after association.

@@ -993,7 +993,9 @@ test("keeps cursor and shortcut selections out of rendered list markers", async 
         };
       }),
     )
-    .toEqual({ gap: 8, selectedText: "task item" });
+    // Task checkboxes use the tighter 8px - 5px clearance introduced with
+    // aligned list guides; the full 8px gap belongs to ordinary list markers.
+    .toEqual({ gap: 3, selectedText: "task item" });
 
   await page.evaluate(({ secondTextStart }) => {
     const content = document.querySelector(".cm-content") as (HTMLElement & { cmView?: { view?: any } }) | null;
