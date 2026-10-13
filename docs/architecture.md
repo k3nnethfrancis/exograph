@@ -210,3 +210,11 @@ The browser shell reuses the production editor and graph renderer through
 explicit API props. It owns browser draft state and presentation, while Core
 remains the owner of parsing, revision checks, graph meaning and containment.
 See [Browser workspace](browser-workspace.md) for operator flow and proof.
+
+### GitHub notes sync
+
+The main-owned `GitHubSyncService` schedules the active Workspace and persists
+per-root configuration. `GitSyncRepository` validates a private destination,
+fetches remote changes, takes a guarded local snapshot through the existing
+document/annotation save barrier, then pushes that exact commit after releasing
+the editor. Renderer code uses typed preload calls. See [GitHub sync](github-sync.md).

@@ -1,3 +1,5 @@
+import { GitHubSyncService } from "./github-sync/github-sync-service";
+import { registerGitHubSyncIpc } from "./github-sync/github-sync-ipc";
 import { prepareAppProfile } from "./runtime/app-profile";
 import { planWorkspaceSettingsApply } from "./runtime/workspace-settings-apply-plan";
 import { app, dialog, nativeTheme, powerMonitor } from "electron";
@@ -100,6 +102,7 @@ let commandServerLifecycle: CommandServerLifecycle;
 let workspaceModel: WorkspaceModel;
 let managedSiteSetup: ManagedSiteSetup | undefined;
 let publishingService: PublishingService | undefined;
+let githubSyncService: GitHubSyncService | undefined;
 let workspaceSettings: WorkspaceSettings | null = null;
 let workspaceSettingsRevision: string | null = null;
 let workspaceConfig: WorkspaceConfigStore;
@@ -378,6 +381,27 @@ function isPathWithin(rootPath: string, candidatePath: string): boolean {
 }
 
 function registerIpcHandlers() {
+  githubSyncService = new GitHubSyncService({
+    stateRoot: path.join(app.getPath("userData"), "github-sync"),
+    toolsRoot: path.join(app.getPath("userData"), "published-sites", ".tools"),
+    noteRoots: () => workspaceModel.noteRoots.map((root) => root.path),
+    canSchedule: () => appLifecycle.isRendererReady() && !quitFlushStarted,
+    withDocumentsFlushed: async (operation) => {
+      if (!appLifecycle.isRendererReady()) throw new Error("Open Exograph and wait for your Workspace to load before syncing.");
+      if (invocationRunner.hasWorkspaceWriter() || (await invocationRunner.listPendingReviews()).length) {
+        throw new Error("Finish or review the active agent work before syncing your notes.");
+      }
+      return appLifecycle.withDocumentsFlushed(async () => {
+        const result = await operation();
+        editorialService.refreshFromDisk();
+        return result;
+      });
+    },
+    publishStatus: (status) => sendToRenderer("github-sync:status", status),
+  });
+  registerGitHubSyncIpc(githubSyncService);
+  githubSyncService.start();
+  powerMonitor.on("resume", () => void githubSyncService?.tick());
   publishingService = new PublishingService({
     context: () => ({ ...currentSnapshot(), model: workspaceModel }),
     stagingParent: path.join(app.getPath("userData"), "publishing"),
@@ -854,6 +878,9 @@ app.whenReady().then(async () => {
     workspaceWatcherService,
     terminalManager,
     getWorkspaceSettings: () => currentSettings(),
+    assertWorkspaceWritable: () => {
+      if (githubSyncService?.isBusy()) throw new Error("Wait for GitHub sync to finish before starting agent work.");
+    },
     inspectEditorialAnnotationRevision: async input => {
       const snapshot = await editorialService.read(input.documentPath);
       return snapshot.revision === input.annotationRevision && snapshot.notes.some(note => note.id === input.noteId);
@@ -898,7 +925,7 @@ app.whenReady().then(async () => {
     openSettings: () => {
       sendToRenderer("command:open-settings", { section: "workspace" });
     },
-    onRendererReady: () => void flushOsOpenFiles(),
+    onRendererReady: () => { void flushOsOpenFiles(); void githubSyncService?.tick(); },
     restartCommandServer: () => void commandServerLifecycle.restart(),
     logMain,
   });
@@ -1071,6 +1098,7 @@ app.on("before-quit", (event) => {
     void awaitInvocationAwareQuit({
       flushDirtyDocuments: () => appLifecycle?.prepareDocumentTransition() ?? Promise.resolve(),
       stopInvocations: async () => {
+        await githubSyncService?.idle();
         await Promise.all([
           typeof invocationRunner === "undefined" ? Promise.resolve() : invocationRunner.stopAll(),
           stopActiveOntologyDiscoveries(),
@@ -1099,6 +1127,7 @@ app.on("before-quit", (event) => {
   workspaceWatcherService?.stop();
   indexingService?.dispose();
   workspaceNotesService?.dispose();
+  githubSyncService?.dispose();
 });
 
 app.on("window-all-closed", () => {

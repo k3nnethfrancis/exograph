@@ -20,6 +20,23 @@ afterEach(async () => {
 });
 
 describe("InvocationRunner readiness parity", () => {
+  it("blocks agent preparation and delayed authorization while Git sync owns the Workspace", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "exograph-invocation-sync-")); temporaryRoots.push(root);
+    const command = { ...createDefaultClaudeAgentCommand(), id: "echo", handle: "echo", label: "Echo", command: "/bin/echo", adapter: "generic" as const, continuityPolicy: "fresh" as const };
+    const terminalManager = new FakeTerminalManager(); let syncBusy = false;
+    const runner = new InvocationRunner({
+      getWorkspaceSettings: () => settings(root, command), trustStateRoot: root,
+      terminalManager: terminalManager as unknown as TerminalManager,
+      workspaceWatcherService: { subscribe: () => () => undefined } as unknown as WorkspaceWatcherService,
+      assertWorkspaceWritable: () => { if (syncBusy) throw new Error("GitHub sync is running"); },
+    });
+    const prepared = await runner.prepare({ context: "cli", handle: "echo", message: "test" });
+    syncBusy = true;
+    await expect(runner.prepare({ context: "cli", handle: "echo", message: "test" })).rejects.toThrow("GitHub sync");
+    await expect(runner.authorizeAndStart(prepared, authorizationFor(prepared, "run-once"))).rejects.toThrow("GitHub sync");
+    expect(terminalManager.created).toBe(0); expect(runner.hasWorkspaceWriter()).toBe(false);
+  });
+
   it("rejects an absent @claude command instead of launching an implicit default", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "exograph-invocation-runner-"));
     temporaryRoots.push(root);

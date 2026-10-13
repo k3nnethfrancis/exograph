@@ -1,0 +1,18 @@
+.github-sync-section {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  font-size: 13px;
+  min-width: 0;
+}
+.github-sync-section p { margin: 0; }
+.github-sync-summary { display: grid; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--surface-border); }
+.github-sync-summary p { overflow-wrap: anywhere; color: var(--muted); }
+.github-sync-section small { color: var(--muted); line-height: 1.5; }
+.github-sync-toggle { display: flex; align-items: center; gap: 8px; }
+.github-sync-toggle input { margin: 0; }
+.github-sync-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
+.github-sync-fields .dialog-field { min-width: 0; }
+.github-sync-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.github-sync-section [data-testid="github-sync-status"] { display: grid; gap: 6px; }
+.github-sync-section ul { padding-left: 20px; overflow-wrap: anywhere; }

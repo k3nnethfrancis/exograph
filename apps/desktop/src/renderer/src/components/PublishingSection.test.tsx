@@ -63,3 +63,16 @@ it("shows setup-required truthfully without inventing a deployed URL", async () 
   expect(mounted!.root.findAllByProps({ "data-testid": "publishing-open-site" })).toHaveLength(0);
   expect(JSON.stringify(mounted!.toJSON())).toContain("Configure the workflow");
 });
+
+it("exposes local website configuration before setup without invoking remote operations", async () => {
+  const setSettings = vi.fn();
+  const blank = { ...settings, publishing: undefined };
+  await act(async () => { mounted = create(<PublishingSection settings={blank} setSettings={setSettings} />); });
+  expect(JSON.stringify(mounted!.toJSON())).toContain("Connect an existing local website");
+  expect(mounted!.root.findAllByProps({ "data-testid": "publishing-folder" })).toHaveLength(1);
+  expect(mounted!.root.findAllByProps({ "data-testid": "publishing-preview" })).toHaveLength(0);
+  await act(async () => mounted!.root.findByProps({ "data-testid": "publishing-engine" }).props.onChange({ target: { value: "/cloned-site" } }));
+  expect(setSettings.mock.calls[0][0](blank)).toMatchObject({ publishing: { engineDirectory: "/cloned-site" }, saveStatus: "idle" });
+  expect(build).not.toHaveBeenCalled();
+  expect(publish).not.toHaveBeenCalled();
+});

@@ -7,6 +7,10 @@ type TerminalsApi = DesktopApi["terminals"];
 type ShellApi = DesktopApi["shell"];
 
 export interface DesktopInvokeHandlers {
+  "github-sync:cancel": DesktopApi["githubSync"]["cancel"];
+  "github-sync:get-status": DesktopApi["githubSync"]["getStatus"];
+  "github-sync:configure": DesktopApi["githubSync"]["configure"];
+  "github-sync:sync-now": DesktopApi["githubSync"]["syncNow"];
   "workspace:launch-editorial-draft": WorkspaceApi["launchEditorialDraft"];
   "workspace:get-editorial-draft-review": WorkspaceApi["getEditorialDraftReview"];
   "workspace:list-pending-editorial-draft-reviews": WorkspaceApi["listPendingEditorialDraftReviews"];
@@ -105,6 +109,7 @@ export interface DesktopInvokeHandlers {
 }
 
 export interface DesktopEventPayloads {
+  "github-sync:status": Awaited<ReturnType<DesktopApi["githubSync"]["getStatus"]>>;
   "editorial:changed": import("./api/editorial").EditorialChangedEvent;
   "publishing:status": Awaited<ReturnType<DesktopApi["publishing"]["getStatus"]>>;
   "workspace:changed": { rootPath: string; eventType: string; filePath: string | null };

@@ -31,3 +31,11 @@ quit/reload and Workspace replacement wait for revision-checked saves or explici
 copy/reload resolution. A renderer crash or force-kill can still lose unsaved
 local text. See [the editor save contract](architecture.md#editor-saves-and-external-writers)
 and [`useOpenDocuments.conflicts.test.ts`](../apps/desktop/src/renderer/src/hooks/useOpenDocuments.conflicts.test.ts).
+
+GitHub sync configuration and last-attempt status live in app user-data
+`github-sync/<canonical-root-hash>.json` (version 1). `GitHubSyncService` owns
+temporary-file/rename writes and rejects unknown or malformed schemas without
+rewriting them. These local scheduling settings contain no credentials; Git
+commits and the private remote own synchronized content and its history. See
+[GitHub sync](github-sync.md) for recovery and `github-sync-service.test.ts`
+for persistence, scheduling and overlap checks.

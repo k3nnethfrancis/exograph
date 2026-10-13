@@ -108,7 +108,9 @@ export function PublishingSection({ settings, setSettings }: {
       </div>
       {confirmRestore ? <div role="group" aria-label="Restore vanilla design"><p>Your current customization will be saved before vanilla replaces it. Your live site changes only when you publish.</p><button className="toolbar-button" disabled={busy || !saved} onClick={() => void changeDesign("restore")}>Save customization and restore</button><button className="toolbar-button" onClick={() => setConfirmRestore(false)}>Cancel</button></div> : null}
     </details> : null}
-    <details><summary>Publishing configuration</summary><div className="dialog-form">
+    </>}
+    <details><summary>{config.engineDirectory ? "Publishing configuration" : "Connect an existing local website"}</summary><div className="dialog-form">
+    {!config.engineDirectory ? <p>Choose your cloned Quartz project and notes folder. Connecting saves local settings; it keeps the existing theme and does not upload or publish anything.</p> : null}
     <label className="dialog-field">
       <span className="dialog-field__label">Publication folder</span>
       <div className="settings-control-row">
@@ -135,6 +137,7 @@ export function PublishingSection({ settings, setSettings }: {
       <small>The GitHub repository for your website. Publishing uses its reviewed GitHub Pages workflow and publication branch.</small>
     </label>
     </div></details>
+    {config.engineDirectory ? <>
     <div className="dialog-card__actions">
       <button className="toolbar-button" data-testid={status.previewUrl ? "publishing-open-preview" : "publishing-preview"} disabled={busy || !saved} type="button" onClick={() => status.previewUrl ? action(() => window.exograph.shell.openExternal(status.previewUrl!)) : void run("preview")}>View local site</button>
       <button className="toolbar-button" data-testid="publishing-prepare" disabled={busy || !saved} type="button" onClick={() => void run("prepare")}>Prepare publish</button>
@@ -156,6 +159,6 @@ export function PublishingSection({ settings, setSettings }: {
     {status.diagnostics.length ? <details><summary>{status.diagnostics.length} publication notice{status.diagnostics.length === 1 ? "" : "s"}</summary>
       <ul>{status.diagnostics.map((diagnostic, index) => <li key={index}>{diagnostic.path}: {diagnostic.message}</li>)}</ul>
     </details> : null}
-    </>}
+    </> : null}
   </section>;
 }

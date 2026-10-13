@@ -1,11 +1,26 @@
+import { EditorialStore } from "@exograph/core/editorial-store";
 import { describe,it,expect,afterEach,vi } from 'vitest';
-import { mkdtemp,writeFile,rm,readFile,mkdir,access } from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
+import { mkdtemp,writeFile,rm,readFile,mkdir,access,cp } from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 import { DocumentPersistence,type WorkspaceModel } from '@exograph/core';
 import { captureEditorialTarget,createEditorialNote,serializeEditorialNote } from '@exograph/core/editorial-notes';
 import { EditorialService } from './editorial-service';
 const cleanup:Array<()=>Promise<void>>=[];afterEach(async()=>{await Promise.all(cleanup.splice(0).map(run=>run()));});
 async function fixture(){const root=await mkdtemp(path.join(os.tmpdir(),'editorial-main-')),file=path.join(root,'essay.md');await writeFile(file,'Original prose');const model:WorkspaceModel={workspaceRoot:root,defaultTerminalCwd:root,noteRoots:[{id:'root',label:'root',path:root}],indexedRoots:[],indexing:{enabled:false,mode:'off',backend:'qmd'}};const changed=vi.fn();const service=new EditorialService(()=>model,new DocumentPersistence(),changed);cleanup.push(async()=>{service.dispose();await rm(root,{recursive:true,force:true});});return {root,file,service,changed};}
 describe('main editorial authority and events',()=>{
+ it('refreshes an already-open document when Git creates the first editorial sidecars, and resumes watching',async()=>{
+  const f=await fixture(),other=await fixture();await f.service.read(f.file);
+  await expect(access(path.join(f.root,'.exograph/editorial/v1'))).rejects.toMatchObject({code:'ENOENT'});
+  const incoming=new EditorialStore(other.root),before=await incoming.read(other.file);
+  const saved=await incoming.save(other.file,[createEditorialNote({id:'incoming',commentary:'From the other Mac'})],before.revision);
+  if(saved.status!=='saved') throw new Error();
+  await cp(path.join(other.root,'.exograph'),path.join(f.root,'.exograph'),{recursive:true});
+  f.service.refreshFromDisk();expect(f.changed).toHaveBeenCalledWith({filePath:f.file});
+  expect((await f.service.read(f.file)).notes[0].commentary).toBe('From the other Mac');
+  f.changed.mockClear();const record=path.join(f.root,'.exograph/editorial/v1/documents',saved.snapshot.documentId+'.json');
+  const data=JSON.parse(await readFile(record,'utf8'));data.notes[0].commentary='Later external edit';await writeFile(record,JSON.stringify(data));
+  await vi.waitFor(()=>expect(f.changed).toHaveBeenCalledWith({filePath:f.file}));
+  expect((await f.service.read(f.file)).notes[0].commentary).toBe('Later external edit');
+ });
  it('saves annotations and imports agent edits without writing prose, then applies via actual persistence',async()=>{const f=await fixture(),initial=await f.service.read(f.file),target=captureEditorialTarget('Original prose',0,14,'target'),note=createEditorialNote({id:'note',targets:[target],edits:[{targetId:'target',replacement:'Proposed prose'}]});const saved=await f.service.save(f.file,[note],initial.revision);expect(saved.status).toBe('saved');expect(await readFile(f.file,'utf8')).toBe('Original prose');expect(f.changed).toHaveBeenCalledWith(expect.objectContaining({filePath:f.file}));if(saved.status==='saved'){const applied=await f.service.apply(f.file,'note',saved.snapshot.sourceRevision,saved.snapshot.revision);expect(applied.status).toBe('applied');expect(await readFile(f.file,'utf8')).toBe('Proposed prose');}});
  it('coordinates rename and rejects paths outside active authority',async()=>{const f=await fixture(),initial=await f.service.read(f.file),note=createEditorialNote({id:'general',commentary:'Keep'});await f.service.save(f.file,[note],initial.revision);const next=path.join(f.root,'next.md');await f.service.renamePath(f.file,next);expect((await f.service.read(next)).notes[0].commentary).toBe('Keep');await expect(f.service.read(path.join(f.root,'..','other.md'))).rejects.toThrow('configured Note Roots');});
  it('invalidates annotation state on external sidecar changes',async()=>{const f=await fixture(),initial=await f.service.read(f.file),note=createEditorialNote({id:'note'});const saved=await f.service.save(f.file,[note],initial.revision);if(saved.status!=='saved') throw new Error();f.changed.mockClear();const recordPath=path.join(f.root,'.exograph/editorial/v1/documents',saved.snapshot.documentId+'.json');const record=JSON.parse(await readFile(recordPath,'utf8'));record.notes[0].commentary='Outside edit';await writeFile(recordPath,JSON.stringify(record));await vi.waitFor(()=>expect(f.changed).toHaveBeenCalledWith({filePath:f.file}));expect((await f.service.read(f.file)).notes[0].commentary).toBe('Outside edit');});

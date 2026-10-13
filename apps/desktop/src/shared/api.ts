@@ -1,3 +1,5 @@
+import type { GitHubSyncApi } from "./api/github-sync";
+export type { GitHubSyncConfig, GitHubSyncStatus } from "./api/github-sync";
 import type { EditorialApi } from './api/editorial';
 export type { EditorialSnapshot, EditorialSaveResult, EditorialMutationResult, EditorialChangedEvent } from './api/editorial';
 import type { PublishingApi } from "./api/publishing";
@@ -58,6 +60,7 @@ export interface DesktopApi {
   test?: { graphHooks: true };
   workspace: WorkspaceSetupApi & WorkspaceIndexApi & WorkspaceFilesystemApi & WorkspaceInvocationApi;
   publishing: PublishingApi;
+  githubSync: GitHubSyncApi;
   editorial: EditorialApi;
   notes: NotesGraphApi;
   terminals: TerminalsApi;
